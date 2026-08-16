@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.5-pg18
+        env:
+          POSTGRES_DB: insightops
+          POSTGRES_USER: insightops
+          POSTGRES_PASSWORD: insightops_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U insightops -d insightops"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      INSIGHTOPS_CHAIN_GATE: 'true'
+      DB_URL: jdbc:postgresql://localhost:5432/insightops
+      DB_USERNAME: insightops
+      DB_PASSWORD: insightops_ci
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Verify backend and P0 chain gate
+        run: ./mvnw --batch-mode --no-transfer-progress verify
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: insightops-web
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: insightops-web/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build

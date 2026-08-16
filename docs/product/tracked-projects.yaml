@@ -1,0 +1,242 @@
+schemaVersion: 2
+updatedAt: "2026-08-16"
+scope: "alpha-p0"
+
+# P0 只启用 GitHub Release API。官网、仓库、文档、博客和 Atom 在本文件中完成登记，
+# 但不代表已经进入采集链路；后续启用时必须先补去重、失败重试和内容质量测试。
+collectionDefaults:
+  githubRelease: true
+  otherOfficialSources: false
+
+sourcePolicy:
+  trustTiers:
+    T1_PROJECT_DOMAIN: "项目自有官网、文档站或博客"
+    T1_OFFICIAL_REPOSITORY: "项目官方 GitHub 仓库、Release API 或仓库订阅源"
+  verificationStatus:
+    VERIFIED: "已确认页面存在且归属项目官方"
+    NOT_FOUND: "核验时未发现独立官方来源，必须使用已登记的替代来源"
+  requiredSourceTypes:
+    - "homepage"
+    - "github_repository"
+    - "github_release"
+    - "official_documentation"
+
+projects:
+  - id: "spring-ai"
+    name: "Spring AI"
+    priority: 1
+    enabled: true
+    category: "java-ai-framework"
+    ecosystem: ["java", "spring", "ai"]
+    rationale: "与首发 Java 用户最匹配，并作为第一条 GitHub Release Agent 链路的验证项目。"
+    repository:
+      provider: "github"
+      owner: "spring-projects"
+      name: "spring-ai"
+    sources:
+      - id: "spring-ai-homepage"
+        type: "homepage"
+        name: "Spring AI 项目主页"
+        url: "https://spring.io/projects/spring-ai"
+        trustTier: "T1_PROJECT_DOMAIN"
+        updateFrequency: "随稳定版本和重要能力不定期更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "spring-ai-github"
+        type: "github_repository"
+        name: "Spring AI 官方 GitHub 仓库"
+        url: "https://github.com/spring-projects/spring-ai"
+        apiUrl: "https://api.github.com/repos/spring-projects/spring-ai"
+        trustTier: "T1_OFFICIAL_REPOSITORY"
+        updateFrequency: "持续更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "spring-ai-github-release"
+        type: "github_release"
+        name: "Spring AI GitHub Releases"
+        url: "https://github.com/spring-projects/spring-ai/releases"
+        apiUrl: "https://api.github.com/repos/spring-projects/spring-ai/releases"
+        trustTier: "T1_OFFICIAL_REPOSITORY"
+        updateFrequency: "版本发布时更新"
+        collectionEnabled: true
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "spring-ai-documentation"
+        type: "official_documentation"
+        name: "Spring AI Reference"
+        url: "https://docs.spring.io/spring-ai/reference/"
+        trustTier: "T1_PROJECT_DOMAIN"
+        updateFrequency: "随版本和文档修订持续更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "spring-ai-blog"
+        type: "official_blog"
+        name: "Spring 官方博客"
+        url: "https://spring.io/blog/"
+        trustTier: "T1_PROJECT_DOMAIN"
+        updateFrequency: "不定期更新"
+        collectionEnabled: false
+        filterHint: "只保留标题、正文或标签明确包含 Spring AI 的文章"
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "spring-ai-blog-atom"
+        type: "official_atom_feed"
+        name: "Spring 官方博客 Atom"
+        url: "https://spring.io/blog.atom"
+        trustTier: "T1_PROJECT_DOMAIN"
+        updateFrequency: "随 Spring 博客更新"
+        collectionEnabled: false
+        filterHint: "该订阅源覆盖整个 Spring 博客，采集时必须按 Spring AI 过滤"
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "spring-ai-release-atom"
+        type: "github_release_atom"
+        name: "Spring AI GitHub Release Atom"
+        url: "https://github.com/spring-projects/spring-ai/releases.atom"
+        trustTier: "T1_OFFICIAL_REPOSITORY"
+        updateFrequency: "版本发布时更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+    researchTopics: ["tool-calling", "rag", "mcp", "model-provider", "breaking-change", "spring-boot-compatibility"]
+
+  - id: "langchain4j"
+    name: "LangChain4j"
+    priority: 2
+    enabled: true
+    category: "java-ai-framework"
+    ecosystem: ["java", "jvm", "ai"]
+    rationale: "与 Spring AI 用户和能力范围接近，适合验证同类框架横向比较。"
+    repository:
+      provider: "github"
+      owner: "langchain4j"
+      name: "langchain4j"
+    sources:
+      - id: "langchain4j-homepage"
+        type: "homepage"
+        name: "LangChain4j 官网"
+        url: "https://langchain4j.dev/"
+        trustTier: "T1_PROJECT_DOMAIN"
+        updateFrequency: "不定期更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "langchain4j-github"
+        type: "github_repository"
+        name: "LangChain4j 官方 GitHub 仓库"
+        url: "https://github.com/langchain4j/langchain4j"
+        apiUrl: "https://api.github.com/repos/langchain4j/langchain4j"
+        trustTier: "T1_OFFICIAL_REPOSITORY"
+        updateFrequency: "持续更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "langchain4j-github-release"
+        type: "github_release"
+        name: "LangChain4j GitHub Releases"
+        url: "https://github.com/langchain4j/langchain4j/releases"
+        apiUrl: "https://api.github.com/repos/langchain4j/langchain4j/releases"
+        trustTier: "T1_OFFICIAL_REPOSITORY"
+        updateFrequency: "版本发布时更新"
+        collectionEnabled: true
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "langchain4j-documentation"
+        type: "official_documentation"
+        name: "LangChain4j Documentation"
+        url: "https://docs.langchain4j.dev/"
+        trustTier: "T1_PROJECT_DOMAIN"
+        updateFrequency: "随版本和文档修订持续更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "langchain4j-release-notes"
+        type: "official_announcement"
+        name: "LangChain4j Latest Release Notes"
+        url: "https://docs.langchain4j.dev/latest-release-notes/"
+        trustTier: "T1_PROJECT_DOMAIN"
+        updateFrequency: "版本发布时更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "langchain4j-release-atom"
+        type: "github_release_atom"
+        name: "LangChain4j GitHub Release Atom"
+        url: "https://github.com/langchain4j/langchain4j/releases.atom"
+        trustTier: "T1_OFFICIAL_REPOSITORY"
+        updateFrequency: "版本发布时更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+    sourceGaps:
+      - type: "official_blog"
+        status: "NOT_FOUND"
+        checkedAt: "2026-08-16"
+        fallbackSourceIds: ["langchain4j-release-notes", "langchain4j-github-release"]
+        note: "未发现独立官方博客；发布说明页和 GitHub Releases 承担官方公告职责。"
+      - type: "official_blog_feed"
+        status: "NOT_FOUND"
+        checkedAt: "2026-08-16"
+        fallbackSourceIds: ["langchain4j-release-atom"]
+        note: "未发现独立博客订阅源；保留官方 GitHub Release Atom。"
+    researchTopics: ["tool-calling", "agentic", "rag", "mcp", "model-provider", "breaking-change"]
+
+  - id: "dify"
+    name: "Dify"
+    priority: 3
+    enabled: true
+    category: "agent-platform"
+    ecosystem: ["agent-platform", "workflow", "knowledge-base"]
+    rationale: "补充可视化 Agent 平台样本，用于观察工作流、知识库、插件和部署方向。"
+    repository:
+      provider: "github"
+      owner: "langgenius"
+      name: "dify"
+    sources:
+      - id: "dify-homepage"
+        type: "homepage"
+        name: "Dify 官网"
+        url: "https://dify.ai/"
+        trustTier: "T1_PROJECT_DOMAIN"
+        updateFrequency: "不定期更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "dify-github"
+        type: "github_repository"
+        name: "Dify 官方 GitHub 仓库"
+        url: "https://github.com/langgenius/dify"
+        apiUrl: "https://api.github.com/repos/langgenius/dify"
+        trustTier: "T1_OFFICIAL_REPOSITORY"
+        updateFrequency: "持续更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "dify-github-release"
+        type: "github_release"
+        name: "Dify GitHub Releases"
+        url: "https://github.com/langgenius/dify/releases"
+        apiUrl: "https://api.github.com/repos/langgenius/dify/releases"
+        trustTier: "T1_OFFICIAL_REPOSITORY"
+        updateFrequency: "版本发布时更新"
+        collectionEnabled: true
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "dify-documentation"
+        type: "official_documentation"
+        name: "Dify Documentation"
+        url: "https://docs.dify.ai/"
+        trustTier: "T1_PROJECT_DOMAIN"
+        updateFrequency: "随产品和文档修订持续更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "dify-blog"
+        type: "official_blog"
+        name: "Dify Blog"
+        url: "https://dify.ai/blog"
+        trustTier: "T1_PROJECT_DOMAIN"
+        updateFrequency: "不定期更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+      - id: "dify-release-atom"
+        type: "github_release_atom"
+        name: "Dify GitHub Release Atom"
+        url: "https://github.com/langgenius/dify/releases.atom"
+        trustTier: "T1_OFFICIAL_REPOSITORY"
+        updateFrequency: "版本发布时更新"
+        collectionEnabled: false
+        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+    sourceGaps:
+      - type: "official_blog_feed"
+        status: "NOT_FOUND"
+        checkedAt: "2026-08-16"
+        fallbackSourceIds: ["dify-release-atom"]
+        note: "未发现独立官方博客 RSS/Atom；保留官方 GitHub Release Atom。"
+    researchTopics: ["agent", "workflow", "knowledge-base", "plugin", "security", "deployment"]

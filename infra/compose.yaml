@@ -1,0 +1,25 @@
+name: insightops-agent
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.5-pg18
+    container_name: insightops-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-insightops}
+      POSTGRES_USER: ${POSTGRES_USER:-insightops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-insightops_dev}
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - insightops-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  insightops-postgres-data:
+    name: insightops-postgres-data

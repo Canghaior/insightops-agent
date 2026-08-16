@@ -1,0 +1,74 @@
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  application:
+    name: insightops-server
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:55432/insightops}
+    username: ${DB_USERNAME:insightops}
+    password: ${DB_PASSWORD:insightops_dev}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  ai:
+    model:
+      chat: ${SPRING_AI_MODEL_CHAT:none}
+      embedding: none
+    openai:
+      api-key: ${DEEPSEEK_API_KEY:}
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      chat:
+        options:
+          model: ${DEEPSEEK_CHAT_MODEL:deepseek-v4-flash}
+          temperature: ${DEEPSEEK_TEMPERATURE:0.2}
+          max-tokens: ${DEEPSEEK_MAX_OUTPUT_TOKENS:4096}
+          timeout: ${MODEL_RUN_TIMEOUT_SECONDS:90}s
+          max-retries: ${MODEL_MAX_RETRIES:2}
+
+insightops:
+  tool:
+    github:
+      base-url: ${GITHUB_API_BASE_URL:https://api.github.com}
+      api-version: ${GITHUB_API_VERSION:2026-03-10}
+      connect-timeout-seconds: ${GITHUB_CONNECT_TIMEOUT_SECONDS:10}
+      request-timeout-seconds: ${GITHUB_REQUEST_TIMEOUT_SECONDS:20}
+      max-body-chars: ${GITHUB_RELEASE_MAX_BODY_CHARS:1600}
+  model:
+    deepseek:
+      enabled: ${DEEPSEEK_ENABLED:false}
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      model: ${DEEPSEEK_CHAT_MODEL:deepseek-v4-flash}
+      thinking-enabled: ${DEEPSEEK_THINKING_ENABLED:false}
+      temperature: ${DEEPSEEK_TEMPERATURE:0.2}
+      max-output-tokens: ${DEEPSEEK_MAX_OUTPUT_TOKENS:4096}
+      max-tool-rounds: ${MODEL_MAX_TOOL_ROUNDS:4}
+      request-timeout-seconds: ${MODEL_RUN_TIMEOUT_SECONDS:90}
+      max-retries: ${MODEL_MAX_RETRIES:2}
+      smoke-test-enabled: ${DEEPSEEK_SMOKE_TEST_ENABLED:false}
+      pricing:
+        effective-date: ${DEEPSEEK_PRICING_EFFECTIVE_DATE:2026-08-16}
+        usd-to-cny: ${DEEPSEEK_PRICING_USD_TO_CNY:7.20}
+        input-cache-hit-usd-per-million: ${DEEPSEEK_INPUT_CACHE_HIT_USD_PER_MILLION:0.0028}
+        input-cache-miss-usd-per-million: ${DEEPSEEK_INPUT_CACHE_MISS_USD_PER_MILLION:0.14}
+        output-usd-per-million: ${DEEPSEEK_OUTPUT_USD_PER_MILLION:0.28}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+
+server:
+  port: ${SERVER_PORT:18080}
+
+logging:
+  pattern:
+    level: "%5p [traceId=%X{traceId:-}]"

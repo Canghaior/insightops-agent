@@ -855,7 +855,7 @@ insightops-agent/
 | 现有能力审计 | 已完成 | 核心能力、缺口和可迁移经验 | 形成新项目模块边界 |
 | 产品定义 | P0 已完成 | 确定 InsightOps Agent、首发用户、3 个项目、19 条官方来源、20 问评测集和三角色模拟验收 | P1 邀请真实外部用户持续试用 |
 | 架构设计 | P0 已完成 | ADR、模块边界、领域模型和状态机 | 随真实链路继续演进 |
-| 新项目初始化 | P0 已完成 | Git 基线、四个 Maven 模块、Vue、Compose、Flyway、CI、一键启动脚本 | 推送远程仓库并确认首次远程 CI |
+| 新项目初始化 | P0 已完成 | Git 基线、四个 Maven 模块、Vue、Compose、Flyway、CI、一键启动脚本、GitHub 远程仓库和首次绿色 CI | P1 建立分支保护和发布流程 |
 | Agent 核心 | P0 已完成 | DeepSeek 流式调用、会话/Run、最近 12 条消息短期上下文、最近 100 条消息回看、GitHub Release 工具、Step/Tool Call 审计、成本与执行记录页面 | P1 增加登录、隔离、会话列表和账号级长期记忆 |
 | 知识库与 RAG | 未开始 | 无 | 等待 Agent 最小闭环 |
 | 行业情报 Alpha | 未开始 | 无 | 等待完整 RAG |
@@ -1371,8 +1371,8 @@ insightops-agent/
 
 - [x] 完成 Java 开发者、架构师、技术负责人三个角色的模拟 Alpha 验收，并把共同问题更新到用户文档。
 - [x] 明确并实现 Phase 2 的 P0 最小输入、输出、工具和来源 Guardrail。
-- [ ] 配置远程仓库并确认 GitHub Actions 首次真实运行；当前只有本地等价门禁。
-- [ ] 验收稳定后整理并提交本轮尚未提交的 P0 代码和文档变更。
+- [x] 配置 `Canghaior/insightops-agent` 远程仓库并确认 GitHub Actions 首次真实运行通过。
+- [x] 验收稳定后整理并提交本轮 P0 代码和文档变更。
 
 ### 2026-08-17 / v0.13
 
@@ -1395,7 +1395,9 @@ insightops-agent/
 - 三角色共 9 个真实页面任务通过；技术负责人会话刷新后恢复 8 条消息。
 - 当前回答的 10 个可点击链接全部为白名单项目的 GitHub Release tag URL。
 
-#### 待完成
+#### 远程收尾
 
-- [ ] 整理 Git 提交、配置 `Canghaior/insightops-agent` 远程仓库并推送。
-- [ ] 确认 GitHub Actions 首次真实执行通过。
+- [x] 创建 `feat: complete verified P0 alpha` 功能提交并推送到 `origin/main`。
+- [x] 修复 Linux Runner 下 `mvnw` 的执行权限，并将 GitHub Actions 官方 action 更新到 v5。
+- [x] GitHub Actions Run `31959308152` 的 backend、frontend 均为 SUCCESS。
+- [x] 第一阶段 P0 的 Guardrail、三角色验收、远程仓库、CI 和 Git 提交全部完成。

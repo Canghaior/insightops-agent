@@ -1,5 +1,7 @@
 # InsightOps Agent
 
+[![CI](https://github.com/Canghaior/insightops-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Canghaior/insightops-agent/actions/workflows/ci.yml)
+
 面向需要持续跟踪 AI 开源项目的 Java 开发者、架构师和技术负责人的开源情报 Agent。
 
 当前处于 Alpha/P0：固定跟踪 Spring AI、LangChain4j 和 Dify，并已接通 GitHub Releases 第一条真实数据链路。

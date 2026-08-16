@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.server.api;
 
 import com.jundaodsj.insightops.agent.application.AgentRunQuery;
+import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -37,14 +38,15 @@ public class AgentRunController {
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
             @RequestParam(required = false) String status,
             HttpServletRequest request) {
-        return new ApiResponse<>(traceId(request), agentRunQuery.listRuns(page, size, status(status)));
+        return new ApiResponse<>(traceId(request), agentRunQuery.listRuns(
+                CurrentAccount.actor(request), page, size, status(status)));
     }
 
     @GetMapping("/{runId}")
     public ApiResponse<AgentRunQuery.RunDetail> detail(
             @PathVariable UUID runId,
             HttpServletRequest request) {
-        AgentRunQuery.RunDetail detail = agentRunQuery.findRun(runId)
+        AgentRunQuery.RunDetail detail = agentRunQuery.findRun(CurrentAccount.actor(request), runId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Agent run not found"));
         return new ApiResponse<>(traceId(request), detail);
     }

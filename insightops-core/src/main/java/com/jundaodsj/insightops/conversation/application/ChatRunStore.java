@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.conversation.application;
 
 import com.jundaodsj.insightops.model.application.ModelUsage;
+import com.jundaodsj.insightops.identity.application.ActorContext;
 
 import java.time.Instant;
 import java.util.List;
@@ -9,11 +10,14 @@ import java.util.UUID;
 
 public interface ChatRunStore {
 
-    List<StoredMessage> recentMessages(UUID sessionId, int limit);
+    List<StoredMessage> recentMessages(ActorContext actor, UUID sessionId, int limit);
 
-    Optional<SessionHistory> sessionHistory(UUID sessionId, int limit);
+    Optional<SessionHistory> sessionHistory(ActorContext actor, UUID sessionId, int limit);
+
+    boolean ownsRun(ActorContext actor, UUID runId);
 
     UUID startRun(
+            ActorContext actor,
             UUID runId,
             UUID requestedSessionId,
             String traceId,

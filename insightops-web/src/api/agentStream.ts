@@ -100,6 +100,7 @@ export async function streamChat(
       'X-Trace-Id': crypto.randomUUID(),
     },
     body: JSON.stringify({ message, sessionId: sessionId || null }),
+    credentials: 'include',
     signal,
   })
 

@@ -1,6 +1,9 @@
 package com.jundaodsj.insightops.server.api;
 
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
+import com.jundaodsj.insightops.identity.application.ActorContext;
+import com.jundaodsj.insightops.identity.application.AccountWorkspaceStore;
+import com.jundaodsj.insightops.memory.application.UserMemoryStore;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
 import com.jundaodsj.insightops.model.application.ChatStreamEvent;
 import com.jundaodsj.insightops.model.application.ChatStreamSession;
@@ -10,6 +13,7 @@ import com.jundaodsj.insightops.model.application.ModelUsage;
 import com.jundaodsj.insightops.server.chat.ChatStreamSessionRegistry;
 import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
 import com.jundaodsj.insightops.server.chat.ReleaseToolService;
+import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.server.ResponseStatusException;
@@ -30,6 +34,10 @@ import static org.mockito.Mockito.when;
 
 class ChatStreamControllerTest {
 
+    private static final ActorContext ACTOR = new ActorContext(
+            UUID.fromString("00000000-0000-0000-0000-000000000101"),
+            UUID.fromString("00000000-0000-0000-0000-000000000001"));
+
     @Test
     void shouldRejectUnsafeInputBeforeCreatingARun() {
         RecordingChatRunStore store = new RecordingChatRunStore();
@@ -39,7 +47,7 @@ class ChatStreamControllerTest {
                 properties(),
                 store,
                 noTool(),
-                new P0ChatGuardrail());
+                new P0ChatGuardrail(), noMemory());
 
         assertThatThrownBy(() -> controller.stream(
                 new ChatStreamController.ChatStreamRequest("unsafe\u0000input"),
@@ -70,7 +78,7 @@ class ChatStreamControllerTest {
                 properties(),
                 store,
                 tool,
-                new P0ChatGuardrail());
+                new P0ChatGuardrail(), noMemory());
 
         controller.stream(
                 new ChatStreamController.ChatStreamRequest("Spring AI latest release"),
@@ -102,7 +110,7 @@ class ChatStreamControllerTest {
                 properties(),
                 store,
                 noTool(),
-                new P0ChatGuardrail());
+                new P0ChatGuardrail(), noMemory());
 
         var emitter = controller.stream(
                 new ChatStreamController.ChatStreamRequest("解释 Spring AI"),
@@ -125,7 +133,7 @@ class ChatStreamControllerTest {
                 properties(),
                 store,
                 noTool(),
-                new P0ChatGuardrail());
+                new P0ChatGuardrail(), noMemory());
         controller.stream(
                 new ChatStreamController.ChatStreamRequest("长回答"),
                 request("trace-start"));
@@ -154,7 +162,7 @@ class ChatStreamControllerTest {
                 properties(),
                 store,
                 noTool(),
-                new P0ChatGuardrail());
+                new P0ChatGuardrail(), noMemory());
 
         controller.stream(
                 new ChatStreamController.ChatStreamRequest("解释 Agent"),
@@ -188,7 +196,7 @@ class ChatStreamControllerTest {
                 properties(),
                 store,
                 noTool(),
-                new P0ChatGuardrail());
+                new P0ChatGuardrail(), noMemory());
 
         controller.stream(
                 new ChatStreamController.ChatStreamRequest(
@@ -208,6 +216,9 @@ class ChatStreamControllerTest {
     private static MockHttpServletRequest request(String traceId) {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE, traceId);
+        request.setAttribute(CurrentAccount.ATTRIBUTE, new AccountWorkspaceStore.AccountRecord(
+                ACTOR.userId(), "alpha-owner", "Alpha Owner", ACTOR.workspaceId(),
+                "Alpha Workspace", "OWNER", "hash", false));
         return request;
     }
 
@@ -231,6 +242,12 @@ class ChatStreamControllerTest {
         return service;
     }
 
+    private static UserMemoryStore noMemory() {
+        UserMemoryStore store = mock(UserMemoryStore.class);
+        when(store.list(any())).thenReturn(List.of());
+        return store;
+    }
+
     private static final class RecordingChatRunStore implements ChatRunStore {
 
         private final UUID sessionId = UUID.randomUUID();
@@ -241,17 +258,21 @@ class ChatStreamControllerTest {
         private List<StoredMessage> history = List.of();
 
         @Override
-        public List<StoredMessage> recentMessages(UUID sessionId, int limit) {
+        public List<StoredMessage> recentMessages(ActorContext actor, UUID sessionId, int limit) {
             return history;
         }
 
         @Override
-        public Optional<SessionHistory> sessionHistory(UUID sessionId, int limit) {
+        public Optional<SessionHistory> sessionHistory(ActorContext actor, UUID sessionId, int limit) {
             return Optional.empty();
         }
 
         @Override
+        public boolean ownsRun(ActorContext actor, UUID runId) { return this.runId.equals(runId); }
+
+        @Override
         public UUID startRun(
+                ActorContext actor,
                 UUID runId,
                 UUID requestedSessionId,
                 String traceId,

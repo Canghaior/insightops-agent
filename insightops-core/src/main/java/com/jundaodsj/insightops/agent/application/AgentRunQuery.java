@@ -1,5 +1,7 @@
 package com.jundaodsj.insightops.agent.application;
 
+import com.jundaodsj.insightops.identity.application.ActorContext;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -9,9 +11,9 @@ import java.util.UUID;
 
 public interface AgentRunQuery {
 
-    RunPage listRuns(int page, int size, String status);
+    RunPage listRuns(ActorContext actor, int page, int size, String status);
 
-    Optional<RunDetail> findRun(UUID runId);
+    Optional<RunDetail> findRun(ActorContext actor, UUID runId);
 
     record RunPage(
             List<RunSummary> items,

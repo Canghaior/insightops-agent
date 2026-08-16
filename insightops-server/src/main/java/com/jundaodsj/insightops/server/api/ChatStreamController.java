@@ -2,6 +2,8 @@ package com.jundaodsj.insightops.server.api;
 
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
+import com.jundaodsj.insightops.identity.application.ActorContext;
+import com.jundaodsj.insightops.memory.application.UserMemoryStore;
 import com.jundaodsj.insightops.model.application.ChatModelRequest;
 import com.jundaodsj.insightops.model.application.ChatStreamEvent;
 import com.jundaodsj.insightops.model.application.ChatStreamEventType;
@@ -12,6 +14,7 @@ import com.jundaodsj.insightops.model.application.StreamingChatModelGateway;
 import com.jundaodsj.insightops.server.chat.ChatStreamSessionRegistry;
 import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
 import com.jundaodsj.insightops.server.chat.ReleaseToolService;
+import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolErrorCode;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -58,6 +61,7 @@ public class ChatStreamController {
     private final ChatRunStore chatRunStore;
     private final ReleaseToolService releaseToolService;
     private final P0ChatGuardrail guardrail;
+    private final UserMemoryStore userMemoryStore;
 
     public ChatStreamController(
             StreamingChatModelGateway streamingGateway,
@@ -65,13 +69,15 @@ public class ChatStreamController {
             DeepSeekModelProperties modelProperties,
             ChatRunStore chatRunStore,
             ReleaseToolService releaseToolService,
-            P0ChatGuardrail guardrail) {
+            P0ChatGuardrail guardrail,
+            UserMemoryStore userMemoryStore) {
         this.streamingGateway = streamingGateway;
         this.sessionRegistry = sessionRegistry;
         this.modelProperties = modelProperties;
         this.chatRunStore = chatRunStore;
         this.releaseToolService = releaseToolService;
         this.guardrail = guardrail;
+        this.userMemoryStore = userMemoryStore;
     }
 
     @PostMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -81,6 +87,7 @@ public class ChatStreamController {
         UUID runUuid = UUID.randomUUID();
         String runId = runUuid.toString();
         String traceId = (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE);
+        ActorContext actor = CurrentAccount.actor(request);
         Instant startedAt = Instant.now();
         String userMessage;
         try {
@@ -93,8 +100,9 @@ public class ChatStreamController {
         }
         List<ChatRunStore.StoredMessage> history = body.sessionId() == null
                 ? List.of()
-                : chatRunStore.recentMessages(body.sessionId(), 12);
+                : chatRunStore.recentMessages(actor, body.sessionId(), 12);
         UUID sessionId = chatRunStore.startRun(
+                actor,
                 runUuid,
                 body.sessionId(),
                 traceId,
@@ -193,7 +201,8 @@ public class ChatStreamController {
             return emitter;
         }
 
-        String systemPrompt = SYSTEM_PROMPT + guardrail.systemPolicy() + toolEvidence
+        String systemPrompt = SYSTEM_PROMPT + guardrail.systemPolicy()
+                + userMemoryStore.prompt(actor, 20) + toolEvidence
                 .map(ReleaseToolService.ToolEvidence::systemPromptAppendix)
                 .orElse("");
         List<String> citations = toolEvidence
@@ -342,6 +351,18 @@ public class ChatStreamController {
     public ResponseEntity<ApiResponse<CancelStreamResult>> cancel(
             @PathVariable String runId,
             HttpServletRequest request) {
+        UUID runUuid;
+        try {
+            runUuid = UUID.fromString(runId);
+        }
+        catch (IllegalArgumentException exception) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.NOT_FOUND, "Agent run not found");
+        }
+        if (!chatRunStore.ownsRun(CurrentAccount.actor(request), runUuid)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.NOT_FOUND, "Agent run not found");
+        }
         boolean cancelled = sessionRegistry.cancel(runId);
         String traceId = (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE);
         ApiResponse<CancelStreamResult> response = new ApiResponse<>(

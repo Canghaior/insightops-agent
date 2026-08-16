@@ -4,7 +4,7 @@
 
 面向需要持续跟踪 AI 开源项目的 Java 开发者、架构师和技术负责人的开源情报 Agent。
 
-当前处于 Alpha/P0：固定跟踪 Spring AI、LangChain4j 和 Dify，并已接通 GitHub Releases 第一条真实数据链路。
+当前处于 Alpha/P1：在 P0 GitHub Releases 真实数据链路之上，已加入登录、个人工作区隔离、账号级会话管理、长期记忆和个人项目关注。
 
 ## 工程结构
 
@@ -32,7 +32,16 @@ docs                       产品、架构、评测与测试文档
    Copy-Item .env.example .env
    ```
 
-2. 在 `.env` 中填写本机配置后，一键启动数据库、后端和前端：
+2. 在 `.env` 中填写本机配置。首次启用登录时至少设置以下本地参数（密码不得提交）：
+
+   ```properties
+   AUTH_BOOTSTRAP_ENABLED=true
+   AUTH_BOOTSTRAP_USERNAME=alpha-owner
+   AUTH_BOOTSTRAP_DISPLAY_NAME=Alpha Owner
+   AUTH_BOOTSTRAP_PASSWORD=请设置10到72位且含大小写字母和数字的密码
+   ```
+
+   然后一键启动数据库、后端和前端：
 
    ```powershell
    .\scripts\start-dev.ps1
@@ -73,7 +82,7 @@ docs                       产品、架构、评测与测试文档
    npm run dev
    ```
 
-访问 `http://127.0.0.1:15173`。后端健康检查为 `http://127.0.0.1:18080/actuator/health`。本地 Alpha 默认将前端、后端和 PostgreSQL 都绑定到 `127.0.0.1`，避免无登录阶段被局域网直接访问。P0 Worker 目前仅提供工程与健康检查骨架，不参与按需 GitHub Release 问答，所以默认启动脚本不运行 Worker。
+访问 `http://127.0.0.1:15173` 并使用 `.env` 中的本地账号登录。后端健康检查为 `http://127.0.0.1:18080/actuator/health`。前端、后端和 PostgreSQL 默认只绑定 `127.0.0.1`。P0 Worker 目前仅提供工程与健康检查骨架，不参与按需 GitHub Release 问答，所以默认启动脚本不运行 Worker。
 
 研究问答页面已接通 DeepSeek SSE：回答会增量显示，用户可以停止生成，完成后显示模型、Token、首 Token 时间、总耗时、RunId 和 TraceId。同一浏览器会话会复用最近 12 条用户/助手消息，支持“这个版本”等指代型追问；页面按时间连续展示问答，刷新后从 PostgreSQL 恢复最近 100 条消息。会话、用户消息、成功的 AI 消息以及成功/取消/失败 Run 会保存到 PostgreSQL。`/runs` 页面支持分页和状态筛选，Run 详情展示 Step、Tool Call、请求/结果 JSON、来源、失败原因和最终回答。
 
@@ -84,12 +93,22 @@ docs                       产品、架构、评测与测试文档
 ```text
 POST /api/v1/chat/streams
 POST /api/v1/chat/streams/{runId}/cancel
+POST /api/v1/auth/login
+GET  /api/v1/auth/me
+POST /api/v1/auth/logout
+POST /api/v1/auth/password
+GET  /api/v1/chat/sessions?includeArchived=true
+PATCH /api/v1/chat/sessions/{sessionId}
+DELETE /api/v1/chat/sessions/{sessionId}
 GET  /api/v1/chat/sessions/{sessionId}/messages?limit=100
+GET/POST/PUT/DELETE /api/v1/memories
+GET  /api/v1/projects
+PATCH /api/v1/projects/{projectId}/watch
 GET  /api/v1/runs?page=0&size=20&status=SUCCEEDED
 GET  /api/v1/runs/{runId}
 ```
 
-首次请求不传 `sessionId`，服务端创建会话并在 `started` 事件返回该 ID；后续请求传回该 `sessionId` 即可继续同一会话。前端把 ID 保存在当前浏览器标签页的 `sessionStorage` 中；“新建会话”会清除页面状态但不删除数据库历史。账号级、跨设备和可管理的长期记忆不在 P0 范围内。
+首次请求不传 `sessionId`，服务端创建当前登录用户的会话并在 `started` 事件返回该 ID；后续请求传回该 `sessionId` 即可继续同一会话。会话列表来自 PostgreSQL，可跨标签页和设备恢复，并支持改名、归档、恢复和删除。删除会话时保留 Agent Run 审计记录。长期记忆由用户显式新增、启停、修改和删除，只用于个性化表达，不作为版本事实证据。
 
 当问题明确涉及三个白名单项目的 Release、版本、发布、升级或近期变化时，Agent 会执行只读工具 `github_release_list`：从 GitHub 官方 REST API 获取证据，保存 Agent Step 与 Tool Call，再由 DeepSeek 基于证据生成带官方链接的回答。P0 不允许模型指定任意仓库，也不查询 Issue、PR、Roadmap 或官方文档。
 

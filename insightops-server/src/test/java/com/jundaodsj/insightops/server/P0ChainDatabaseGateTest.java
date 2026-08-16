@@ -3,12 +3,17 @@ package com.jundaodsj.insightops.server;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentRunQuery;
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
+import com.jundaodsj.insightops.identity.application.ActorContext;
+import com.jundaodsj.insightops.identity.application.AccountWorkspaceStore;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekPricingProperties;
 import com.jundaodsj.insightops.infrastructure.model.DeepSeekCostEstimator;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentRunQuery;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentToolExecutionStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcChatRunStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserMemoryStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcConversationManager;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserProjectWatchStore;
 import com.jundaodsj.insightops.model.application.ChatStreamEvent;
 import com.jundaodsj.insightops.model.application.ChatStreamSession;
 import com.jundaodsj.insightops.model.application.ModelUsage;
@@ -19,6 +24,7 @@ import com.jundaodsj.insightops.server.chat.GitHubReleaseEvidenceFormatter;
 import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
 import com.jundaodsj.insightops.server.chat.ReleaseQuestionRouter;
 import com.jundaodsj.insightops.server.chat.ReleaseToolService;
+import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import com.jundaodsj.insightops.tool.application.github.GitHubRelease;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseResult;
 import org.flywaydb.core.Flyway;
@@ -46,6 +52,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @EnabledIfEnvironmentVariable(named = "INSIGHTOPS_CHAIN_GATE", matches = "true")
 class P0ChainDatabaseGateTest {
 
+    private static final ActorContext ACTOR = new ActorContext(
+            UUID.fromString("00000000-0000-0000-0000-000000000101"),
+            UUID.fromString("00000000-0000-0000-0000-000000000001"));
+
     private static final String SCHEMA = "chain_gate_" + UUID.randomUUID().toString().replace("-", "");
     private static String databaseUrl;
     private static String username;
@@ -54,6 +64,10 @@ class P0ChainDatabaseGateTest {
     private static JdbcChatRunStore runStore;
     private static AgentRunQuery runQuery;
     private static ReleaseToolService releaseToolService;
+    private static JdbcUserMemoryStore memoryStore;
+    private static JdbcConversationManager conversationManager;
+    private static JdbcUserProjectWatchStore projectWatchStore;
+    private static JdbcClient jdbcClient;
 
     @BeforeAll
     static void prepareIsolatedSchema() {
@@ -71,12 +85,15 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(6);
+        assertThat(migration.migrationsExecuted).isEqualTo(7);
 
-        JdbcClient jdbcClient = JdbcClient.create(dataSource);
+        jdbcClient = JdbcClient.create(dataSource);
         DeepSeekCostEstimator estimator = new DeepSeekCostEstimator(pricing());
         runStore = new JdbcChatRunStore(jdbcClient, estimator);
         runQuery = new JdbcAgentRunQuery(jdbcClient, objectMapper());
+        memoryStore = new JdbcUserMemoryStore(jdbcClient);
+        conversationManager = new JdbcConversationManager(jdbcClient);
+        projectWatchStore = new JdbcUserProjectWatchStore(jdbcClient);
         releaseToolService = new ReleaseToolService(
                 new ReleaseQuestionRouter(),
                 query -> new GitHubReleaseResult(List.of(new GitHubRelease(
@@ -123,11 +140,11 @@ class P0ChainDatabaseGateTest {
                 new ChatStreamController.ChatStreamRequest("Spring AI 最新正式版本是什么？"),
                 request(traceId));
 
-        AgentRunQuery.RunSummary summary = runQuery.listRuns(0, 20, "SUCCEEDED").items().stream()
+        AgentRunQuery.RunSummary summary = runQuery.listRuns(ACTOR, 0, 20, "SUCCEEDED").items().stream()
                 .filter(run -> traceId.equals(run.traceId()))
                 .findFirst()
                 .orElseThrow();
-        AgentRunQuery.RunDetail detail = runQuery.findRun(summary.id()).orElseThrow();
+        AgentRunQuery.RunDetail detail = runQuery.findRun(ACTOR, summary.id()).orElseThrow();
 
         assertThat(detail.status()).isEqualTo("SUCCEEDED");
         assertThat(detail.answer()).contains("v2.0.0", "https://github.com/");
@@ -154,10 +171,10 @@ class P0ChainDatabaseGateTest {
             assertThat(tool.resultPayload().toString()).contains("v2.0.0");
         });
         assertThat(detail.toString()).doesNotContain("DEEPSEEK_API_KEY", "Authorization", "sk-");
-        assertThat(runStore.recentMessages(detail.sessionId(), 12))
+        assertThat(runStore.recentMessages(ACTOR, detail.sessionId(), 12))
                 .extracting(ChatRunStore.StoredMessage::role)
                 .containsExactly("USER", "ASSISTANT");
-        ChatRunStore.SessionHistory history = runStore.sessionHistory(detail.sessionId(), 100)
+        ChatRunStore.SessionHistory history = runStore.sessionHistory(ACTOR, detail.sessionId(), 100)
                 .orElseThrow();
         assertThat(history.hasEarlierMessages()).isFalse();
         assertThat(history.messages())
@@ -175,7 +192,7 @@ class P0ChainDatabaseGateTest {
         ChatStreamController controller = controller((request, listener) -> session(providerCancelled));
 
         controller.stream(new ChatStreamController.ChatStreamRequest("生成一份长报告"), request(cancelTrace));
-        AgentRunQuery.RunSummary running = runQuery.listRuns(0, 20, "RUNNING").items().stream()
+        AgentRunQuery.RunSummary running = runQuery.listRuns(ACTOR, 0, 20, "RUNNING").items().stream()
                 .filter(run -> cancelTrace.equals(run.traceId()))
                 .findFirst()
                 .orElseThrow();
@@ -183,21 +200,84 @@ class P0ChainDatabaseGateTest {
 
         assertThat(cancelResponse.getStatusCode().value()).isEqualTo(200);
         assertThat(providerCancelled).isTrue();
-        assertThat(runQuery.findRun(running.id()).orElseThrow().status()).isEqualTo("CANCELLED");
+        assertThat(runQuery.findRun(ACTOR, running.id()).orElseThrow().status()).isEqualTo("CANCELLED");
 
         UUID timeoutRunId = UUID.randomUUID();
         runStore.startRun(
+                ACTOR,
                 timeoutRunId,
                 null,
                 "chain-timeout-" + UUID.randomUUID(),
                 "模拟超过 90 秒的 Run",
                 Instant.now());
         runStore.failRun(timeoutRunId, "", "TIMED_OUT", Instant.now());
-        AgentRunQuery.RunDetail timedOut = runQuery.findRun(timeoutRunId).orElseThrow();
+        AgentRunQuery.RunDetail timedOut = runQuery.findRun(ACTOR, timeoutRunId).orElseThrow();
         assertThat(timedOut.status()).isEqualTo("FAILED");
         assertThat(timedOut.failureCode()).isEqualTo("TIMED_OUT");
         assertThat(timedOut.steps()).isEmpty();
         assertThat(timedOut.toolCalls()).isEmpty();
+    }
+
+    @Test
+    void shouldIsolateConversationRunMemoryAndProjectWatchForThreeUsers() {
+        ActorContext developer = actor("00000000-0000-0000-0000-000000000102");
+        ActorContext architect = actor("00000000-0000-0000-0000-000000000103");
+        createTestUser(developer.userId(), "alpha-developer", "Alpha Developer");
+        createTestUser(architect.userId(), "alpha-architect", "Alpha Architect");
+
+        UUID developerRun = UUID.randomUUID();
+        UUID developerSession = runStore.startRun(
+                developer, developerRun, null, "isolation-" + UUID.randomUUID(),
+                "developer private question", Instant.now());
+        runStore.succeedRun(
+                developerRun, "developer private answer", "deepseek", "deepseek-v4-flash",
+                new ModelUsage(10, 5, 15, 0L, 0L), List.of(), Instant.now());
+
+        assertThat(runQuery.findRun(developer, developerRun)).isPresent();
+        assertThat(runQuery.findRun(architect, developerRun)).isEmpty();
+        assertThat(runQuery.findRun(ACTOR, developerRun)).isEmpty();
+        assertThat(runStore.sessionHistory(developer, developerSession, 100)).isPresent();
+        assertThat(runStore.sessionHistory(architect, developerSession, 100)).isEmpty();
+        assertThat(runStore.ownsRun(architect, developerRun)).isFalse();
+        assertThat(conversationManager.list(developer, true)).extracting("id").contains(developerSession);
+        assertThat(conversationManager.list(architect, true)).isEmpty();
+
+        memoryStore.create(
+                developer, UUID.randomUUID(), "answer-style", "conclusion first",
+                "PREFERENCE", Instant.now());
+        memoryStore.create(
+                architect, UUID.randomUUID(), "answer-style", "architecture tradeoffs first",
+                "PREFERENCE", Instant.now());
+        assertThat(memoryStore.list(developer)).extracting("value").containsExactly("conclusion first");
+        assertThat(memoryStore.list(architect)).extracting("value")
+                .containsExactly("architecture tradeoffs first");
+        assertThat(memoryStore.list(ACTOR)).isEmpty();
+
+        UUID projectId = projectWatchStore.list(developer).getFirst().id();
+        projectWatchStore.setEnabled(developer, projectId, true, Instant.now());
+        assertThat(projectWatchStore.list(developer).stream()
+                .filter(project -> project.id().equals(projectId)).findFirst().orElseThrow().enabled()).isTrue();
+        assertThat(projectWatchStore.list(architect).stream()
+                .filter(project -> project.id().equals(projectId)).findFirst().orElseThrow().enabled()).isFalse();
+    }
+
+    private static ActorContext actor(String userId) {
+        return new ActorContext(UUID.fromString(userId), ACTOR.workspaceId());
+    }
+
+    private static void createTestUser(UUID userId, String username, String displayName) {
+        jdbcClient.sql("""
+                insert into app_user (id, username, display_name, status)
+                values (:id, :username, :displayName, 'ACTIVE')
+                on conflict (id) do nothing
+                """)
+                .param("id", userId).param("username", username).param("displayName", displayName).update();
+        jdbcClient.sql("""
+                insert into workspace_member (workspace_id, user_id, role)
+                values (:workspaceId, :userId, 'MEMBER')
+                on conflict do nothing
+                """)
+                .param("workspaceId", ACTOR.workspaceId()).param("userId", userId).update();
     }
 
     private static ChatStreamController controller(
@@ -208,7 +288,8 @@ class P0ChainDatabaseGateTest {
                 properties(),
                 runStore,
                 releaseToolService,
-                new P0ChatGuardrail());
+                new P0ChatGuardrail(),
+                memoryStore);
     }
 
     private static DeepSeekModelProperties properties() {
@@ -233,6 +314,9 @@ class P0ChainDatabaseGateTest {
     private static MockHttpServletRequest request(String traceId) {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE, traceId);
+        request.setAttribute(CurrentAccount.ATTRIBUTE, new AccountWorkspaceStore.AccountRecord(
+                ACTOR.userId(), "alpha-owner", "Alpha Owner", ACTOR.workspaceId(),
+                "Alpha Workspace", "OWNER", "hash", false));
         return request;
     }
 

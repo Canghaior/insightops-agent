@@ -1,6 +1,9 @@
 package com.jundaodsj.insightops.server.api;
 
 import com.jundaodsj.insightops.agent.application.AgentRunQuery;
+import com.jundaodsj.insightops.identity.application.ActorContext;
+import com.jundaodsj.insightops.identity.application.AccountWorkspaceStore;
+import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.server.ResponseStatusException;
@@ -16,6 +19,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class AgentRunControllerTest {
 
     private static final UUID RUN_ID = UUID.fromString("10000000-0000-0000-0000-000000000001");
+    private static final ActorContext ACTOR = new ActorContext(
+            UUID.fromString("00000000-0000-0000-0000-000000000101"),
+            UUID.fromString("00000000-0000-0000-0000-000000000001"));
 
     @Test
     void shouldListRunsWithNormalizedStatusAndTraceId() {
@@ -62,7 +68,14 @@ class AgentRunControllerTest {
     private static MockHttpServletRequest request() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE, "trace-runs");
+        request.setAttribute(CurrentAccount.ATTRIBUTE, account());
         return request;
+    }
+
+    private static AccountWorkspaceStore.AccountRecord account() {
+        return new AccountWorkspaceStore.AccountRecord(
+                ACTOR.userId(), "alpha-owner", "Alpha Owner", ACTOR.workspaceId(),
+                "Alpha Workspace", "OWNER", "hash", false);
     }
 
     private static final class RecordingQuery implements AgentRunQuery {
@@ -72,7 +85,8 @@ class AgentRunControllerTest {
         private boolean missing;
 
         @Override
-        public RunPage listRuns(int page, int size, String status) {
+        public RunPage listRuns(ActorContext actor, int page, int size, String status) {
+            assertThat(actor).isEqualTo(ACTOR);
             this.page = page;
             this.size = size;
             this.status = status;
@@ -80,7 +94,8 @@ class AgentRunControllerTest {
         }
 
         @Override
-        public Optional<RunDetail> findRun(UUID runId) {
+        public Optional<RunDetail> findRun(ActorContext actor, UUID runId) {
+            assertThat(actor).isEqualTo(ACTOR);
             return missing ? Optional.empty() : Optional.of(detail());
         }
 

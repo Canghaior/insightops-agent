@@ -3,6 +3,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { cancelChat, streamChat, type ChatStreamEvent, type ModelUsage } from '@/api/agentStream'
 import { getChatSessionHistory, type ChatHistoryMessage } from '@/api/chatHistory'
+import {
+  deleteConversation,
+  listConversations,
+  updateConversation,
+  type ConversationSummary,
+} from '@/api/conversations'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 
 type StreamStatus = 'idle' | 'connecting' | 'streaming' | 'completed' | 'cancelled' | 'error'
@@ -26,11 +32,12 @@ interface ConversationMessage {
   sources?: string[]
 }
 
-const SESSION_STORAGE_KEY = 'insightops.chat.sessionId'
 const question = ref('')
 const status = ref<StreamStatus>('idle')
 const runId = ref('')
-const sessionId = ref(globalThis.sessionStorage.getItem(SESSION_STORAGE_KEY) ?? '')
+const sessionId = ref('')
+const conversations = ref<ConversationSummary[]>([])
+const sessionsLoading = ref(false)
 const messages = ref<ConversationMessage[]>([])
 const historyLoading = ref(false)
 const historyError = ref('')
@@ -97,7 +104,6 @@ function handleEvent(event: ChatStreamEvent) {
   assistant.runId = event.runId
   if (event.sessionId) {
     sessionId.value = event.sessionId
-    globalThis.sessionStorage.setItem(SESSION_STORAGE_KEY, event.sessionId)
   }
   assistant.traceId = event.traceId || assistant.traceId
   if (event.type === 'started') {
@@ -131,6 +137,7 @@ function handleEvent(event: ChatStreamEvent) {
     assistant.timeToFirstTokenMs = event.timeToFirstTokenMs
     assistant.sources = event.sources ?? []
     void scrollConversationToBottom()
+    void loadConversations()
     return
   }
   if (event.type === 'cancelled') {
@@ -146,8 +153,48 @@ function handleEvent(event: ChatStreamEvent) {
 }
 
 function clearStoredSession() {
-  globalThis.sessionStorage.removeItem(SESSION_STORAGE_KEY)
   sessionId.value = ''
+}
+
+async function loadConversations(selectLatest = false) {
+  sessionsLoading.value = true
+  try {
+    conversations.value = await listConversations(true)
+    if (selectLatest && !sessionId.value) {
+      const latest = conversations.value.find((item) => item.status === 'ACTIVE')
+      if (latest) await selectConversation(latest)
+    }
+  } finally { sessionsLoading.value = false }
+}
+
+async function selectConversation(conversation: ConversationSummary) {
+  if (streaming.value) return
+  if (conversation.status === 'ARCHIVED') {
+    await updateConversation(conversation.id, { archived: false })
+    await loadConversations()
+  }
+  sessionId.value = conversation.id
+  messages.value = []
+  await loadHistory()
+}
+
+async function renameConversation(conversation: ConversationSummary) {
+  const title = globalThis.prompt('新的会话标题', conversation.title)?.trim()
+  if (!title) return
+  Object.assign(conversation, await updateConversation(conversation.id, { title }))
+}
+
+async function archiveConversation(conversation: ConversationSummary) {
+  await updateConversation(conversation.id, { archived: conversation.status !== 'ARCHIVED' })
+  if (sessionId.value === conversation.id) startNewConversation()
+  await loadConversations()
+}
+
+async function removeConversation(conversation: ConversationSummary) {
+  if (!globalThis.confirm(`永久删除会话“${conversation.title}”？执行审计记录会保留。`)) return
+  await deleteConversation(conversation.id)
+  if (sessionId.value === conversation.id) startNewConversation()
+  await loadConversations()
 }
 
 async function loadHistory() {
@@ -280,7 +327,7 @@ function formatMessageTime(value: string) {
   }).format(new Date(value))
 }
 
-onMounted(() => void loadHistory())
+onMounted(() => void loadConversations(true))
 
 onBeforeUnmount(() => {
   const activeRunId = runId.value
@@ -291,8 +338,33 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="research-layout">
+    <aside class="conversation-sidebar">
+      <div class="conversation-sidebar-heading">
+        <div><span class="eyebrow">我的会话</span><strong>{{ conversations.length }}</strong></div>
+        <button class="secondary-button" :disabled="streaming" @click="startNewConversation">＋ 新建</button>
+      </div>
+      <p v-if="sessionsLoading" class="subtle">加载中…</p>
+      <div class="conversation-list">
+        <article
+          v-for="conversation in conversations"
+          :key="conversation.id"
+          :class="{ active: sessionId === conversation.id, archived: conversation.status === 'ARCHIVED' }"
+        >
+          <button class="conversation-select" @click="selectConversation(conversation)">
+            <strong>{{ conversation.title }}</strong>
+            <small>{{ conversation.messageCount }} 条消息 · {{ conversation.status === 'ACTIVE' ? '进行中' : '已归档' }}</small>
+          </button>
+          <div class="conversation-actions">
+            <button @click="renameConversation(conversation)">改名</button>
+            <button @click="archiveConversation(conversation)">{{ conversation.status === 'ACTIVE' ? '归档' : '恢复' }}</button>
+            <button @click="removeConversation(conversation)">删除</button>
+          </div>
+        </article>
+        <p v-if="!sessionsLoading && !conversations.length" class="subtle">还没有会话</p>
+      </div>
+    </aside>
     <div class="research-main">
-      <span class="eyebrow">研究问答 · P0 流式链路</span>
+      <span class="eyebrow">研究问答 · P1 个人工作区</span>
       <h2>与 DeepSeek 多轮实时问答</h2>
       <p class="lead">回答会按消息连续显示并保存到数据库；刷新当前标签页可以恢复本会话，模型使用最近 12 条消息理解指代。</p>
 
@@ -406,7 +478,7 @@ onBeforeUnmount(() => {
       </ul>
       <div class="scope-warning">
         <strong>当前限制</strong>
-        <p>当前标签页最多回看最近 100 条消息；账号级会话列表、跨设备同步和可管理的长期记忆将在 P1 实现。</p>
+        <p>单次最多加载最近 100 条消息；更早消息仍保存在数据库。长期记忆由用户在“长期记忆”页面主动维护。</p>
       </div>
     </aside>
   </section>

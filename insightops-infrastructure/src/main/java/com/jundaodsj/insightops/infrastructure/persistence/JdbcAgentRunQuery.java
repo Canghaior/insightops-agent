@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentRunQuery;
+import com.jundaodsj.insightops.identity.application.ActorContext;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -17,7 +18,6 @@ import java.util.UUID;
 @Repository
 public class JdbcAgentRunQuery implements AgentRunQuery {
 
-    private static final UUID ALPHA_WORKSPACE_ID = JdbcChatRunStore.ALPHA_WORKSPACE_ID;
     private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {
     };
 
@@ -30,14 +30,15 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
     }
 
     @Override
-    public RunPage listRuns(int page, int size, String status) {
+    public RunPage listRuns(ActorContext actor, int page, int size, String status) {
         String statusClause = status == null ? "" : " and status = :status";
         JdbcClient.StatementSpec countQuery = jdbcClient.sql("""
                 select count(*)
                 from agent_run
-                where workspace_id = :workspaceId
+                where workspace_id = :workspaceId and owner_user_id = :userId
                 """ + statusClause)
-                .param("workspaceId", ALPHA_WORKSPACE_ID);
+                .param("workspaceId", actor.workspaceId())
+                .param("userId", actor.userId());
         JdbcClient.StatementSpec listQuery = jdbcClient.sql("""
                 select id, session_id, trace_id, status, question, model_provider, model_name,
                        tool_rounds, prompt_tokens, completion_tokens,
@@ -45,9 +46,10 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                            coalesce(started_at, created_at))) * 1000)::bigint as duration_ms,
                        created_at, finished_at
                 from agent_run
-                where workspace_id = :workspaceId
+                where workspace_id = :workspaceId and owner_user_id = :userId
                 """ + statusClause + " order by created_at desc limit :limit offset :offset")
-                .param("workspaceId", ALPHA_WORKSPACE_ID)
+                .param("workspaceId", actor.workspaceId())
+                .param("userId", actor.userId())
                 .param("limit", size)
                 .param("offset", page * size);
         if (status != null) {
@@ -62,7 +64,7 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
     }
 
     @Override
-    public Optional<RunDetail> findRun(UUID runId) {
+    public Optional<RunDetail> findRun(ActorContext actor, UUID runId) {
         Optional<RunRow> row = jdbcClient.sql("""
                         select id, session_id, trace_id, status, question, answer,
                                model_provider, model_name, tool_rounds, prompt_tokens,
@@ -72,10 +74,11 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                                    coalesce(started_at, created_at))) * 1000)::bigint as duration_ms,
                                started_at, finished_at, created_at
                         from agent_run
-                        where id = :id and workspace_id = :workspaceId
+                        where id = :id and workspace_id = :workspaceId and owner_user_id = :userId
                         """)
                 .param("id", runId)
-                .param("workspaceId", ALPHA_WORKSPACE_ID)
+                .param("workspaceId", actor.workspaceId())
+                .param("userId", actor.userId())
                 .query((resultSet, rowNum) -> runRow(resultSet))
                 .optional();
         if (row.isEmpty()) {

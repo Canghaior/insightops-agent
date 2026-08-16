@@ -29,6 +29,14 @@ spring:
           max-retries: ${MODEL_MAX_RETRIES:2}
 
 insightops:
+  auth:
+    session-days: ${AUTH_SESSION_DAYS:14}
+    secure-cookie: ${AUTH_SECURE_COOKIE:false}
+    bootstrap:
+      enabled: ${AUTH_BOOTSTRAP_ENABLED:false}
+      username: ${AUTH_BOOTSTRAP_USERNAME:alpha-owner}
+      display-name: ${AUTH_BOOTSTRAP_DISPLAY_NAME:Alpha Owner}
+      password: ${AUTH_BOOTSTRAP_PASSWORD:}
   tool:
     github:
       base-url: ${GITHUB_API_BASE_URL:https://api.github.com}

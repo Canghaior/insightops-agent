@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.infrastructure.persistence;
 
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
+import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.infrastructure.model.DeepSeekCostEstimator;
 import com.jundaodsj.insightops.model.application.ModelUsage;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -19,9 +20,6 @@ import java.util.UUID;
 @Repository
 public class JdbcChatRunStore implements ChatRunStore {
 
-    public static final UUID ALPHA_WORKSPACE_ID =
-            UUID.fromString("00000000-0000-0000-0000-000000000001");
-
     private final JdbcClient jdbcClient;
     private final DeepSeekCostEstimator costEstimator;
 
@@ -31,7 +29,7 @@ public class JdbcChatRunStore implements ChatRunStore {
     }
 
     @Override
-    public List<StoredMessage> recentMessages(UUID sessionId, int limit) {
+    public List<StoredMessage> recentMessages(ActorContext actor, UUID sessionId, int limit) {
         if (sessionId == null) {
             return List.of();
         }
@@ -46,6 +44,7 @@ public class JdbcChatRunStore implements ChatRunStore {
                             join conversation_session session on session.id = message.session_id
                             where message.session_id = :sessionId
                               and session.workspace_id = :workspaceId
+                              and session.owner_user_id = :userId
                               and session.status = 'ACTIVE'
                             order by message.sequence_no desc
                             limit :limit
@@ -53,7 +52,8 @@ public class JdbcChatRunStore implements ChatRunStore {
                         order by sequence_no
                         """)
                 .param("sessionId", sessionId)
-                .param("workspaceId", ALPHA_WORKSPACE_ID)
+                .param("workspaceId", actor.workspaceId())
+                .param("userId", actor.userId())
                 .param("limit", limit)
                 .query((resultSet, rowNum) -> new StoredMessage(
                         resultSet.getString("role"),
@@ -63,7 +63,7 @@ public class JdbcChatRunStore implements ChatRunStore {
 
     @Override
     @Transactional(readOnly = true)
-    public Optional<SessionHistory> sessionHistory(UUID sessionId, int limit) {
+    public Optional<SessionHistory> sessionHistory(ActorContext actor, UUID sessionId, int limit) {
         if (sessionId == null) {
             return Optional.empty();
         }
@@ -75,10 +75,12 @@ public class JdbcChatRunStore implements ChatRunStore {
                         from conversation_session
                         where id = :sessionId
                           and workspace_id = :workspaceId
+                          and owner_user_id = :userId
                           and status = 'ACTIVE'
                         """)
                 .param("sessionId", sessionId)
-                .param("workspaceId", ALPHA_WORKSPACE_ID)
+                .param("workspaceId", actor.workspaceId())
+                .param("userId", actor.userId())
                 .query(String.class)
                 .optional();
         if (title.isEmpty()) {
@@ -113,16 +115,33 @@ public class JdbcChatRunStore implements ChatRunStore {
     }
 
     @Override
+    public boolean ownsRun(ActorContext actor, UUID runId) {
+        return jdbcClient.sql("""
+                select count(*) = 1
+                from agent_run run
+                where run.id = :runId
+                  and run.workspace_id = :workspaceId
+                  and run.owner_user_id = :userId
+                """)
+                .param("runId", runId)
+                .param("workspaceId", actor.workspaceId())
+                .param("userId", actor.userId())
+                .query(Boolean.class)
+                .single();
+    }
+
+    @Override
     @Transactional
     public UUID startRun(
+            ActorContext actor,
             UUID runId,
             UUID requestedSessionId,
             String traceId,
             String question,
             Instant startedAt) {
         UUID sessionId = requestedSessionId == null
-                ? createSession(question, startedAt)
-                : lockActiveSession(requestedSessionId);
+                ? createSession(actor, question, startedAt)
+                : lockActiveSession(actor, requestedSessionId);
         int sequenceNo = nextMessageSequence(sessionId);
 
         jdbcClient.sql("""
@@ -140,14 +159,15 @@ public class JdbcChatRunStore implements ChatRunStore {
 
         jdbcClient.sql("""
                         insert into agent_run
-                            (id, workspace_id, session_id, trace_id, status, question,
+                            (id, workspace_id, owner_user_id, session_id, trace_id, status, question,
                              started_at, created_at)
                         values
-                            (:id, :workspaceId, :sessionId, :traceId, 'RUNNING', :question,
+                            (:id, :workspaceId, :userId, :sessionId, :traceId, 'RUNNING', :question,
                              :startedAt, :startedAt)
                         """)
                 .param("id", runId)
-                .param("workspaceId", ALPHA_WORKSPACE_ID)
+                .param("workspaceId", actor.workspaceId())
+                .param("userId", actor.userId())
                 .param("sessionId", sessionId)
                 .param("traceId", traceId)
                 .param("question", question)
@@ -202,7 +222,7 @@ public class JdbcChatRunStore implements ChatRunStore {
                 .param("citations", jsonArray(citations))
                 .update();
 
-        lockActiveSession(run.sessionId());
+        lockRunSession(run.sessionId());
         jdbcClient.sql("""
                         insert into conversation_message
                             (id, session_id, role, content, citations, sequence_no, created_at)
@@ -236,31 +256,47 @@ public class JdbcChatRunStore implements ChatRunStore {
         finishWithoutAssistant(runId, "FAILED", partialAnswer, failureCode, finishedAt);
     }
 
-    private UUID createSession(String question, Instant createdAt) {
+    private UUID createSession(ActorContext actor, String question, Instant createdAt) {
         UUID sessionId = UUID.randomUUID();
         jdbcClient.sql("""
                         insert into conversation_session
-                            (id, workspace_id, title, status, created_at, updated_at)
+                            (id, workspace_id, owner_user_id, title, status, created_at, updated_at)
                         values
-                            (:id, :workspaceId, :title, 'ACTIVE', :createdAt, :createdAt)
+                            (:id, :workspaceId, :userId, :title, 'ACTIVE', :createdAt, :createdAt)
                         """)
                 .param("id", sessionId)
-                .param("workspaceId", ALPHA_WORKSPACE_ID)
+                .param("workspaceId", actor.workspaceId())
+                .param("userId", actor.userId())
                 .param("title", title(question))
                 .param("createdAt", timestamp(createdAt))
                 .update();
         return sessionId;
     }
 
-    private UUID lockActiveSession(UUID sessionId) {
+    private UUID lockActiveSession(ActorContext actor, UUID sessionId) {
         return jdbcClient.sql("""
                         select id
                         from conversation_session
-                        where id = :id and workspace_id = :workspaceId and status = 'ACTIVE'
+                        where id = :id and workspace_id = :workspaceId
+                          and owner_user_id = :userId and status = 'ACTIVE'
                         for update
                         """)
                 .param("id", sessionId)
-                .param("workspaceId", ALPHA_WORKSPACE_ID)
+                .param("workspaceId", actor.workspaceId())
+                .param("userId", actor.userId())
+                .query(UUID.class)
+                .optional()
+                .orElseThrow(() -> new IllegalArgumentException("Conversation session is missing or inactive"));
+    }
+
+    private UUID lockRunSession(UUID sessionId) {
+        return jdbcClient.sql("""
+                        select id
+                        from conversation_session
+                        where id = :id and status = 'ACTIVE'
+                        for update
+                        """)
+                .param("id", sessionId)
                 .query(UUID.class)
                 .optional()
                 .orElseThrow(() -> new IllegalArgumentException("Conversation session is missing or inactive"));

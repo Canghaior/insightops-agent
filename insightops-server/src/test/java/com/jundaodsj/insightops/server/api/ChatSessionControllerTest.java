@@ -1,6 +1,10 @@
 package com.jundaodsj.insightops.server.api;
 
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
+import com.jundaodsj.insightops.conversation.application.ConversationManager;
+import com.jundaodsj.insightops.identity.application.ActorContext;
+import com.jundaodsj.insightops.identity.application.AccountWorkspaceStore;
+import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.server.ResponseStatusException;
@@ -19,6 +23,9 @@ class ChatSessionControllerTest {
 
     private static final UUID SESSION_ID =
             UUID.fromString("30000000-0000-0000-0000-000000000001");
+    private static final ActorContext ACTOR = new ActorContext(
+            UUID.fromString("00000000-0000-0000-0000-000000000101"),
+            UUID.fromString("00000000-0000-0000-0000-000000000001"));
 
     @Test
     void shouldReturnChronologicalSessionMessages() {
@@ -30,8 +37,8 @@ class ChatSessionControllerTest {
                         message("USER", "Spring AI 最新版本是什么？", 1),
                         message("ASSISTANT", "最新版本是 v2.0.0。", 2)),
                 false);
-        when(store.sessionHistory(SESSION_ID, 100)).thenReturn(Optional.of(history));
-        ChatSessionController controller = new ChatSessionController(store);
+        when(store.sessionHistory(ACTOR, SESSION_ID, 100)).thenReturn(Optional.of(history));
+        ChatSessionController controller = new ChatSessionController(store, mock(ConversationManager.class));
 
         ApiResponse<ChatRunStore.SessionHistory> response = controller.messages(
                 SESSION_ID,
@@ -47,8 +54,8 @@ class ChatSessionControllerTest {
     @Test
     void shouldReturnNotFoundForUnknownSession() {
         ChatRunStore store = mock(ChatRunStore.class);
-        when(store.sessionHistory(SESSION_ID, 100)).thenReturn(Optional.empty());
-        ChatSessionController controller = new ChatSessionController(store);
+        when(store.sessionHistory(ACTOR, SESSION_ID, 100)).thenReturn(Optional.empty());
+        ChatSessionController controller = new ChatSessionController(store, mock(ConversationManager.class));
 
         assertThatThrownBy(() -> controller.messages(SESSION_ID, 100, request()))
                 .isInstanceOf(ResponseStatusException.class)
@@ -67,6 +74,9 @@ class ChatSessionControllerTest {
     private static MockHttpServletRequest request() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE, "trace-session");
+        request.setAttribute(CurrentAccount.ATTRIBUTE, new AccountWorkspaceStore.AccountRecord(
+                ACTOR.userId(), "alpha-owner", "Alpha Owner", ACTOR.workspaceId(),
+                "Alpha Workspace", "OWNER", "hash", false));
         return request;
     }
 }

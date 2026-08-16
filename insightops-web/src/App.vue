@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ChatDotRound, DataAnalysis, FolderOpened, Operation, User } from '@element-plus/icons-vue'
+import { ChatDotRound, DataAnalysis, FolderOpened, Operation, Setting, User, UserFilled } from '@element-plus/icons-vue'
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
@@ -7,12 +8,14 @@ import { useAuthStore } from '@/stores/auth'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const canManageAccounts = computed(() => auth.account?.systemRole === 'SYSTEM_ADMIN' || auth.account?.role === 'OWNER')
 const navigation = [
   { path: '/', label: '概览', icon: DataAnalysis },
   { path: '/projects', label: '跟踪项目', icon: FolderOpened },
   { path: '/chat', label: '研究问答', icon: ChatDotRound },
   { path: '/memory', label: '长期记忆', icon: User },
   { path: '/runs', label: '执行记录', icon: Operation },
+  { path: '/settings', label: '账号设置', icon: Setting },
 ]
 
 async function signOut() {
@@ -31,10 +34,14 @@ async function signOut() {
           <el-icon><component :is="item.icon" /></el-icon><span>{{ item.label }}</span>
         </RouterLink>
       </nav>
+      <nav v-if="canManageAccounts" class="navigation admin-navigation" aria-label="管理导航">
+        <RouterLink to="/admin/users"><el-icon><UserFilled /></el-icon><span>用户管理</span></RouterLink>
+      </nav>
       <div class="scope-note account-card">
         <span class="eyebrow">当前账号</span>
         <strong>{{ auth.account?.displayName }}</strong>
         <p>{{ auth.account?.workspaceName }} · {{ auth.account?.role }}</p>
+        <p>{{ auth.account?.systemRole === 'SYSTEM_ADMIN' ? '系统管理员' : '普通用户' }}</p>
         <button class="text-button" @click="signOut">退出登录</button>
       </div>
     </aside>

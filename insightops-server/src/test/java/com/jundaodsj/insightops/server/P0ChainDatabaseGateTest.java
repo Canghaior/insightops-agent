@@ -5,10 +5,13 @@ import com.jundaodsj.insightops.agent.application.AgentRunQuery;
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.identity.application.AccountWorkspaceStore;
+import com.jundaodsj.insightops.identity.application.AdminAccountStore;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekPricingProperties;
 import com.jundaodsj.insightops.infrastructure.model.DeepSeekCostEstimator;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentRunQuery;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcAdminAccountStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcAccountWorkspaceStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentToolExecutionStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcChatRunStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserMemoryStore;
@@ -68,6 +71,7 @@ class P0ChainDatabaseGateTest {
     private static JdbcConversationManager conversationManager;
     private static JdbcUserProjectWatchStore projectWatchStore;
     private static JdbcClient jdbcClient;
+    private static JdbcAdminAccountStore adminAccountStore;
 
     @BeforeAll
     static void prepareIsolatedSchema() {
@@ -85,9 +89,10 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(7);
+        assertThat(migration.migrationsExecuted).isEqualTo(9);
 
         jdbcClient = JdbcClient.create(dataSource);
+        adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
         DeepSeekCostEstimator estimator = new DeepSeekCostEstimator(pricing());
         runStore = new JdbcChatRunStore(jdbcClient, estimator);
         runQuery = new JdbcAgentRunQuery(jdbcClient, objectMapper());
@@ -108,6 +113,50 @@ class P0ChainDatabaseGateTest {
                 new JdbcAgentToolExecutionStore(jdbcClient),
                 new GitHubReleaseEvidenceFormatter(),
                 objectMapper());
+    }
+
+    @Test
+    void shouldPersistAccountAdministrationAndAuditRecords() {
+        JdbcAccountWorkspaceStore accountStore = new JdbcAccountWorkspaceStore(jdbcClient);
+        accountStore.ensureBootstrapCredential("configured-admin", "Configured Admin", "bootstrap-hash");
+        accountStore.ensureBootstrapCredential("configured-admin", "Renamed Admin", "must-not-overwrite");
+        assertThat(jdbcClient.sql("""
+                select u.system_role || ':' || member.role || ':' || credential.password_hash
+                from app_user u
+                join workspace_member member on member.user_id = u.id
+                join user_credential credential on credential.user_id = u.id
+                where u.username = 'configured-admin'
+                """).query(String.class).single())
+                .isEqualTo("SYSTEM_ADMIN:OWNER:bootstrap-hash");
+
+        UUID userId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-17T08:00:00Z");
+        AdminAccountStore.ManagedUser created = adminAccountStore.createUser(
+                userId, ACTOR.workspaceId(), "chain-member", "Chain Member", "$2a$12$test",
+                "USER", "MEMBER", now);
+
+        assertThat(created.mustChangePassword()).isTrue();
+        assertThat(adminAccountStore.listUsers(ACTOR.workspaceId()))
+                .extracting(AdminAccountStore.ManagedUser::username)
+                .contains("chain-member");
+
+        assertThat(adminAccountStore.updateWorkspaceRole(ACTOR.workspaceId(), userId, "OWNER", now.plusSeconds(1)))
+                .get().extracting(AdminAccountStore.ManagedUser::workspaceRole).isEqualTo("OWNER");
+        assertThat(adminAccountStore.resetPassword(
+                ACTOR.workspaceId(), userId, "$2a$12$reset", now.plusSeconds(2))).isTrue();
+
+        adminAccountStore.appendAudit(UUID.randomUUID(), ACTOR.workspaceId(), ACTOR.userId(), userId,
+                "PASSWORD_RESET", "{\"mustChangePassword\":true}", now.plusSeconds(3));
+        assertThat(adminAccountStore.listAudit(ACTOR.workspaceId(), 10))
+                .singleElement()
+                .satisfies(entry -> {
+                    assertThat(entry.action()).isEqualTo("PASSWORD_RESET");
+                    assertThat(entry.targetUsername()).isEqualTo("chain-member");
+                });
+
+        assertThat(adminAccountStore.updateStatus(
+                ACTOR.workspaceId(), userId, "DISABLED", now.plusSeconds(4)))
+                .get().extracting(AdminAccountStore.ManagedUser::status).isEqualTo("DISABLED");
     }
 
     @AfterAll
@@ -316,7 +365,7 @@ class P0ChainDatabaseGateTest {
         request.setAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE, traceId);
         request.setAttribute(CurrentAccount.ATTRIBUTE, new AccountWorkspaceStore.AccountRecord(
                 ACTOR.userId(), "alpha-owner", "Alpha Owner", ACTOR.workspaceId(),
-                "Alpha Workspace", "OWNER", "hash", false));
+                "Alpha Workspace", "SYSTEM_ADMIN", "OWNER", "hash", false));
         return request;
     }
 

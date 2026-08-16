@@ -6,6 +6,7 @@ export interface Account {
   displayName: string
   workspaceId: string
   workspaceName: string
+  systemRole: 'USER' | 'SYSTEM_ADMIN'
   role: string
   mustChangePassword: boolean
 }

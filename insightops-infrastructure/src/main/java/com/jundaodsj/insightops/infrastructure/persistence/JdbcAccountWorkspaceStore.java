@@ -46,7 +46,7 @@ public class JdbcAccountWorkspaceStore implements AccountWorkspaceStore {
     private Optional<AccountRecord> account(String joinAndWhere, String value, Instant now) {
         JdbcClient.StatementSpec query = jdbcClient.sql("""
                 select u.id as user_id, u.username, u.display_name,
-                       w.id as workspace_id, w.name as workspace_name, member.role,
+                       w.id as workspace_id, w.name as workspace_name, u.system_role, member.role,
                        credential.password_hash, credential.must_change_password
                 from app_user u
                 join user_credential credential on credential.user_id = u.id
@@ -68,6 +68,7 @@ public class JdbcAccountWorkspaceStore implements AccountWorkspaceStore {
                         resultSet.getString("display_name"),
                         resultSet.getObject("workspace_id", UUID.class),
                         resultSet.getString("workspace_name"),
+                        resultSet.getString("system_role"),
                         resultSet.getString("role"),
                         resultSet.getString("password_hash"),
                         resultSet.getBoolean("must_change_password")))
@@ -130,22 +131,46 @@ public class JdbcAccountWorkspaceStore implements AccountWorkspaceStore {
     }
 
     @Override
+    @Transactional
     public void ensureBootstrapCredential(String username, String displayName, String passwordHash) {
-        UUID userId = jdbcClient.sql("""
+        Optional<UUID> existing = jdbcClient.sql("""
                 select id from app_user where lower(username) = lower(:username)
                 """)
                 .param("username", username)
                 .query(UUID.class)
-                .optional()
-                .orElseThrow(() -> new IllegalStateException(
-                        "Bootstrap user must be created by Flyway before credentials are initialized"));
-        jdbcClient.sql("update app_user set display_name = :displayName where id = :id")
+                .optional();
+        UUID userId = existing.orElseGet(UUID::randomUUID);
+        if (existing.isEmpty()) {
+            jdbcClient.sql("""
+                    insert into app_user
+                        (id, username, display_name, status, system_role, created_at, updated_at)
+                    values (:id, :username, :displayName, 'ACTIVE', 'SYSTEM_ADMIN', current_timestamp, current_timestamp)
+                    """)
+                    .param("id", userId)
+                    .param("username", username)
+                    .param("displayName", displayName)
+                    .update();
+            jdbcClient.sql("""
+                    insert into workspace_member (workspace_id, user_id, role, created_at)
+                    values ('00000000-0000-0000-0000-000000000001', :userId, 'OWNER', current_timestamp)
+                    """)
+                    .param("userId", userId)
+                    .update();
+        }
+        jdbcClient.sql("""
+                update app_user
+                set display_name = :displayName,
+                    status = 'ACTIVE',
+                    system_role = 'SYSTEM_ADMIN',
+                    updated_at = current_timestamp
+                where id = :id
+                """)
                 .param("displayName", displayName)
                 .param("id", userId)
                 .update();
         jdbcClient.sql("""
                 insert into user_credential (user_id, password_hash, must_change_password)
-                values (:userId, :passwordHash, true)
+                values (:userId, :passwordHash, false)
                 on conflict (user_id) do nothing
                 """)
                 .param("userId", userId)

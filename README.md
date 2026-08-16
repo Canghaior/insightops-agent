@@ -4,7 +4,7 @@
 
 面向需要持续跟踪 AI 开源项目的 Java 开发者、架构师和技术负责人的开源情报 Agent。
 
-当前处于 Alpha/P1：在 P0 GitHub Releases 真实数据链路之上，已加入登录、个人工作区隔离、账号级会话管理、长期记忆和个人项目关注。
+当前处于 Alpha/P1：在 P0 GitHub Releases 真实数据链路之上，已加入登录、个人工作区隔离、账号级会话管理、长期记忆、个人项目关注，以及邀请制用户与权限管理。
 
 ## 工程结构
 
@@ -32,7 +32,7 @@ docs                       产品、架构、评测与测试文档
    Copy-Item .env.example .env
    ```
 
-2. 在 `.env` 中填写本机配置。首次启用登录时至少设置以下本地参数（密码不得提交）：
+2. 在 `.env` 中填写本机配置。以下账号会在启动时创建或提升为首个 `SYSTEM_ADMIN + OWNER`（密码不得提交）：
 
    ```properties
    AUTH_BOOTSTRAP_ENABLED=true
@@ -84,6 +84,8 @@ docs                       产品、架构、评测与测试文档
 
 访问 `http://127.0.0.1:15173` 并使用 `.env` 中的本地账号登录。后端健康检查为 `http://127.0.0.1:18080/actuator/health`。前端、后端和 PostgreSQL 默认只绑定 `127.0.0.1`。P0 Worker 目前仅提供工程与健康检查骨架，不参与按需 GitHub Release 问答，所以默认启动脚本不运行 Worker。
 
+系统采用封闭邀请制，不提供公开注册接口。`SYSTEM_ADMIN` 可在“用户管理”中创建系统管理员、Owner 或 Member；工作区 `OWNER` 只能创建和管理普通 Member；`MEMBER` 只能使用业务功能。管理员创建用户时设置临时密码，新用户首次登录只能进入“账号设置”修改密码，完成后旧会话立即失效。普通用户和管理员使用同一套工作台，管理菜单按权限显示，不维护两套重复前端。
+
 研究问答页面已接通 DeepSeek SSE：回答会增量显示，用户可以停止生成，完成后显示模型、Token、首 Token 时间、总耗时、RunId 和 TraceId。同一浏览器会话会复用最近 12 条用户/助手消息，支持“这个版本”等指代型追问；页面按时间连续展示问答，刷新后从 PostgreSQL 恢复最近 100 条消息。会话、用户消息、成功的 AI 消息以及成功/取消/失败 Run 会保存到 PostgreSQL。`/runs` 页面支持分页和状态筛选，Run 详情展示 Step、Tool Call、请求/结果 JSON、来源、失败原因和最终回答。
 
 成功 Run 会按带生效日期的 DeepSeek 单价快照和可配置美元兑人民币规划汇率保存估算费用。该数值用于 Alpha 预算观察，不作为供应商账单。
@@ -97,6 +99,12 @@ POST /api/v1/auth/login
 GET  /api/v1/auth/me
 POST /api/v1/auth/logout
 POST /api/v1/auth/password
+GET  /api/v1/admin/users
+POST /api/v1/admin/users
+PATCH /api/v1/admin/users/{userId}/status
+PATCH /api/v1/admin/users/{userId}/role
+POST /api/v1/admin/users/{userId}/reset-password
+GET  /api/v1/admin/audit?limit=100
 GET  /api/v1/chat/sessions?includeArchived=true
 PATCH /api/v1/chat/sessions/{sessionId}
 DELETE /api/v1/chat/sessions/{sessionId}
@@ -140,7 +148,7 @@ npm run build
 
 普通自动测试不调用在线模型；真实 DeepSeek 验证结果记录在 `docs/testing/results/`。
 
-完整 P0 数据库门禁需要本地 PostgreSQL，使用随机隔离 Schema，结束后自动删除：
+完整数据库门禁需要本地 PostgreSQL，使用随机隔离 Schema，结束后自动删除；它同时覆盖 P0 Agent 链路和 P1 账号管理：
 
 ```powershell
 $env:INSIGHTOPS_CHAIN_GATE='true'

@@ -63,7 +63,8 @@ class AuthServiceTest {
         private RecordingStore(String password) {
             account = new AccountRecord(
                     UUID.randomUUID(), "alpha-owner", "Alpha Owner", UUID.randomUUID(),
-                    "InsightOps Alpha", "OWNER", new BCryptPasswordEncoder().encode(password), false);
+                    "InsightOps Alpha", "SYSTEM_ADMIN", "OWNER",
+                    new BCryptPasswordEncoder().encode(password), false);
         }
 
         @Override

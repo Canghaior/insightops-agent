@@ -75,7 +75,7 @@ class AgentRunControllerTest {
     private static AccountWorkspaceStore.AccountRecord account() {
         return new AccountWorkspaceStore.AccountRecord(
                 ACTOR.userId(), "alpha-owner", "Alpha Owner", ACTOR.workspaceId(),
-                "Alpha Workspace", "OWNER", "hash", false);
+                "Alpha Workspace", "SYSTEM_ADMIN", "OWNER", "hash", false);
     }
 
     private static final class RecordingQuery implements AgentRunQuery {

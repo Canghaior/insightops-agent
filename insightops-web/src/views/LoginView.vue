@@ -30,12 +30,14 @@ async function submit() {
       <span class="eyebrow">个人工作区登录</span>
       <h1>欢迎回来</h1>
       <p>登录后，会话、执行记录、长期记忆和项目关注都会按账号隔离。</p>
+      <p v-if="route.query.changed === '1'" class="success-notice">密码已修改，请使用新密码重新登录。</p>
       <form @submit.prevent="submit">
         <label>用户名<input v-model="username" autocomplete="username" maxlength="64" /></label>
         <label>密码<input v-model="password" type="password" autocomplete="current-password" maxlength="72" /></label>
         <p v-if="error" class="stream-error">{{ error }}</p>
         <button class="send-button" :disabled="loading">{{ loading ? '登录中…' : '登录' }}</button>
       </form>
+      <p class="registration-note">当前为封闭邀请制，不开放自主注册。账号由管理员创建。</p>
     </section>
   </main>
 </template>

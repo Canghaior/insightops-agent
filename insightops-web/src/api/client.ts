@@ -15,6 +15,9 @@ apiClient.interceptors.response.use(
       const target = `${globalThis.location.pathname}${globalThis.location.search}`
       globalThis.location.assign(`/login?redirect=${encodeURIComponent(target)}`)
     }
+    if (error?.response?.status === 428 && globalThis.location.pathname !== '/settings') {
+      globalThis.location.assign('/settings?required=1')
+    }
     return Promise.reject(error)
   },
 )

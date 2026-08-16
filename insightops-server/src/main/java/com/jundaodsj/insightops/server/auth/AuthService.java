@@ -89,6 +89,11 @@ public class AuthService implements ApplicationRunner {
         store.changePassword(account.userId(), passwords.encode(newPassword), clock.instant());
     }
 
+    String encodePassword(String password) {
+        validatePassword(password);
+        return passwords.encode(password);
+    }
+
     public int cookieMaxAgeSeconds() {
         return Math.multiplyExact(properties.getSessionDays(), 86_400);
     }

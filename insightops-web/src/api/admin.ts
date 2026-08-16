@@ -1,0 +1,65 @@
+import { apiClient } from './client'
+
+export type SystemRole = 'USER' | 'SYSTEM_ADMIN'
+export type WorkspaceRole = 'OWNER' | 'MEMBER'
+export type AccountStatus = 'ACTIVE' | 'DISABLED'
+
+export interface ManagedUser {
+  userId: string
+  username: string
+  displayName: string
+  status: AccountStatus
+  systemRole: SystemRole
+  workspaceRole: WorkspaceRole
+  mustChangePassword: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AccountAudit {
+  id: string
+  actorUserId: string | null
+  actorUsername: string | null
+  targetUserId: string | null
+  targetUsername: string | null
+  action: string
+  detailsJson: string
+  createdAt: string
+}
+
+export interface CreateUserInput {
+  username: string
+  displayName: string
+  temporaryPassword: string
+  systemRole: SystemRole
+  workspaceRole: WorkspaceRole
+}
+
+export async function listUsers(): Promise<ManagedUser[]> {
+  const response = await apiClient.get<{ data: ManagedUser[] }>('/admin/users')
+  return response.data.data
+}
+
+export async function createUser(input: CreateUserInput): Promise<ManagedUser> {
+  const response = await apiClient.post<{ data: ManagedUser }>('/admin/users', input)
+  return response.data.data
+}
+
+export async function updateStatus(userId: string, status: AccountStatus): Promise<ManagedUser> {
+  const response = await apiClient.patch<{ data: ManagedUser }>(`/admin/users/${userId}/status`, { status })
+  return response.data.data
+}
+
+export async function updateRole(userId: string, workspaceRole: WorkspaceRole): Promise<ManagedUser> {
+  const response = await apiClient.patch<{ data: ManagedUser }>(`/admin/users/${userId}/role`, { workspaceRole })
+  return response.data.data
+}
+
+export async function resetPassword(userId: string, temporaryPassword: string): Promise<void> {
+  await apiClient.post(`/admin/users/${userId}/reset-password`, { temporaryPassword })
+}
+
+export async function listAudit(limit = 100): Promise<AccountAudit[]> {
+  const response = await apiClient.get<{ data: AccountAudit[] }>('/admin/audit', { params: { limit } })
+  return response.data.data
+}

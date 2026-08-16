@@ -53,8 +53,24 @@ public class AuthenticationFilter extends OncePerRequestFilter {
                     "message", "Please sign in"));
             return;
         }
-        request.setAttribute(CurrentAccount.ATTRIBUTE, account.orElseThrow());
+        var authenticated = account.orElseThrow();
+        request.setAttribute(CurrentAccount.ATTRIBUTE, authenticated);
+        if (authenticated.mustChangePassword() && !isPasswordSetupPath(request.getRequestURI())) {
+            response.setStatus(428);
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.setCharacterEncoding("UTF-8");
+            objectMapper.writeValue(response.getWriter(), Map.of(
+                    "code", "PASSWORD_CHANGE_REQUIRED",
+                    "message", "Change the temporary password before continuing"));
+            return;
+        }
         filterChain.doFilter(request, response);
+    }
+
+    private static boolean isPasswordSetupPath(String path) {
+        return path.equals("/api/v1/auth/me")
+                || path.equals("/api/v1/auth/password")
+                || path.equals("/api/v1/auth/logout");
     }
 
     public static String cookie(HttpServletRequest request) {

@@ -38,7 +38,7 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Verify backend and P0 chain gate
+      - name: Verify backend, P0 chain and P1 account administration
         run: ./mvnw --batch-mode --no-transfer-progress verify
 
   frontend:

@@ -12,6 +12,13 @@ const router = createRouter({
     { path: '/memory', name: 'memory', component: () => import('@/views/MemoryView.vue') },
     { path: '/runs', name: 'runs', component: () => import('@/views/RunsView.vue') },
     { path: '/runs/:runId', name: 'run-detail', component: () => import('@/views/RunsView.vue') },
+    { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
+    {
+      path: '/admin/users',
+      name: 'admin-users',
+      component: () => import('@/views/AdminUsersView.vue'),
+      meta: { manager: true },
+    },
   ],
 })
 
@@ -20,6 +27,13 @@ router.beforeEach(async (to) => {
   await auth.initialize()
   if (!to.meta.public && !auth.account) {
     return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  if (auth.account?.mustChangePassword && to.name !== 'settings') {
+    return { name: 'settings', query: { required: '1' } }
+  }
+  if (to.meta.manager && auth.account
+      && auth.account.systemRole !== 'SYSTEM_ADMIN' && auth.account.role !== 'OWNER') {
+    return { name: 'dashboard' }
   }
   if (to.name === 'login' && auth.account) return { name: 'dashboard' }
 })

@@ -23,5 +23,11 @@ export const useAuthStore = defineStore('auth', () => {
     try { await authApi.logout() } finally { account.value = null; initialized.value = true }
   }
 
-  return { account, initialized, initialize, signIn, signOut }
+  async function changeOwnPassword(currentPassword: string, newPassword: string) {
+    await authApi.changePassword(currentPassword, newPassword)
+    account.value = null
+    initialized.value = true
+  }
+
+  return { account, initialized, initialize, signIn, signOut, changeOwnPassword }
 })

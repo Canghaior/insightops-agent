@@ -218,7 +218,7 @@ class ChatStreamControllerTest {
         request.setAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE, traceId);
         request.setAttribute(CurrentAccount.ATTRIBUTE, new AccountWorkspaceStore.AccountRecord(
                 ACTOR.userId(), "alpha-owner", "Alpha Owner", ACTOR.workspaceId(),
-                "Alpha Workspace", "OWNER", "hash", false));
+                "Alpha Workspace", "SYSTEM_ADMIN", "OWNER", "hash", false));
         return request;
     }
 

@@ -23,9 +23,11 @@ import org.springframework.web.server.ResponseStatusException;
 public class AuthController {
 
     private final AuthService authService;
+    private final AccountAdminService accountAdminService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, AccountAdminService accountAdminService) {
         this.authService = authService;
+        this.accountAdminService = accountAdminService;
     }
 
     @PostMapping("/login")
@@ -36,6 +38,7 @@ public class AuthController {
         try {
             AuthService.LoginResult result = authService.login(body.username(), body.password());
             response.addHeader(HttpHeaders.SET_COOKIE, cookie(result.token(), authService.cookieMaxAgeSeconds()));
+            accountAdminService.auditSelf(result.account(), "LOGIN_SUCCEEDED");
             return new ApiResponse<>(traceId(request), view(result.account()));
         } catch (AuthService.InvalidCredentialsException exception) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, exception.getMessage());
@@ -50,6 +53,7 @@ public class AuthController {
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logout(HttpServletRequest request, HttpServletResponse response) {
+        accountAdminService.auditSelf(CurrentAccount.account(request), "LOGOUT");
         authService.logout(AuthenticationFilter.cookie(request));
         response.addHeader(HttpHeaders.SET_COOKIE, cookie("", 0));
     }
@@ -62,6 +66,7 @@ public class AuthController {
             HttpServletResponse response) {
         try {
             authService.changePassword(CurrentAccount.account(request), body.currentPassword(), body.newPassword());
+            accountAdminService.auditSelf(CurrentAccount.account(request), "PASSWORD_CHANGED");
             response.addHeader(HttpHeaders.SET_COOKIE, cookie("", 0));
         } catch (AuthService.InvalidCredentialsException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password is incorrect");
@@ -84,7 +89,7 @@ public class AuthController {
     private static AccountView view(AccountWorkspaceStore.AccountRecord account) {
         return new AccountView(
                 account.userId(), account.username(), account.displayName(), account.workspaceId(),
-                account.workspaceName(), account.role(), account.mustChangePassword());
+                account.workspaceName(), account.systemRole(), account.role(), account.mustChangePassword());
     }
 
     private static String traceId(HttpServletRequest request) {
@@ -105,6 +110,7 @@ public class AuthController {
             String displayName,
             java.util.UUID workspaceId,
             String workspaceName,
+            String systemRole,
             String role,
             boolean mustChangePassword) {
     }

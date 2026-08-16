@@ -24,6 +24,7 @@ public interface AccountWorkspaceStore {
             String displayName,
             UUID workspaceId,
             String workspaceName,
+            String systemRole,
             String role,
             String passwordHash,
             boolean mustChangePassword) {

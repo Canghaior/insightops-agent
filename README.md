@@ -4,7 +4,7 @@
 
 面向需要持续跟踪 AI 开源项目的 Java 开发者、架构师和技术负责人的开源情报 Agent。
 
-当前处于 Alpha/P1：在 P0 GitHub Releases 真实数据链路之上，已加入登录、个人工作区隔离、账号级会话管理、长期记忆、个人项目关注，以及邀请制用户与权限管理。
+当前处于 Alpha/P1：在 P0 GitHub Releases 真实数据链路之上，已加入登录、个人工作区隔离、账号级会话管理、长期记忆、个人项目关注、邀请制用户与权限管理，以及自动采集和个人已读状态隔离的项目更新中心。
 
 ## 工程结构
 
@@ -67,14 +67,20 @@ docs                       产品、架构、评测与测试文档
    docker compose --env-file .env -f infra/compose.yaml up -d
    ```
 
-2. 构建并启动后端。不要在 Maven 聚合根项目执行 `spring-boot:run`：
+2. 构建并分别启动 Server 与 Worker。不要在 Maven 聚合根项目执行 `spring-boot:run`：
 
    ```powershell
-   mvn -pl insightops-server -am package -DskipTests
+   mvn -pl insightops-server,insightops-worker -am package -DskipTests
    java -jar .\insightops-server\target\insightops-server-0.1.0-SNAPSHOT.jar
    ```
 
-3. 新开一个终端启动前端：
+   再新开一个终端：
+
+   ```powershell
+   java -jar .\insightops-worker\target\insightops-worker-0.1.0-SNAPSHOT.jar
+   ```
+
+3. 再新开一个终端启动前端：
 
    ```powershell
    Set-Location insightops-web
@@ -82,7 +88,7 @@ docs                       产品、架构、评测与测试文档
    npm run dev
    ```
 
-访问 `http://127.0.0.1:15173` 并使用 `.env` 中的本地账号登录。后端健康检查为 `http://127.0.0.1:18080/actuator/health`。前端、后端和 PostgreSQL 默认只绑定 `127.0.0.1`。P0 Worker 目前仅提供工程与健康检查骨架，不参与按需 GitHub Release 问答，所以默认启动脚本不运行 Worker。
+访问 `http://127.0.0.1:15173` 并使用 `.env` 中的本地账号登录。Server 和 Worker 健康检查分别为 `http://127.0.0.1:18080/actuator/health`、`http://127.0.0.1:18081/actuator/health`。前端、两个 Java 进程和 PostgreSQL 默认只绑定 `127.0.0.1`。启动脚本会同时运行 Worker；它首次启动后立即采集已关注项目，之后默认每 6 小时增量同步 GitHub Releases，失败时按原因退避重试。
 
 系统采用封闭邀请制，不提供公开注册接口。`SYSTEM_ADMIN` 可在“用户管理”中创建系统管理员、Owner 或 Member；工作区 `OWNER` 只能创建和管理普通 Member；`MEMBER` 只能使用业务功能。管理员创建用户时设置临时密码，新用户首次登录只能进入“账号设置”修改密码，完成后旧会话立即失效。普通用户和管理员使用同一套工作台，管理菜单按权限显示，不维护两套重复前端。
 
@@ -112,6 +118,12 @@ GET  /api/v1/chat/sessions/{sessionId}/messages?limit=100
 GET/POST/PUT/DELETE /api/v1/memories
 GET  /api/v1/projects
 PATCH /api/v1/projects/{projectId}/watch
+GET  /api/v1/updates?page=0&size=20&projectId=&unreadOnly=false
+GET  /api/v1/updates/unread-count
+POST /api/v1/updates/{eventId}/read
+POST /api/v1/updates/read-all
+GET  /api/v1/admin/collection
+POST /api/v1/admin/collection/{projectId}/sync
 GET  /api/v1/runs?page=0&size=20&status=SUCCEEDED
 GET  /api/v1/runs/{runId}
 ```
@@ -119,6 +131,8 @@ GET  /api/v1/runs/{runId}
 首次请求不传 `sessionId`，服务端创建当前登录用户的会话并在 `started` 事件返回该 ID；后续请求传回该 `sessionId` 即可继续同一会话。会话列表来自 PostgreSQL，可跨标签页和设备恢复，并支持改名、归档、恢复和删除。删除会话时保留 Agent Run 审计记录。长期记忆由用户显式新增、启停、修改和删除，只用于个性化表达，不作为版本事实证据。
 
 当问题明确涉及三个白名单项目的 Release、版本、发布、升级或近期变化时，Agent 会执行只读工具 `github_release_list`：从 GitHub 官方 REST API 获取证据，保存 Agent Step 与 Tool Call，再由 DeepSeek 基于证据生成带官方链接的回答。P0 不允许模型指定任意仓库，也不查询 Issue、PR、Roadmap 或官方文档。
+
+项目更新中心只展示当前工作区已关注项目的 Release。采集证据全局去重保存，已读状态按用户隔离；点击“基于本次更新研究”会把带项目和版本的研究问题预填到问答页。`SYSTEM_ADMIN` 可在用户管理页查看每个项目的采集状态、错误和下次执行时间，并请求立即同步。设计细节见 [P1 项目更新中心](docs/architecture/p1-project-update-center.md)。
 
 P0 聊天入口已启用最小 Guardrail：统一限制输入长度和控制字符，把用户、历史与工具内容标记为不可信数据，禁止泄露系统提示词或密钥，并在模型调用前校验引用必须为 GitHub 官方 Release tag URL。前端同时使用安全 Markdown 子集渲染回答。完整边界见 [P0 聊天 Guardrail](docs/architecture/p0-chat-guardrail.md)。
 
@@ -148,7 +162,7 @@ npm run build
 
 普通自动测试不调用在线模型；真实 DeepSeek 验证结果记录在 `docs/testing/results/`。
 
-完整数据库门禁需要本地 PostgreSQL，使用随机隔离 Schema，结束后自动删除；它同时覆盖 P0 Agent 链路和 P1 账号管理：
+完整数据库门禁需要本地 PostgreSQL，使用随机隔离 Schema，结束后自动删除；它同时覆盖 P0 Agent 链路、P1 账号管理与项目更新去重/已读隔离：
 
 ```powershell
 $env:INSIGHTOPS_CHAIN_GATE='true'

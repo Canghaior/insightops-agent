@@ -4,12 +4,15 @@ import axios from 'axios'
 
 import {
   createUser,
+  listCollectionStatus,
   listAudit,
   listUsers,
   resetPassword,
+  requestCollectionSync,
   updateRole,
   updateStatus,
   type AccountAudit,
+  type CollectionStatus,
   type ManagedUser,
   type SystemRole,
   type WorkspaceRole,
@@ -19,6 +22,7 @@ import { useAuthStore } from '@/stores/auth'
 const auth = useAuthStore()
 const users = ref<ManagedUser[]>([])
 const audit = ref<AccountAudit[]>([])
+const collection = ref<CollectionStatus[]>([])
 const loading = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -31,7 +35,10 @@ const isSystemAdmin = computed(() => auth.account?.systemRole === 'SYSTEM_ADMIN'
 
 async function load() {
   loading.value = true; error.value = ''
-  try { [users.value, audit.value] = await Promise.all([listUsers(), listAudit()]) }
+  try {
+    [users.value, audit.value] = await Promise.all([listUsers(), listAudit()])
+    collection.value = isSystemAdmin.value ? await listCollectionStatus() : []
+  }
   catch (caught: unknown) { error.value = message(caught) } finally { loading.value = false }
 }
 
@@ -67,6 +74,15 @@ async function reset(user: ManagedUser) {
     resetValues[user.userId] = ''
     notice.value = `${user.username} 的密码已重置，原会话已失效，下次登录必须改密。`
     await load()
+  } catch (caught: unknown) { error.value = message(caught) }
+}
+
+async function syncNow(project: CollectionStatus) {
+  error.value = ''; notice.value = ''
+  try {
+    await requestCollectionSync(project.projectId)
+    notice.value = `${project.projectName} 已加入采集队列，Worker 会在下一轮处理。`
+    collection.value = await listCollectionStatus()
   } catch (caught: unknown) { error.value = message(caught) }
 }
 
@@ -128,6 +144,18 @@ onMounted(load)
       </article>
       <p v-if="loading" class="run-loading">正在加载账号…</p>
     </div>
+
+    <template v-if="isSystemAdmin">
+      <div class="section-heading audit-heading"><div><span class="eyebrow">Worker 可观测性</span><h2>Release 采集状态</h2></div><span class="subtle">默认每 6 小时增量同步</span></div>
+      <div class="collection-grid">
+        <article v-for="project in collection" :key="project.projectId" class="panel collection-card">
+          <header><div><strong>{{ project.projectName }}</strong><small>{{ project.repositoryOwner }}/{{ project.projectName }}</small></div><i class="status-pill" :class="project.status === 'SUCCEEDED' ? 'status-succeeded' : project.status === 'FAILED' ? 'status-failed' : 'status-running'">{{ project.status }}</i></header>
+          <dl><div><dt>上次采集</dt><dd>{{ project.lastSyncAt ? new Date(project.lastSyncAt).toLocaleString() : '尚未执行' }}</dd></div><div><dt>下次计划</dt><dd>{{ project.nextSyncAt ? new Date(project.nextSyncAt).toLocaleString() : '等待关注' }}</dd></div></dl>
+          <p v-if="project.lastError" class="stream-error">{{ project.lastError }}</p>
+          <footer><span>连续失败 {{ project.consecutiveFailures }} 次</span><button class="secondary-button" @click="syncNow(project)">立即同步</button></footer>
+        </article>
+      </div>
+    </template>
 
     <div class="section-heading audit-heading"><div><span class="eyebrow">操作留痕</span><h2>账号审计日志</h2></div></div>
     <div class="panel audit-list">

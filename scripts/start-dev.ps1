@@ -9,6 +9,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $runtimeDir = Join-Path $projectRoot '.runtime'
 $webRoot = Join-Path $projectRoot 'insightops-web'
 $serverJar = Join-Path $projectRoot 'insightops-server\target\insightops-server-0.1.0-SNAPSHOT.jar'
+$workerJar = Join-Path $projectRoot 'insightops-worker\target\insightops-worker-0.1.0-SNAPSHOT.jar'
 
 function Resolve-RequiredCommand([string]$name) {
     $command = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -71,10 +72,13 @@ if ($environmentText -notmatch '(?m)^DEEPSEEK_API_KEY=.+$') {
 
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
 $serverPidFile = Join-Path $runtimeDir 'server.pid'
+$workerPidFile = Join-Path $runtimeDir 'worker.pid'
 $webPidFile = Join-Path $runtimeDir 'web.pid'
 Remove-StalePidFile $serverPidFile
+Remove-StalePidFile $workerPidFile
 Remove-StalePidFile $webPidFile
 Assert-PortAvailable 18080
+Assert-PortAvailable 18081
 Assert-PortAvailable 15173
 
 & docker compose --env-file .env -f infra/compose.yaml up -d
@@ -83,13 +87,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (-not $SkipBuild) {
-    & $mavenCommand -pl insightops-server -am package -DskipTests
+    & $mavenCommand -pl insightops-server,insightops-worker -am package -DskipTests
     if ($LASTEXITCODE -ne 0) {
         throw 'Backend build failed.'
     }
 }
 if (-not (Test-Path -LiteralPath $serverJar)) {
     throw "Server JAR not found: $serverJar"
+}
+if (-not (Test-Path -LiteralPath $workerJar)) {
+    throw "Worker JAR not found: $workerJar"
 }
 
 if (-not (Test-Path -LiteralPath (Join-Path $webRoot 'node_modules'))) {
@@ -117,6 +124,15 @@ $serverProcess = Start-Process -FilePath $javaCommand `
     -PassThru
 $serverProcess.Id | Set-Content -LiteralPath $serverPidFile
 
+$workerProcess = Start-Process -FilePath $javaCommand `
+    -ArgumentList @('-jar', $workerJar) `
+    -WorkingDirectory $projectRoot `
+    -RedirectStandardOutput (Join-Path $runtimeDir 'worker.out.log') `
+    -RedirectStandardError (Join-Path $runtimeDir 'worker.err.log') `
+    -WindowStyle Hidden `
+    -PassThru
+$workerProcess.Id | Set-Content -LiteralPath $workerPidFile
+
 $viteScript = Join-Path $webRoot 'node_modules\vite\bin\vite.js'
 $webProcess = Start-Process -FilePath $nodeCommand `
     -ArgumentList @($viteScript, '--host', '127.0.0.1') `
@@ -128,10 +144,12 @@ $webProcess = Start-Process -FilePath $nodeCommand `
 $webProcess.Id | Set-Content -LiteralPath $webPidFile
 
 Wait-ForHttp 'http://127.0.0.1:18080/actuator/health' 60
+Wait-ForHttp 'http://127.0.0.1:18081/actuator/health' 60
 Wait-ForHttp 'http://127.0.0.1:15173/' 40
 
 Write-Host 'InsightOps Agent development services are ready.'
 Write-Host 'Web:    http://127.0.0.1:15173/'
 Write-Host 'Health: http://127.0.0.1:18080/actuator/health'
+Write-Host 'Worker: http://127.0.0.1:18081/actuator/health'
 Write-Host 'Logs:   .runtime\'
 Write-Host 'Stop:   .\scripts\stop-dev.ps1'

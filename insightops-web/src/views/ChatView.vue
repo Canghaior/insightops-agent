@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 import { cancelChat, streamChat, type ChatStreamEvent, type ModelUsage } from '@/api/agentStream'
 import { getChatSessionHistory, type ChatHistoryMessage } from '@/api/chatHistory'
@@ -10,6 +11,8 @@ import {
   type ConversationSummary,
 } from '@/api/conversations'
 import MarkdownContent from '@/components/MarkdownContent.vue'
+
+const route = useRoute()
 
 type StreamStatus = 'idle' | 'connecting' | 'streaming' | 'completed' | 'cancelled' | 'error'
 
@@ -327,7 +330,10 @@ function formatMessageTime(value: string) {
   }).format(new Date(value))
 }
 
-onMounted(() => void loadConversations(true))
+onMounted(() => {
+  if (typeof route.query.question === 'string') question.value = route.query.question.slice(0, 4000)
+  void loadConversations(true)
+})
 
 onBeforeUnmount(() => {
   const activeRunId = runId.value

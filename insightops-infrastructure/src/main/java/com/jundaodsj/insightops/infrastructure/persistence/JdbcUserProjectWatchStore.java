@@ -65,6 +65,17 @@ public class JdbcUserProjectWatchStore implements UserProjectWatchStore {
                 .param("enabled", enabled)
                 .param("now", OffsetDateTime.ofInstant(now, ZoneOffset.UTC))
                 .update();
+        if (enabled) {
+            jdbcClient.sql("""
+                    update tracked_project
+                    set next_sync_at = least(coalesce(next_sync_at, :now), :now), updated_at = :now
+                    where id = :projectId and workspace_id = :workspaceId
+                    """)
+                    .param("now", OffsetDateTime.ofInstant(now, ZoneOffset.UTC))
+                    .param("projectId", projectId)
+                    .param("workspaceId", actor.workspaceId())
+                    .update();
+        }
         return list(actor).stream().filter(project -> project.id().equals(projectId)).findFirst();
     }
 

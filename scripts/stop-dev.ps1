@@ -37,6 +37,7 @@ function Stop-ManagedProcess([string]$pidFile, [string]$expectedCommand, [string
 
 Set-Location $projectRoot
 Stop-ManagedProcess (Join-Path $runtimeDir 'web.pid') 'vite' 'InsightOps Web'
+Stop-ManagedProcess (Join-Path $runtimeDir 'worker.pid') 'insightops-worker' 'InsightOps Worker'
 Stop-ManagedProcess (Join-Path $runtimeDir 'server.pid') 'insightops-server' 'InsightOps Server'
 
 if (-not $KeepDatabase) {

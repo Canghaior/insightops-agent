@@ -18,7 +18,7 @@ onMounted(load)
 
 <template>
   <section>
-    <div class="section-heading"><div><span class="eyebrow">个人关注范围</span><h2>首批开源项目</h2></div><span class="subtle">每个账号独立保存</span></div>
+    <div class="section-heading"><div><span class="eyebrow">个人关注范围</span><h2>首批开源项目</h2></div><RouterLink class="secondary-button" to="/updates">查看项目更新</RouterLink></div>
     <p v-if="loading">加载中…</p><p v-if="error" class="stream-error">{{ error }}</p>
     <div class="project-grid">
       <article v-for="project in projects" :key="project.id" class="project-card">

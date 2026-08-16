@@ -29,6 +29,13 @@ spring:
           max-retries: ${MODEL_MAX_RETRIES:2}
 
 insightops:
+  collection:
+    enabled: ${RELEASE_COLLECTION_ENABLED:true}
+    batch-size: ${RELEASE_COLLECTION_BATCH_SIZE:3}
+    sync-interval-hours: ${RELEASE_COLLECTION_INTERVAL_HOURS:6}
+    lock-minutes: ${RELEASE_COLLECTION_LOCK_MINUTES:5}
+    initial-delay-ms: ${RELEASE_COLLECTION_INITIAL_DELAY_MS:3000}
+    poll-delay-ms: ${RELEASE_COLLECTION_POLL_DELAY_MS:30000}
   tool:
     github:
       base-url: ${GITHUB_API_BASE_URL:https://api.github.com}

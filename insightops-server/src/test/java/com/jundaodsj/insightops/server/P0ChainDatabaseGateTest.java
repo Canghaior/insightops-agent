@@ -6,6 +6,7 @@ import com.jundaodsj.insightops.conversation.application.ChatRunStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.identity.application.AccountWorkspaceStore;
 import com.jundaodsj.insightops.identity.application.AdminAccountStore;
+import com.jundaodsj.insightops.project.application.ProjectUpdateStore;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekPricingProperties;
 import com.jundaodsj.insightops.infrastructure.model.DeepSeekCostEstimator;
@@ -16,6 +17,7 @@ import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentToolExecutio
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcChatRunStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserMemoryStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcConversationManager;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcProjectUpdateStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserProjectWatchStore;
 import com.jundaodsj.insightops.model.application.ChatStreamEvent;
 import com.jundaodsj.insightops.model.application.ChatStreamSession;
@@ -72,6 +74,7 @@ class P0ChainDatabaseGateTest {
     private static JdbcUserProjectWatchStore projectWatchStore;
     private static JdbcClient jdbcClient;
     private static JdbcAdminAccountStore adminAccountStore;
+    private static JdbcProjectUpdateStore projectUpdateStore;
 
     @BeforeAll
     static void prepareIsolatedSchema() {
@@ -89,10 +92,11 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(9);
+        assertThat(migration.migrationsExecuted).isEqualTo(10);
 
         jdbcClient = JdbcClient.create(dataSource);
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
+        projectUpdateStore = new JdbcProjectUpdateStore(jdbcClient, objectMapper());
         DeepSeekCostEstimator estimator = new DeepSeekCostEstimator(pricing());
         runStore = new JdbcChatRunStore(jdbcClient, estimator);
         runQuery = new JdbcAgentRunQuery(jdbcClient, objectMapper());
@@ -113,6 +117,56 @@ class P0ChainDatabaseGateTest {
                 new JdbcAgentToolExecutionStore(jdbcClient),
                 new GitHubReleaseEvidenceFormatter(),
                 objectMapper());
+    }
+
+    @Test
+    void shouldPersistDeduplicateAndReadProjectUpdates() {
+        Instant now = Instant.parse("2026-08-17T09:00:00Z");
+        List<ProjectUpdateStore.TrackedProject> claimed = projectUpdateStore.claimDueProjects(
+                now, Duration.ofMinutes(5), 3);
+        ProjectUpdateStore.TrackedProject spring = claimed.stream()
+                .filter(project -> project.catalogProjectId().equals("spring-ai"))
+                .findFirst().orElseThrow();
+        UUID secondUserId = UUID.randomUUID();
+        adminAccountStore.createUser(secondUserId, ACTOR.workspaceId(), "update-member", "Update Member",
+                "$2a$12$test", "USER", "MEMBER", now);
+        ActorContext secondActor = new ActorContext(secondUserId, ACTOR.workspaceId());
+        assertThat(projectWatchStore.setEnabled(secondActor, spring.id(), true, now)).isPresent();
+        GitHubRelease release = new GitHubRelease(
+                "spring-ai", "Spring AI", "v2.1.0", "Spring AI 2.1.0",
+                now.minus(Duration.ofDays(1)),
+                "https://github.com/spring-projects/spring-ai/releases/tag/v2.1.0",
+                false, "New agent observability and model integrations.");
+
+        ProjectUpdateStore.SyncResult first = projectUpdateStore.completeSuccessfulSync(
+                spring, List.of(release), now, now.plus(Duration.ofHours(6)));
+        assertThat(first.newEventCount()).isEqualTo(1);
+        assertThat(projectUpdateStore.unreadCount(ACTOR)).isEqualTo(1);
+        assertThat(projectUpdateStore.unreadCount(secondActor)).isEqualTo(1);
+
+        ProjectUpdateStore.UpdatePage updates = projectUpdateStore.listUpdates(ACTOR, 0, 20, null, true);
+        assertThat(updates.items()).singleElement().satisfies(update -> {
+            assertThat(update.versionTag()).isEqualTo("v2.1.0");
+            assertThat(update.sourceUrl()).contains("github.com/spring-projects/spring-ai/releases/tag/");
+            assertThat(update.read()).isFalse();
+        });
+        UUID eventId = updates.items().getFirst().eventId();
+        assertThat(projectUpdateStore.markRead(ACTOR, eventId, now.plusSeconds(1))).isTrue();
+        assertThat(projectUpdateStore.unreadCount(ACTOR)).isZero();
+        assertThat(projectUpdateStore.unreadCount(secondActor)).isEqualTo(1);
+
+        assertThat(projectUpdateStore.requestSync(ACTOR.workspaceId(), spring.id(), now.plusSeconds(2))).isTrue();
+        ProjectUpdateStore.TrackedProject secondClaim = projectUpdateStore.claimDueProjects(
+                now.plusSeconds(2), Duration.ofMinutes(5), 3).stream()
+                .filter(project -> project.id().equals(spring.id())).findFirst().orElseThrow();
+        ProjectUpdateStore.SyncResult second = projectUpdateStore.completeSuccessfulSync(
+                secondClaim, List.of(release), now.plusSeconds(3), now.plus(Duration.ofHours(6)));
+        assertThat(second.newEventCount()).isZero();
+        assertThat(projectUpdateStore.listUpdates(ACTOR, 0, 20, null, false).total()).isEqualTo(1);
+        assertThat(projectUpdateStore.collectionStatus(ACTOR.workspaceId()))
+                .filteredOn(status -> status.projectId().equals(spring.id()))
+                .singleElement().extracting(ProjectUpdateStore.CollectionStatus::status)
+                .isEqualTo("SUCCEEDED");
     }
 
     @Test

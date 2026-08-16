@@ -35,6 +35,17 @@ export interface CreateUserInput {
   workspaceRole: WorkspaceRole
 }
 
+export interface CollectionStatus {
+  projectId: string
+  projectName: string
+  repositoryOwner: string
+  status: 'NEVER' | 'RUNNING' | 'SUCCEEDED' | 'RETRY_WAIT' | 'FAILED'
+  lastSyncAt: string | null
+  nextSyncAt: string | null
+  consecutiveFailures: number
+  lastError: string | null
+}
+
 export async function listUsers(): Promise<ManagedUser[]> {
   const response = await apiClient.get<{ data: ManagedUser[] }>('/admin/users')
   return response.data.data
@@ -62,4 +73,13 @@ export async function resetPassword(userId: string, temporaryPassword: string): 
 export async function listAudit(limit = 100): Promise<AccountAudit[]> {
   const response = await apiClient.get<{ data: AccountAudit[] }>('/admin/audit', { params: { limit } })
   return response.data.data
+}
+
+export async function listCollectionStatus(): Promise<CollectionStatus[]> {
+  const response = await apiClient.get<{ data: CollectionStatus[] }>('/admin/collection')
+  return response.data.data
+}
+
+export async function requestCollectionSync(projectId: string): Promise<void> {
+  await apiClient.post(`/admin/collection/${projectId}/sync`)
 }

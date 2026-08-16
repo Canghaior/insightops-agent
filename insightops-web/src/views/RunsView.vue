@@ -10,6 +10,7 @@ import {
   type RunSummary,
   type RunToolCall,
 } from '@/api/runs'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -211,7 +212,7 @@ onMounted(loadRuns)
           </section>
           <section v-if="selectedRun.answer" class="detail-block">
             <span class="eyebrow">Final Answer</span>
-            <p class="detail-answer">{{ selectedRun.answer }}</p>
+            <MarkdownContent class="detail-answer" :content="selectedRun.answer" />
           </section>
           <section v-if="selectedRun.failureCode" class="detail-block detail-failure">
             <span class="eyebrow">Failure</span>

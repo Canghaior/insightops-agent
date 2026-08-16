@@ -84,6 +84,16 @@ a { color: inherit; text-decoration: none; }
 .suggestion-list button { color: #c3cdcf; border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 9px 13px; cursor: pointer; }
 .suggestion-list button:hover { border-color: var(--accent); }
 .suggestion-list button:disabled { opacity: .45; cursor: not-allowed; }
+.conversation-thread { max-height: min(66vh, 760px); min-height: 260px; overflow-y: auto; overscroll-behavior: contain; scroll-behavior: smooth; display: grid; align-content: start; gap: 16px; margin-bottom: 16px; padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: rgba(8, 13, 15, .52); scrollbar-color: rgba(103, 212, 180, .38) transparent; }
+.conversation-thread .answer-panel { margin: 0; }
+.chat-message { min-width: 0; }
+.user-message { width: min(82%, 760px); justify-self: end; padding: 15px 18px; border: 1px solid rgba(103, 212, 180, .24); border-radius: 16px 16px 4px 16px; background: linear-gradient(145deg, rgba(30, 75, 65, .9), rgba(20, 49, 44, .94)); box-shadow: 0 12px 35px rgba(0, 0, 0, .15); }
+.user-message header { display: flex; align-items: center; justify-content: space-between; gap: 14px; color: #a8e1d2; font-size: 11px; }
+.user-message time { color: rgba(210, 236, 231, .56); font-size: 9px; }
+.user-message p { margin: 9px 0 0; color: #f2f8f6; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.history-boundary, .chat-history-state { margin: 0 0 12px; color: var(--muted); text-align: center; font-size: 11px; }
+.conversation-empty { display: grid; place-items: center; min-height: 180px; margin-bottom: 16px; padding: 28px; border: 1px dashed var(--line); border-radius: 18px; color: #c7d1d3; text-align: center; background: rgba(12, 18, 20, .35); }
+.conversation-empty p { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
 .answer-panel { border: 1px solid rgba(103, 212, 180, .2); background: linear-gradient(145deg, rgba(21, 35, 35, .98), rgba(15, 22, 25, .98)); border-radius: 18px; padding: 24px; margin: 0 0 16px; box-shadow: 0 18px 50px rgba(0, 0, 0, .16); }
 .answer-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .answer-heading h3 { margin: 7px 0 0; font-size: 23px; }
@@ -95,7 +105,21 @@ a { color: inherit; text-decoration: none; }
 .stream-status.is-completed { color: #8cddb1; }
 .stream-status.is-cancelled { color: #efb96b; }
 .stream-status.is-error { color: #ff8f8f; }
-.answer-content { min-height: 90px; padding: 22px 0 6px; color: #e6eeee; white-space: pre-wrap; line-height: 1.85; overflow-wrap: anywhere; }
+.answer-content { min-height: 90px; padding: 22px 0 6px; color: #e6eeee; line-height: 1.85; overflow-wrap: anywhere; }
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content p { margin: 0 0 14px; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3 { margin: 20px 0 10px; color: #f0f6f5; line-height: 1.35; }
+.markdown-content h1 { font-size: 24px; }
+.markdown-content h2 { font-size: 21px; }
+.markdown-content h3 { font-size: 18px; }
+.markdown-content ul, .markdown-content ol { margin: 8px 0 16px; padding-left: 24px; }
+.markdown-content li { margin: 4px 0; }
+.markdown-content a { color: var(--mint); text-decoration: underline; text-underline-offset: 3px; }
+.markdown-content code { padding: 2px 6px; border: 1px solid var(--line); border-radius: 5px; background: #091211; color: #b7e7d9; }
+.markdown-content pre { overflow-x: auto; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #091211; }
+.markdown-content pre code { padding: 0; border: 0; background: transparent; }
+.markdown-content blockquote { margin: 12px 0; padding: 4px 0 4px 14px; border-left: 3px solid var(--mint); color: var(--muted); }
 .stream-cursor { width: 8px; height: 1.1em; display: inline-block; vertical-align: -.15em; background: var(--accent); margin-left: 3px; animation: stream-blink .75s steps(1) infinite; }
 .answer-skeleton { display: grid; gap: 11px; padding: 27px 0 14px; }
 .answer-skeleton span { display: block; height: 10px; border-radius: 99px; background: linear-gradient(90deg, #202d2e 25%, #2c4240 50%, #202d2e 75%); background-size: 200% 100%; animation: stream-shimmer 1.4s linear infinite; }
@@ -115,6 +139,7 @@ a { color: inherit; text-decoration: none; }
 .source-list a { color: #7bd9be; font-size: 10px; overflow-wrap: anywhere; text-decoration: none; }
 .source-list a:hover { text-decoration: underline; }
 .composer { padding: 18px; }
+.chat-composer { position: sticky; z-index: 4; bottom: 14px; box-shadow: 0 18px 60px rgba(0, 0, 0, .38); }
 .composer textarea { width: 100%; border: 0; resize: vertical; color: white; background: transparent; outline: none; }
 .composer textarea:disabled { opacity: .72; }
 .composer > div { display: flex; justify-content: space-between; align-items: center; padding-top: 13px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
@@ -186,7 +211,7 @@ a { color: inherit; text-decoration: none; }
 .detail-metrics code { font-size: 9px; }
 .detail-block { margin-top: 15px; padding: 19px; border: 1px solid var(--line); border-radius: 13px; background: rgba(25, 33, 37, .7); }
 .detail-block > p { margin: 10px 0 0; color: #cad4d6; line-height: 1.7; }
-.detail-answer { white-space: pre-wrap; }
+.detail-answer { white-space: normal; }
 .detail-failure { border-color: rgba(255, 120, 120, .2); }
 .detail-failure .eyebrow, .detail-failure p { color: #ffaaaa; }
 .detail-block-heading { display: flex; justify-content: space-between; }
@@ -229,6 +254,8 @@ a { color: inherit; text-decoration: none; }
   .alpha-chip { display: none; }
   .metric-grid, .project-grid, .flow-list { grid-template-columns: 1fr; }
   .stream-metrics { grid-template-columns: 1fr 1fr; }
+  .conversation-thread { max-height: 62vh; padding: 12px; }
+  .user-message { width: 94%; }
   .runs-heading { align-items: flex-start; gap: 16px; }
   .run-controls { flex-direction: column; }
   .run-table-head { display: none; }

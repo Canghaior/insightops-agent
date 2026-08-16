@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.server;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.project.application.P0TrackedProjectCatalog;
+import com.jundaodsj.insightops.server.chat.ReleaseQuestionRouter;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -26,6 +27,7 @@ class P0EvaluationDatasetTest {
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ReleaseQuestionRouter releaseQuestionRouter = new ReleaseQuestionRouter();
 
     @Test
     void p0DatasetContainsTwentyValidReleaseQuestions() throws IOException {
@@ -54,7 +56,8 @@ class P0EvaluationDatasetTest {
             assertThat(requiredText(item, "status")).isIn(ALLOWED_STATUSES);
             assertThat(item.path("allowInsufficientEvidence").isBoolean()).isTrue();
 
-            assertThat(requiredTextArray(item, "projectIds"))
+            List<String> projectIds = requiredTextArray(item, "projectIds");
+            assertThat(projectIds)
                     .isNotEmpty()
                     .allMatch(PROJECT_IDS::contains);
             assertThat(requiredTextArray(item, "expectedTools"))
@@ -69,6 +72,21 @@ class P0EvaluationDatasetTest {
             assertThat(timeWindow.isNull() || timeWindow.canConvertToInt()).isTrue();
             if (timeWindow.canConvertToInt()) {
                 assertThat(timeWindow.intValue()).isBetween(1, 365);
+            }
+
+            var routed = releaseQuestionRouter.route(question);
+            assertThat(routed).as("P0 question must route to the release tool: %s", id).isPresent();
+            assertThat(routed.orElseThrow().projectIds())
+                    .as("routed projects must match the evaluation contract: %s", id)
+                    .containsExactlyElementsOf(projectIds);
+            if (timeWindow.isNull()) {
+                assertThat(routed.orElseThrow().timeWindowDays())
+                        .as("time window must match the evaluation contract: %s", id)
+                        .isNull();
+            } else {
+                assertThat(routed.orElseThrow().timeWindowDays())
+                        .as("time window must match the evaluation contract: %s", id)
+                        .isEqualTo(timeWindow.intValue());
             }
         }
     }

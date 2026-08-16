@@ -13,7 +13,7 @@ onMounted(() => systemStore.refresh())
   <section class="page-grid">
     <article class="hero-card">
       <span class="eyebrow">今日研究入口</span>
-      <h2>持续追踪，而不是临时搜索</h2>
+      <h2>按需研究，不做无证据判断</h2>
       <p>围绕版本变化、兼容风险和迁移建议，形成带来源证据的技术判断。</p>
       <RouterLink class="primary-action" to="/chat">开始一次研究问答 →</RouterLink>
     </article>
@@ -35,7 +35,7 @@ onMounted(() => systemStore.refresh())
 
     <div class="metric-grid">
       <article class="metric"><span>跟踪项目</span><strong>3</strong><small>P0 固定范围</small></article>
-      <article class="metric"><span>研究问题集</span><strong>20</strong><small>用于回归评测</small></article>
+      <article class="metric"><span>研究问题集</span><strong>20</strong><small>用于场景与路由回归</small></article>
       <article class="metric"><span>数据来源</span><strong>1</strong><small>GitHub Releases</small></article>
     </div>
 
@@ -44,8 +44,8 @@ onMounted(() => systemStore.refresh())
       <ol class="flow-list">
         <li><span>01</span><div><strong>按需查询</strong><p>从 GitHub 官方 API 获取三个项目的 Release。</p></div></li>
         <li><span>02</span><div><strong>执行审计</strong><p>保存 Run、Step、Tool Call 与来源引用。</p></div></li>
-        <li><span>03</span><div><strong>Agent 研究</strong><p>DeepSeek 调用工具并生成可追溯回答。</p></div></li>
-        <li><span>04</span><div><strong>评测</strong><p>用 20 个问题检查正确性和引用质量。</p></div></li>
+        <li><span>03</span><div><strong>证据增强</strong><p>后端受控查询 Release，DeepSeek 基于证据生成回答。</p></div></li>
+        <li><span>04</span><div><strong>契约检查</strong><p>用 20 个问题检查项目识别、工具参数和来源边界。</p></div></li>
       </ol>
     </article>
   </section>

@@ -13,6 +13,7 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -27,6 +28,88 @@ public class JdbcChatRunStore implements ChatRunStore {
     public JdbcChatRunStore(JdbcClient jdbcClient, DeepSeekCostEstimator costEstimator) {
         this.jdbcClient = jdbcClient;
         this.costEstimator = costEstimator;
+    }
+
+    @Override
+    public List<StoredMessage> recentMessages(UUID sessionId, int limit) {
+        if (sessionId == null) {
+            return List.of();
+        }
+        if (limit < 1 || limit > 20) {
+            throw new IllegalArgumentException("message history limit must be between 1 and 20");
+        }
+        return jdbcClient.sql("""
+                        select role, content
+                        from (
+                            select message.role, message.content, message.sequence_no
+                            from conversation_message message
+                            join conversation_session session on session.id = message.session_id
+                            where message.session_id = :sessionId
+                              and session.workspace_id = :workspaceId
+                              and session.status = 'ACTIVE'
+                            order by message.sequence_no desc
+                            limit :limit
+                        ) recent
+                        order by sequence_no
+                        """)
+                .param("sessionId", sessionId)
+                .param("workspaceId", ALPHA_WORKSPACE_ID)
+                .param("limit", limit)
+                .query((resultSet, rowNum) -> new StoredMessage(
+                        resultSet.getString("role"),
+                        resultSet.getString("content")))
+                .list();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<SessionHistory> sessionHistory(UUID sessionId, int limit) {
+        if (sessionId == null) {
+            return Optional.empty();
+        }
+        if (limit < 1 || limit > 200) {
+            throw new IllegalArgumentException("session history limit must be between 1 and 200");
+        }
+        Optional<String> title = jdbcClient.sql("""
+                        select title
+                        from conversation_session
+                        where id = :sessionId
+                          and workspace_id = :workspaceId
+                          and status = 'ACTIVE'
+                        """)
+                .param("sessionId", sessionId)
+                .param("workspaceId", ALPHA_WORKSPACE_ID)
+                .query(String.class)
+                .optional();
+        if (title.isEmpty()) {
+            return Optional.empty();
+        }
+
+        List<HistoryMessage> latestFirst = jdbcClient.sql("""
+                        select id, role, content, sequence_no, created_at
+                        from conversation_message
+                        where session_id = :sessionId
+                        order by sequence_no desc
+                        limit :limit
+                        """)
+                .param("sessionId", sessionId)
+                .param("limit", limit + 1)
+                .query((resultSet, rowNum) -> new HistoryMessage(
+                        resultSet.getObject("id", UUID.class),
+                        resultSet.getString("role"),
+                        resultSet.getString("content"),
+                        resultSet.getInt("sequence_no"),
+                        resultSet.getObject("created_at", OffsetDateTime.class).toInstant()))
+                .list();
+        boolean hasEarlierMessages = latestFirst.size() > limit;
+        List<HistoryMessage> messages = new java.util.ArrayList<>(
+                latestFirst.subList(0, Math.min(latestFirst.size(), limit)));
+        java.util.Collections.reverse(messages);
+        return Optional.of(new SessionHistory(
+                sessionId,
+                title.orElseThrow(),
+                List.copyOf(messages),
+                hasEarlierMessages));
     }
 
     @Override

@@ -16,8 +16,8 @@ public record GitHubReleaseQuery(
         if (timeWindowDays != null && (timeWindowDays < 1 || timeWindowDays > 365)) {
             throw new IllegalArgumentException("timeWindowDays must be between 1 and 365");
         }
-        if (maxReleasesPerProject < 1 || maxReleasesPerProject > 10) {
-            throw new IllegalArgumentException("maxReleasesPerProject must be between 1 and 10");
+        if (maxReleasesPerProject < 1 || maxReleasesPerProject > 30) {
+            throw new IllegalArgumentException("maxReleasesPerProject must be between 1 and 30");
         }
     }
 }

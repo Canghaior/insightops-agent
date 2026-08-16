@@ -10,6 +10,7 @@ import com.jundaodsj.insightops.model.application.ModelCallException;
 import com.jundaodsj.insightops.model.application.ModelUsage;
 import com.jundaodsj.insightops.model.application.StreamingChatModelGateway;
 import com.jundaodsj.insightops.server.chat.ChatStreamSessionRegistry;
+import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
 import com.jundaodsj.insightops.server.chat.ReleaseToolService;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolErrorCode;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolException;
@@ -56,18 +57,21 @@ public class ChatStreamController {
     private final DeepSeekModelProperties modelProperties;
     private final ChatRunStore chatRunStore;
     private final ReleaseToolService releaseToolService;
+    private final P0ChatGuardrail guardrail;
 
     public ChatStreamController(
             StreamingChatModelGateway streamingGateway,
             ChatStreamSessionRegistry sessionRegistry,
             DeepSeekModelProperties modelProperties,
             ChatRunStore chatRunStore,
-            ReleaseToolService releaseToolService) {
+            ReleaseToolService releaseToolService,
+            P0ChatGuardrail guardrail) {
         this.streamingGateway = streamingGateway;
         this.sessionRegistry = sessionRegistry;
         this.modelProperties = modelProperties;
         this.chatRunStore = chatRunStore;
         this.releaseToolService = releaseToolService;
+        this.guardrail = guardrail;
     }
 
     @PostMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -78,11 +82,23 @@ public class ChatStreamController {
         String runId = runUuid.toString();
         String traceId = (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE);
         Instant startedAt = Instant.now();
+        String userMessage;
+        try {
+            userMessage = guardrail.normalizeInput(body.message());
+        }
+        catch (P0ChatGuardrail.GuardrailViolation exception) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Chat input rejected by safety policy");
+        }
+        List<ChatRunStore.StoredMessage> history = body.sessionId() == null
+                ? List.of()
+                : chatRunStore.recentMessages(body.sessionId(), 12);
         UUID sessionId = chatRunStore.startRun(
                 runUuid,
                 body.sessionId(),
                 traceId,
-                body.message(),
+                userMessage,
                 startedAt);
         AtomicLong sequence = new AtomicLong();
         StringBuffer answer = new StringBuffer();
@@ -126,7 +142,8 @@ public class ChatStreamController {
         try {
             toolEvidence = releaseToolService.execute(
                     runUuid,
-                    body.message(),
+                    userMessage,
+                    previousUserQuestions(history),
                     new ReleaseToolService.ToolProgressListener() {
                         @Override
                         public void onStarted(UUID toolCallId, String toolName) {
@@ -176,18 +193,33 @@ public class ChatStreamController {
             return emitter;
         }
 
-        String systemPrompt = SYSTEM_PROMPT + toolEvidence
+        String systemPrompt = SYSTEM_PROMPT + guardrail.systemPolicy() + toolEvidence
                 .map(ReleaseToolService.ToolEvidence::systemPromptAppendix)
                 .orElse("");
         List<String> citations = toolEvidence
                 .map(ReleaseToolService.ToolEvidence::sourceUrls)
                 .orElseGet(List::of);
+        try {
+            guardrail.verifyTrustedReleaseSources(citations);
+        }
+        catch (P0ChatGuardrail.GuardrailViolation exception) {
+            failRunSafely(runUuid, answer, exception.code());
+            send(emitter, ChatSseEvent.error(
+                    runId,
+                    sessionId,
+                    sequence.incrementAndGet(),
+                    traceId,
+                    exception.code()));
+            sessionRegistry.complete(runId);
+            emitter.complete();
+            return emitter;
+        }
 
         try {
             var session = streamingGateway.stream(
                     new ChatModelRequest(
                             systemPrompt,
-                            body.message(),
+                            guardrail.contextualUserPrompt(history, userMessage),
                             modelProperties.temperature(),
                             modelProperties.maxOutputTokens()),
                     new ChatStreamListener() {
@@ -266,6 +298,14 @@ public class ChatStreamController {
             emitter.complete();
         }
         return emitter;
+    }
+
+    private static String previousUserQuestions(List<ChatRunStore.StoredMessage> history) {
+        return history.stream()
+                .filter(message -> "USER".equals(message.role()))
+                .map(ChatRunStore.StoredMessage::content)
+                .reduce((ignored, latest) -> latest)
+                .orElse("");
     }
 
     private String toolErrorCode(GitHubToolErrorCode code) {

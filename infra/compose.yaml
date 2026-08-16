@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-insightops}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-insightops_dev}
     ports:
-      - "${POSTGRES_PORT:-55432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
     volumes:
       - insightops-postgres-data:/var/lib/postgresql
     healthcheck:

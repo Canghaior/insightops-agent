@@ -44,7 +44,17 @@ public class ReleaseToolService {
             UUID runId,
             String question,
             ToolProgressListener listener) {
-        Optional<GitHubReleaseQuery> routed = router.route(question);
+        return execute(runId, question, "", listener);
+    }
+
+    public Optional<ToolEvidence> execute(
+            UUID runId,
+            String question,
+            String previousUserQuestions,
+            ToolProgressListener listener) {
+        Optional<GitHubReleaseQuery> routed = router.routeWithProjectContext(
+                question,
+                previousUserQuestions == null ? "" : previousUserQuestions);
         if (routed.isEmpty()) {
             return Optional.empty();
         }

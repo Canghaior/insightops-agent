@@ -5,8 +5,14 @@ import com.jundaodsj.insightops.tool.application.github.GitHubReleaseQuery;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseResult;
 import org.springframework.stereotype.Component;
 
+import java.util.regex.Pattern;
+
 @Component
 public class GitHubReleaseEvidenceFormatter {
+
+    private static final Pattern MARKDOWN_LINK = Pattern.compile(
+            "\\[([^\\]]+)]\\((?i:https?://[^)]+)\\)");
+    private static final Pattern BARE_HTTP_URL = Pattern.compile("(?i)https?://\\S+");
 
     public String format(GitHubReleaseQuery query, GitHubReleaseResult result) {
         StringBuilder evidence = new StringBuilder("""
@@ -20,6 +26,18 @@ public class GitHubReleaseEvidenceFormatter {
                 .append(query.timeWindowDays() == null ? "最近可用版本" : "最近 " + query.timeWindowDays() + " 天")
                 .append('\n');
         evidence.append("抓取时间：").append(result.fetchedAt()).append('\n');
+        evidence.append("每项目证据条数：");
+        for (String projectId : query.projectIds()) {
+            long count = result.releases().stream()
+                    .filter(release -> projectId.equals(release.projectId()))
+                    .count();
+            evidence.append(projectId).append('=').append(count).append(' ');
+        }
+        evidence.append("（回答中的数量必须使用这里的计数）\n");
+        if (result.truncated()) {
+            evidence.append("证据完整性：结果达到单项目上限，后续 Release 未进入本次证据；")
+                    .append("不得声称这是时间窗口内的完整列表或据此计算精确发布频率。\n");
+        }
         if (result.releases().isEmpty()) {
             evidence.append("查询范围内没有找到符合口径的已发布 Release。\n");
             return evidence.toString();
@@ -33,9 +51,18 @@ public class GitHubReleaseEvidenceFormatter {
                     .append("预发布：").append(release.prerelease()).append('\n')
                     .append("官方 URL：").append(release.url()).append('\n')
                     .append("Release 正文摘录：\n")
-                    .append(release.notesExcerpt().isBlank() ? "（正文为空）" : release.notesExcerpt())
+                    .append(release.notesExcerpt().isBlank()
+                            ? "（正文为空）"
+                            : untrustedNotesWithoutLinks(release.notesExcerpt()))
                     .append('\n');
         }
         return evidence.toString();
+    }
+
+    private static String untrustedNotesWithoutLinks(String notes) {
+        String withoutMarkdownTargets = MARKDOWN_LINK.matcher(notes)
+                .replaceAll("$1 [external link omitted]");
+        return BARE_HTTP_URL.matcher(withoutMarkdownTargets)
+                .replaceAll("[external link omitted]");
     }
 }

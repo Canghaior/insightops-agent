@@ -4,9 +4,14 @@ import com.jundaodsj.insightops.model.application.ModelUsage;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface ChatRunStore {
+
+    List<StoredMessage> recentMessages(UUID sessionId, int limit);
+
+    Optional<SessionHistory> sessionHistory(UUID sessionId, int limit);
 
     UUID startRun(
             UUID runId,
@@ -31,4 +36,22 @@ public interface ChatRunStore {
             String partialAnswer,
             String failureCode,
             Instant finishedAt);
+
+    record StoredMessage(String role, String content) {
+    }
+
+    record SessionHistory(
+            UUID sessionId,
+            String title,
+            List<HistoryMessage> messages,
+            boolean hasEarlierMessages) {
+    }
+
+    record HistoryMessage(
+            UUID id,
+            String role,
+            String content,
+            int sequenceNo,
+            Instant createdAt) {
+    }
 }

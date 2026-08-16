@@ -189,7 +189,7 @@ docs/product/interviews/YYYY-MM-DD-用户代号.md
 - [x] 已定义四个 Alpha 核心场景。
 - [x] 已写明 Alpha 承诺和不做范围。
 - [x] 已定义用户价值和产品质量指标。
-- [ ] 至少访谈或模拟 3 名目标用户，并根据结果更新本文档。
+- [x] 已模拟 Java 开发者、架构师和技术负责人三个目标角色，并根据结果更新本文档。
 
 ## 11. 当前决策记录
 
@@ -202,3 +202,5 @@ docs/product/interviews/YYYY-MM-DD-用户代号.md
 | 首发边界 | 只读研究，不执行生产写操作 | 降低安全风险并缩小 Alpha 范围 |
 
 确认记录：2026-08-15，首发用户正式确定为 Java 开发者、架构师和技术负责人，Alpha 阶段先服务这三个角色。
+
+验证记录：2026-08-17，完成三个角色共 9 个真实页面任务。共同结论是 Release 数据适合版本初筛和变化摘要，但最终选型仍需兼容矩阵、文档、Issue/PR、性能与生产案例；详细记录见 `docs/product/interviews/` 和 `docs/testing/results/p0-three-role-alpha-2026-08-17.md`。

@@ -28,6 +28,9 @@ import java.util.List;
 @Component
 public class GitHubReleaseHttpGateway implements GitHubReleaseGateway {
 
+    private static final int PAGE_SIZE = 30;
+    private static final int MAX_PAGES = 10;
+
     private final GitHubToolProperties properties;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -61,49 +64,69 @@ public class GitHubReleaseHttpGateway implements GitHubReleaseGateway {
                 ? null
                 : fetchedAt.minus(Duration.ofDays(query.timeWindowDays()));
         List<GitHubRelease> releases = new ArrayList<>();
+        boolean truncated = false;
         for (String projectId : query.projectIds()) {
             ProjectDefinition repository = P0TrackedProjectCatalog.find(projectId)
                     .orElseThrow(() -> new GitHubToolException(
                             GitHubToolErrorCode.VALIDATION_ERROR,
                             new IllegalArgumentException("Project is not in the P0 allowlist")));
-            releases.addAll(fetchProject(
+            ProjectFetchResult projectResult = fetchProject(
                     projectId,
                     repository,
                     cutoff,
                     query.maxReleasesPerProject(),
-                    query.includePrereleases()));
+                    query.includePrereleases());
+            releases.addAll(projectResult.releases());
+            truncated = truncated || projectResult.truncated();
         }
-        return new GitHubReleaseResult(releases, fetchedAt);
+        return new GitHubReleaseResult(releases, fetchedAt, truncated);
     }
 
-    private List<GitHubRelease> fetchProject(
+    private ProjectFetchResult fetchProject(
             String projectId,
             ProjectDefinition repository,
             Instant cutoff,
             int maxReleases,
             boolean includePrereleases) {
-        URI uri = URI.create(properties.baseUrl()
-                + "/repos/" + repository.repositoryOwner() + "/" + repository.repositoryName()
-                + "/releases?per_page=30&page=1");
-        HttpRequest request = HttpRequest.newBuilder(uri)
-                .timeout(Duration.ofSeconds(properties.requestTimeoutSeconds()))
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", properties.apiVersion())
-                .header("User-Agent", "InsightOps-Agent/0.1")
-                .GET()
-                .build();
+        List<GitHubRelease> releases = new ArrayList<>();
         try {
-            HttpResponse<String> response = httpClient.send(
-                    request,
-                    HttpResponse.BodyHandlers.ofString());
-            validateStatus(response.statusCode());
-            return parseReleases(
-                    projectId,
-                    repository,
-                    response.body(),
-                    cutoff,
-                    maxReleases,
-                    includePrereleases);
+            for (int page = 1; page <= MAX_PAGES; page++) {
+                URI uri = URI.create(properties.baseUrl()
+                        + "/repos/" + repository.repositoryOwner() + "/" + repository.repositoryName()
+                        + "/releases?per_page=" + PAGE_SIZE + "&page=" + page);
+                HttpRequest request = HttpRequest.newBuilder(uri)
+                        .timeout(Duration.ofSeconds(properties.requestTimeoutSeconds()))
+                        .header("Accept", "application/vnd.github+json")
+                        .header("X-GitHub-Api-Version", properties.apiVersion())
+                        .header("User-Agent", "InsightOps-Agent/0.1")
+                        .GET()
+                        .build();
+                HttpResponse<String> response = httpClient.send(
+                        request,
+                        HttpResponse.BodyHandlers.ofString());
+                validateStatus(response.statusCode());
+                PageResult parsed = parsePage(
+                        projectId,
+                        repository,
+                        response.body(),
+                        cutoff,
+                        includePrereleases);
+                int remaining = maxReleases - releases.size();
+                if (parsed.releases().size() > remaining) {
+                    releases.addAll(parsed.releases().subList(0, remaining));
+                    return new ProjectFetchResult(releases, true);
+                }
+                releases.addAll(parsed.releases());
+                if (releases.size() == maxReleases) {
+                    boolean moreResultsPossible = !parsed.reachedCutoff()
+                            && parsed.rawCount() == PAGE_SIZE;
+                    return new ProjectFetchResult(releases, moreResultsPossible);
+                }
+                if (parsed.reachedCutoff() || parsed.rawCount() < PAGE_SIZE) {
+                    return new ProjectFetchResult(releases, false);
+                }
+            }
+            return new ProjectFetchResult(releases, true);
         }
         catch (HttpTimeoutException exception) {
             throw new GitHubToolException(GitHubToolErrorCode.TIMEOUT, exception);
@@ -117,12 +140,11 @@ public class GitHubReleaseHttpGateway implements GitHubReleaseGateway {
         }
     }
 
-    private List<GitHubRelease> parseReleases(
+    private PageResult parsePage(
             String projectId,
             ProjectDefinition repository,
             String responseBody,
             Instant cutoff,
-            int maxReleases,
             boolean includePrereleases) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);
@@ -130,16 +152,21 @@ public class GitHubReleaseHttpGateway implements GitHubReleaseGateway {
                 throw new IOException("GitHub Releases response is not an array");
             }
             List<GitHubRelease> releases = new ArrayList<>();
+            boolean reachedCutoff = false;
             for (JsonNode item : root) {
                 if (item.path("draft").asBoolean(false)) {
                     continue;
                 }
-                boolean prerelease = item.path("prerelease").asBoolean(false);
-                if (prerelease && !includePrereleases) {
+                Instant publishedAt = timestamp(item, "published_at", "created_at");
+                if (publishedAt == null) {
                     continue;
                 }
-                Instant publishedAt = timestamp(item, "published_at", "created_at");
-                if (publishedAt == null || cutoff != null && publishedAt.isBefore(cutoff)) {
+                if (cutoff != null && publishedAt.isBefore(cutoff)) {
+                    reachedCutoff = true;
+                    break;
+                }
+                boolean prerelease = item.path("prerelease").asBoolean(false);
+                if (prerelease && !includePrereleases) {
                     continue;
                 }
                 String tagName = item.path("tag_name").asText("");
@@ -153,11 +180,8 @@ public class GitHubReleaseHttpGateway implements GitHubReleaseGateway {
                         item.path("html_url").asText(),
                         prerelease,
                         excerpt(item.path("body").asText(""))));
-                if (releases.size() >= maxReleases) {
-                    break;
-                }
             }
-            return releases;
+            return new PageResult(root.size(), releases, reachedCutoff);
         }
         catch (IOException | RuntimeException exception) {
             if (exception instanceof GitHubToolException toolException) {
@@ -192,5 +216,11 @@ public class GitHubReleaseHttpGateway implements GitHubReleaseGateway {
         return normalized.length() <= properties.maxBodyChars()
                 ? normalized
                 : normalized.substring(0, properties.maxBodyChars()) + "…";
+    }
+
+    private record PageResult(int rawCount, List<GitHubRelease> releases, boolean reachedCutoff) {
+    }
+
+    private record ProjectFetchResult(List<GitHubRelease> releases, boolean truncated) {
     }
 }

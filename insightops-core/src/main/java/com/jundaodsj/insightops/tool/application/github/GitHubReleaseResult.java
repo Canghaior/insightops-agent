@@ -5,7 +5,12 @@ import java.util.List;
 
 public record GitHubReleaseResult(
         List<GitHubRelease> releases,
-        Instant fetchedAt) {
+        Instant fetchedAt,
+        boolean truncated) {
+
+    public GitHubReleaseResult(List<GitHubRelease> releases, Instant fetchedAt) {
+        this(releases, fetchedAt, false);
+    }
 
     public GitHubReleaseResult {
         releases = releases == null ? List.of() : List.copyOf(releases);

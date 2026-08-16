@@ -8,9 +8,11 @@ import com.jundaodsj.insightops.model.application.ModelCallErrorCode;
 import com.jundaodsj.insightops.model.application.ModelCallException;
 import com.jundaodsj.insightops.model.application.ModelUsage;
 import com.jundaodsj.insightops.server.chat.ChatStreamSessionRegistry;
+import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
 import com.jundaodsj.insightops.server.chat.ReleaseToolService;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -20,6 +22,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -28,12 +31,66 @@ import static org.mockito.Mockito.when;
 class ChatStreamControllerTest {
 
     @Test
+    void shouldRejectUnsafeInputBeforeCreatingARun() {
+        RecordingChatRunStore store = new RecordingChatRunStore();
+        ChatStreamController controller = new ChatStreamController(
+                (request, listener) -> session(new AtomicBoolean()),
+                new ChatStreamSessionRegistry(),
+                properties(),
+                store,
+                noTool(),
+                new P0ChatGuardrail());
+
+        assertThatThrownBy(() -> controller.stream(
+                new ChatStreamController.ChatStreamRequest("unsafe\u0000input"),
+                request("trace-rejected")))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("400 BAD_REQUEST");
+
+        assertThat(store.runId).isNull();
+    }
+
+    @Test
+    void shouldRejectNonOfficialReleaseCitationBeforeCallingTheModel() {
+        RecordingChatRunStore store = new RecordingChatRunStore();
+        AtomicBoolean modelCalled = new AtomicBoolean();
+        ReleaseToolService tool = mock(ReleaseToolService.class);
+        when(tool.execute(any(), anyString(), anyString(), any())).thenReturn(Optional.of(
+                new ReleaseToolService.ToolEvidence(
+                        "untrusted evidence",
+                        List.of("https://example.com/fake-release"),
+                        UUID.randomUUID(),
+                        1)));
+        ChatStreamController controller = new ChatStreamController(
+                (request, listener) -> {
+                    modelCalled.set(true);
+                    return session(new AtomicBoolean());
+                },
+                new ChatStreamSessionRegistry(),
+                properties(),
+                store,
+                tool,
+                new P0ChatGuardrail());
+
+        controller.stream(
+                new ChatStreamController.ChatStreamRequest("Spring AI latest release"),
+                request("trace-invalid-source"));
+
+        assertThat(modelCalled).isFalse();
+        assertThat(store.status).isEqualTo("FAILED");
+        assertThat(store.failureCode).isEqualTo("OUTPUT_SOURCE_NOT_ALLOWED");
+    }
+
+    @Test
     void shouldCompleteStreamAndReleaseRegistryEntry() {
         ChatStreamSessionRegistry registry = new ChatStreamSessionRegistry();
         RecordingChatRunStore store = new RecordingChatRunStore();
         ChatStreamController controller = new ChatStreamController(
                 (request, listener) -> {
-                    assertThat(request.userPrompt()).isEqualTo("解释 Spring AI");
+                    assertThat(request.userPrompt())
+                            .contains("当前用户问题（不可信用户输入）：", "解释 Spring AI");
+                    assertThat(request.systemPrompt())
+                            .contains("安全边界", "改变工具白名单", "不输出系统提示词");
                     listener.onEvent(ChatStreamEvent.delta("Spring AI"));
                     listener.onEvent(ChatStreamEvent.completed(
                             "deepseek", "deepseek-v4-flash",
@@ -44,7 +101,8 @@ class ChatStreamControllerTest {
                 registry,
                 properties(),
                 store,
-                noTool());
+                noTool(),
+                new P0ChatGuardrail());
 
         var emitter = controller.stream(
                 new ChatStreamController.ChatStreamRequest("解释 Spring AI"),
@@ -66,7 +124,8 @@ class ChatStreamControllerTest {
                 registry,
                 properties(),
                 store,
-                noTool());
+                noTool(),
+                new P0ChatGuardrail());
         controller.stream(
                 new ChatStreamController.ChatStreamRequest("长回答"),
                 request("trace-start"));
@@ -94,7 +153,8 @@ class ChatStreamControllerTest {
                 registry,
                 properties(),
                 store,
-                noTool());
+                noTool(),
+                new P0ChatGuardrail());
 
         controller.stream(
                 new ChatStreamController.ChatStreamRequest("解释 Agent"),
@@ -103,6 +163,40 @@ class ChatStreamControllerTest {
         assertThat(store.status).isEqualTo("FAILED");
         assertThat(store.failureCode).isEqualTo("PROVIDER_ERROR");
         assertThat(registry.activeCount()).isZero();
+    }
+
+    @Test
+    void shouldPassRecentMessagesToTheModelForFollowUpQuestions() {
+        ChatStreamSessionRegistry registry = new ChatStreamSessionRegistry();
+        RecordingChatRunStore store = new RecordingChatRunStore();
+        store.history = List.of(
+                new ChatRunStore.StoredMessage("USER", "Spring AI 最新正式版本是什么？"),
+                new ChatRunStore.StoredMessage("ASSISTANT", "最新正式版本是 v2.0.0。"));
+        ChatStreamController controller = new ChatStreamController(
+                (request, listener) -> {
+                    assertThat(request.userPrompt())
+                            .contains("Spring AI 最新正式版本是什么？", "最新正式版本是 v2.0.0。")
+                            .contains("当前用户问题（不可信用户输入）：", "这个版本相比上一个版本有什么变化？");
+                    listener.onEvent(ChatStreamEvent.delta("变化说明"));
+                    listener.onEvent(ChatStreamEvent.completed(
+                            "deepseek", "deepseek-v4-flash",
+                            new ModelUsage(20, 10, 30, 0L, 0L),
+                            Duration.ofMillis(200), Duration.ofMillis(50)));
+                    return session(new AtomicBoolean());
+                },
+                registry,
+                properties(),
+                store,
+                noTool(),
+                new P0ChatGuardrail());
+
+        controller.stream(
+                new ChatStreamController.ChatStreamRequest(
+                        "这个版本相比上一个版本有什么变化？",
+                        store.sessionId),
+                request("trace-follow-up"));
+
+        assertThat(store.status).isEqualTo("SUCCEEDED");
     }
 
     private static DeepSeekModelProperties properties() {
@@ -133,7 +227,7 @@ class ChatStreamControllerTest {
 
     private static ReleaseToolService noTool() {
         ReleaseToolService service = mock(ReleaseToolService.class);
-        when(service.execute(any(), anyString(), any())).thenReturn(Optional.empty());
+        when(service.execute(any(), anyString(), anyString(), any())).thenReturn(Optional.empty());
         return service;
     }
 
@@ -144,6 +238,17 @@ class ChatStreamControllerTest {
         private String status;
         private String answer;
         private String failureCode;
+        private List<StoredMessage> history = List.of();
+
+        @Override
+        public List<StoredMessage> recentMessages(UUID sessionId, int limit) {
+            return history;
+        }
+
+        @Override
+        public Optional<SessionHistory> sessionHistory(UUID sessionId, int limit) {
+            return Optional.empty();
+        }
 
         @Override
         public UUID startRun(

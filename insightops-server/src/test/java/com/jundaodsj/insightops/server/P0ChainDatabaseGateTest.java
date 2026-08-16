@@ -2,6 +2,7 @@ package com.jundaodsj.insightops.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentRunQuery;
+import com.jundaodsj.insightops.conversation.application.ChatRunStore;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekPricingProperties;
 import com.jundaodsj.insightops.infrastructure.model.DeepSeekCostEstimator;
@@ -15,6 +16,7 @@ import com.jundaodsj.insightops.server.api.ChatStreamController;
 import com.jundaodsj.insightops.server.api.TraceIdFilter;
 import com.jundaodsj.insightops.server.chat.ChatStreamSessionRegistry;
 import com.jundaodsj.insightops.server.chat.GitHubReleaseEvidenceFormatter;
+import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
 import com.jundaodsj.insightops.server.chat.ReleaseQuestionRouter;
 import com.jundaodsj.insightops.server.chat.ReleaseToolService;
 import com.jundaodsj.insightops.tool.application.github.GitHubRelease;
@@ -152,6 +154,18 @@ class P0ChainDatabaseGateTest {
             assertThat(tool.resultPayload().toString()).contains("v2.0.0");
         });
         assertThat(detail.toString()).doesNotContain("DEEPSEEK_API_KEY", "Authorization", "sk-");
+        assertThat(runStore.recentMessages(detail.sessionId(), 12))
+                .extracting(ChatRunStore.StoredMessage::role)
+                .containsExactly("USER", "ASSISTANT");
+        ChatRunStore.SessionHistory history = runStore.sessionHistory(detail.sessionId(), 100)
+                .orElseThrow();
+        assertThat(history.hasEarlierMessages()).isFalse();
+        assertThat(history.messages())
+                .extracting(ChatRunStore.HistoryMessage::role)
+                .containsExactly("USER", "ASSISTANT");
+        assertThat(history.messages())
+                .extracting(ChatRunStore.HistoryMessage::sequenceNo)
+                .containsExactly(1, 2);
     }
 
     @Test
@@ -193,7 +207,8 @@ class P0ChainDatabaseGateTest {
                 new ChatStreamSessionRegistry(),
                 properties(),
                 runStore,
-                releaseToolService);
+                releaseToolService,
+                new P0ChatGuardrail());
     }
 
     private static DeepSeekModelProperties properties() {

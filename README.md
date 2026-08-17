@@ -157,6 +157,10 @@ P0 聊天入口已启用最小 Guardrail：统一限制输入长度和控制字�
 
 系统管理员可在“知识库采集”页面查看并触发 Spring AI、LangChain4j 和 Dify 官方文档采集。Worker 严格限制官方 HTTPS 域名和路径，执行 robots.txt、DNS、重定向、页数、深度、大小、超时与频率检查，并将规范 URL、原文修订和标题感知切片去重保存到 PostgreSQL。该能力默认关闭且首次必须手动触发；本阶段不生成向量、不执行 RAG，也不调用 DeepSeek。设计边界见 [P1.4-A 官方文档知识库基础](docs/architecture/p1-official-document-knowledge-base.md)。
 
+## P1.4-B 本地向量检索
+
+系统通过 Spring AI 调用本机 Ollama `bge-m3`，将当前官方文档切片批量写入 PostgreSQL pgvector。Worker 支持租约、防重复、失败重试和模型版本隔离；系统管理员可以查看总体/分来源进度并重试失败任务。所有登录用户可调用工作区隔离的语义检索 API，每次检索都会写入 `retrieval_trace`。当前 6,135 个切片已全部向量化，三个项目的质量查询均命中对应官方文档。设计和验收结果见 [P1.4-B 本地 Embedding 与向量检索](docs/architecture/p1-vector-embedding-retrieval.md)。
+
 ## DeepSeek API Key
 
 只在未提交的根目录 `.env` 中填写：

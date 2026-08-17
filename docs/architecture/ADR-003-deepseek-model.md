@@ -1,6 +1,6 @@
 # ADR-003：P0 使用 DeepSeek 作为 Chat Model
 
-> 状态：已接受，2026-08-16 修订 Java 适配方式
+> 状态：已接受，2026-08-17 补充 P1 Embedding 决策
 > 日期：2026-08-15
 > 决策范围：P0 最小 Agent 垂直闭环
 > 决策人：项目所有者
@@ -68,6 +68,10 @@ EMBEDDING_ENABLED=false
 3. 过早接入第二个 Provider 会扩大密钥、成本、错误处理和测试范围。
 
 在完整 RAG 阶段前必须单独选定 Embedding Provider、模型、向量维度、批大小和迁移策略，并用中英文技术文档评测后再写入数据库迁移。
+
+### 2.4 P1.4-B Embedding 决策
+
+P0 的“不启用 Embedding”边界保持不变。P1.4-B 已完成独立选型并采用本机 Ollama `bge-m3`：1024 维、32 条一批、向量写入 PostgreSQL pgvector。该方案不需要新的云端 API Key，也不调用 DeepSeek；模型文件保存在 D 盘。完整实现与真实验收见 [P1.4-B 本地 Embedding 与向量检索](p1-vector-embedding-retrieval.md)。
 
 ## 3. 集成方式
 

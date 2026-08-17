@@ -91,6 +91,54 @@ export interface KnowledgeSourceStatus {
   lastJob: KnowledgeCollectionJob | null
 }
 
+export interface KnowledgeEmbeddingSourceProgress {
+  sourceId: string
+  sourceName: string
+  projectName: string
+  total: number
+  succeeded: number
+  pending: number
+  running: number
+  retryWait: number
+  failed: number
+}
+
+export interface KnowledgeEmbeddingOverview {
+  provider: string
+  model: string
+  dimensions: number
+  total: number
+  succeeded: number
+  pending: number
+  running: number
+  retryWait: number
+  failed: number
+  lastUpdatedAt: string | null
+  sources: KnowledgeEmbeddingSourceProgress[]
+}
+
+export interface KnowledgeSearchResult {
+  chunkId: string
+  projectId: string
+  projectName: string
+  sourceName: string
+  title: string
+  canonicalUrl: string
+  headingPath: string | null
+  content: string
+  language: string
+  trustTier: string
+  score: number
+}
+
+export interface KnowledgeSearchResponse {
+  query: string
+  provider: string
+  model: string
+  durationMs: number
+  results: KnowledgeSearchResult[]
+}
+
 export async function listUsers(): Promise<ManagedUser[]> {
   const response = await apiClient.get<{ data: ManagedUser[] }>('/admin/users')
   return response.data.data
@@ -145,4 +193,19 @@ export async function listKnowledgeSources(): Promise<KnowledgeSourceStatus[]> {
 
 export async function requestKnowledgeSync(sourceId: string): Promise<void> {
   await apiClient.post(`/admin/knowledge/sources/${sourceId}/sync`)
+}
+
+export async function getKnowledgeEmbeddingOverview(): Promise<KnowledgeEmbeddingOverview> {
+  const response = await apiClient.get<{ data: KnowledgeEmbeddingOverview }>('/admin/knowledge/embeddings')
+  return response.data.data
+}
+
+export async function retryKnowledgeEmbeddings(): Promise<number> {
+  const response = await apiClient.post<{ data: { resetCount: number } }>('/admin/knowledge/embeddings/retry')
+  return response.data.data.resetCount
+}
+
+export async function searchKnowledge(query: string, limit = 8): Promise<KnowledgeSearchResponse> {
+  const response = await apiClient.post<{ data: KnowledgeSearchResponse }>('/knowledge/search', { query, limit })
+  return response.data.data
 }

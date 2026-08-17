@@ -16,7 +16,12 @@ spring:
   ai:
     model:
       chat: ${SPRING_AI_MODEL_CHAT:none}
-      embedding: none
+      embedding: ${SPRING_AI_MODEL_EMBEDDING:none}
+    ollama:
+      base-url: ${EMBEDDING_BASE_URL:http://127.0.0.1:11434}
+      embedding:
+        options:
+          model: ${EMBEDDING_MODEL:bge-m3}
     openai:
       api-key: ${DEEPSEEK_API_KEY:}
       base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
@@ -29,6 +34,13 @@ spring:
           max-retries: ${MODEL_MAX_RETRIES:2}
 
 insightops:
+  knowledge:
+    embedding:
+      enabled: ${EMBEDDING_ENABLED:false}
+      provider: ${EMBEDDING_PROVIDER:ollama}
+      model: ${EMBEDDING_MODEL:bge-m3}
+      dimensions: ${EMBEDDING_DIMENSIONS:1024}
+      minimum-score: ${EMBEDDING_MINIMUM_SCORE:0.35}
   auth:
     session-days: ${AUTH_SESSION_DAYS:14}
     secure-cookie: ${AUTH_SECURE_COOKIE:false}

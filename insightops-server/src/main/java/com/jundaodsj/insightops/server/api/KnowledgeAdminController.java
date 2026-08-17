@@ -1,9 +1,12 @@
 package com.jundaodsj.insightops.server.api;
 
 import com.jundaodsj.insightops.identity.application.AccountWorkspaceStore;
+import com.jundaodsj.insightops.knowledge.application.KnowledgeEmbeddingStore;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
+import com.jundaodsj.insightops.server.knowledge.KnowledgeEmbeddingProperties;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,9 +24,36 @@ import java.util.UUID;
 @RequestMapping("/api/v1/admin/knowledge")
 public class KnowledgeAdminController {
     private final KnowledgeStore store;
+    private final KnowledgeEmbeddingStore embeddingStore;
+    private final KnowledgeEmbeddingProperties embeddingProperties;
 
-    public KnowledgeAdminController(KnowledgeStore store) {
+    @Autowired
+    public KnowledgeAdminController(KnowledgeStore store, KnowledgeEmbeddingStore embeddingStore,
+                                    KnowledgeEmbeddingProperties embeddingProperties) {
         this.store = store;
+        this.embeddingStore = embeddingStore;
+        this.embeddingProperties = embeddingProperties;
+    }
+
+    KnowledgeAdminController(KnowledgeStore store) {
+        this.store = store;
+        this.embeddingStore = null;
+        this.embeddingProperties = null;
+    }
+
+    @GetMapping("/embeddings")
+    public ApiResponse<KnowledgeEmbeddingStore.EmbeddingOverview> embeddings(HttpServletRequest request) {
+        var account = requireSystemAdmin(request);
+        return new ApiResponse<>((String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE),
+                embeddingStore.overview(account.workspaceId(), embeddingProperties.getModel()));
+    }
+
+    @PostMapping("/embeddings/retry")
+    public ApiResponse<RetryResponse> retryEmbeddings(HttpServletRequest request) {
+        var account = requireSystemAdmin(request);
+        int reset = embeddingStore.retryFailed(account.workspaceId(), embeddingProperties.getModel(), Instant.now());
+        return new ApiResponse<>((String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE),
+                new RetryResponse(reset));
     }
 
     @GetMapping("/sources")
@@ -50,5 +80,8 @@ public class KnowledgeAdminController {
                     "Knowledge administration requires a system administrator");
         }
         return account;
+    }
+
+    public record RetryResponse(int resetCount) {
     }
 }

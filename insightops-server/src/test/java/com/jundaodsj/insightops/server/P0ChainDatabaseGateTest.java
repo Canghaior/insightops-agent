@@ -21,6 +21,7 @@ import com.jundaodsj.insightops.infrastructure.persistence.JdbcConversationManag
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcProjectUpdateStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcIntelligenceStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcKnowledgeStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcKnowledgeEmbeddingStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserProjectWatchStore;
 import com.jundaodsj.insightops.infrastructure.knowledge.KnowledgeDocumentChunker;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
@@ -41,6 +42,9 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -60,6 +64,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @EnabledIfEnvironmentVariable(named = "INSIGHTOPS_CHAIN_GATE", matches = "true")
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class P0ChainDatabaseGateTest {
 
     private static final ActorContext ACTOR = new ActorContext(
@@ -82,6 +87,7 @@ class P0ChainDatabaseGateTest {
     private static JdbcProjectUpdateStore projectUpdateStore;
     private static JdbcIntelligenceStore intelligenceStore;
     private static JdbcKnowledgeStore knowledgeStore;
+    private static JdbcKnowledgeEmbeddingStore knowledgeEmbeddingStore;
 
     @BeforeAll
     static void prepareIsolatedSchema() {
@@ -99,13 +105,14 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(12);
+        assertThat(migration.migrationsExecuted).isEqualTo(13);
 
         jdbcClient = JdbcClient.create(dataSource);
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
         projectUpdateStore = new JdbcProjectUpdateStore(jdbcClient, objectMapper());
         intelligenceStore = new JdbcIntelligenceStore(jdbcClient, objectMapper());
         knowledgeStore = new JdbcKnowledgeStore(jdbcClient, objectMapper());
+        knowledgeEmbeddingStore = new JdbcKnowledgeEmbeddingStore(jdbcClient, objectMapper());
         DeepSeekCostEstimator estimator = new DeepSeekCostEstimator(pricing());
         runStore = new JdbcChatRunStore(jdbcClient, estimator);
         runQuery = new JdbcAgentRunQuery(jdbcClient, objectMapper());
@@ -129,8 +136,9 @@ class P0ChainDatabaseGateTest {
     }
 
     @Test
+    @Order(1)
     void shouldPersistDeduplicateAndReadProjectUpdates() {
-        Instant now = Instant.parse("2026-08-17T09:00:00Z");
+        Instant now = Instant.now().plusSeconds(1);
         List<ProjectUpdateStore.TrackedProject> claimed = projectUpdateStore.claimDueProjects(
                 now, Duration.ofMinutes(5), 3);
         ProjectUpdateStore.TrackedProject spring = claimed.stream()
@@ -184,6 +192,7 @@ class P0ChainDatabaseGateTest {
     }
 
     @Test
+    @Order(2)
     void shouldQueueAnalyzeNotifyAndDigestNewReleaseWithoutCrossUserLeakage() {
         Instant now = Instant.parse("2026-08-17T09:00:00Z");
         UUID springId = UUID.fromString("00000000-0000-0000-0000-000000000101");
@@ -236,6 +245,7 @@ class P0ChainDatabaseGateTest {
     }
 
     @Test
+    @Order(3)
     void shouldPersistAccountAdministrationAndAuditRecords() {
         JdbcAccountWorkspaceStore accountStore = new JdbcAccountWorkspaceStore(jdbcClient);
         accountStore.ensureBootstrapCredential("configured-admin", "Configured Admin", "bootstrap-hash");
@@ -288,6 +298,7 @@ class P0ChainDatabaseGateTest {
     }
 
     @Test
+    @Order(4)
     void shouldPersistAndReadTheCompleteToolAugmentedChain() {
         String traceId = "chain-success-" + UUID.randomUUID();
         ChatStreamController controller = controller((request, listener) -> {
@@ -355,6 +366,7 @@ class P0ChainDatabaseGateTest {
     }
 
     @Test
+    @Order(5)
     void shouldAuditUserCancellationAndTimeoutCode() {
         AtomicBoolean providerCancelled = new AtomicBoolean();
         String cancelTrace = "chain-cancel-" + UUID.randomUUID();
@@ -388,6 +400,7 @@ class P0ChainDatabaseGateTest {
     }
 
     @Test
+    @Order(6)
     void shouldIsolateConversationRunMemoryAndProjectWatchForThreeUsers() {
         ActorContext developer = actor("00000000-0000-0000-0000-000000000102");
         ActorContext architect = actor("00000000-0000-0000-0000-000000000103");
@@ -431,6 +444,7 @@ class P0ChainDatabaseGateTest {
     }
 
     @Test
+    @Order(7)
     void officialDocumentCollectionPersistsChunksAndDeduplicatesUnchangedRevisions() {
         UUID sourceId = UUID.fromString("00000000-0000-0000-0000-000000000401");
         Instant firstRun = Instant.parse("2026-08-17T10:00:00Z");
@@ -493,6 +507,30 @@ class P0ChainDatabaseGateTest {
                 .filter(source -> source.sourceId().equals(sourceId)).findFirst().orElseThrow();
         assertThat(thirdStatus.revisionCount()).isEqualTo(1);
         assertThat(thirdStatus.chunkCount()).isEqualTo(chunks.size());
+
+        Instant embeddingTime = thirdRun.plusSeconds(3);
+        assertThat(knowledgeEmbeddingStore.prepareCurrentChunks(
+                "ollama", "bge-m3", 1024, embeddingTime)).isEqualTo(chunks.size());
+        var embeddingTasks = knowledgeEmbeddingStore.claimPending(
+                "bge-m3", embeddingTime, Duration.ofMinutes(5), 20);
+        assertThat(embeddingTasks).hasSize(chunks.size());
+        float[] vector = new float[1024];
+        vector[0] = 1.0f;
+        for (var task : embeddingTasks) {
+            knowledgeEmbeddingStore.complete(task.chunkId(), "bge-m3", vector, embeddingTime.plusSeconds(1));
+        }
+        var embeddingOverview = knowledgeEmbeddingStore.overview(ACTOR.workspaceId(), "bge-m3");
+        assertThat(embeddingOverview.succeeded()).isEqualTo(chunks.size());
+        assertThat(embeddingOverview.failed()).isZero();
+        var retrieval = knowledgeEmbeddingStore.search(
+                ACTOR.workspaceId(), "bge-m3", vector, 5, 0.5);
+        assertThat(retrieval).isNotEmpty();
+        assertThat(retrieval.getFirst().canonicalUrl()).isEqualTo(page.canonicalUrl());
+        assertThat(retrieval.getFirst().score()).isGreaterThan(0.99);
+        knowledgeEmbeddingStore.recordRetrieval(ACTOR.workspaceId(), "Spring AI reference",
+                "VECTOR", retrieval.size(), 12, retrieval, embeddingTime.plusSeconds(2));
+        assertThat(jdbcClient.sql("select count(*) from retrieval_trace where retrieval_mode='VECTOR'")
+                .query(Long.class).single()).isEqualTo(1L);
     }
 
     private static ActorContext actor(String userId) {

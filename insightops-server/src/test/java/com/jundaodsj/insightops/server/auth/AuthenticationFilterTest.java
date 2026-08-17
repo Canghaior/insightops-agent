@@ -43,6 +43,14 @@ class AuthenticationFilterTest {
         assertThat(response.getStatus()).isEqualTo(200);
     }
 
+    @Test
+    void internalPrometheusScrapeDoesNotRequireAnApplicationSession() {
+        AuthenticationFilter filter = new AuthenticationFilter(mock(AuthService.class), new ObjectMapper());
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/actuator/prometheus");
+
+        assertThat(filter.shouldNotFilter(request)).isTrue();
+    }
+
     private static MockHttpServletRequest request(String path) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
         request.setCookies(new Cookie(AuthenticationFilter.COOKIE_NAME, "token"));

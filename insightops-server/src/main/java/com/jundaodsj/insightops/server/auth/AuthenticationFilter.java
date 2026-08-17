@@ -34,7 +34,8 @@ public class AuthenticationFilter extends OncePerRequestFilter {
                 || path.equals("/api/v1/auth/login")
                 || path.equals("/api/v1/system/status")
                 || path.startsWith("/actuator/health")
-                || path.equals("/actuator/info");
+                || path.equals("/actuator/info")
+                || path.equals("/actuator/prometheus");
     }
 
     @Override

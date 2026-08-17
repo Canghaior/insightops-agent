@@ -2,6 +2,10 @@
 
 [![CI](https://github.com/Canghaior/insightops-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Canghaior/insightops-agent/actions/workflows/ci.yml)
 
+## 生产化部署（P1.5 方案二）
+
+封闭 Alpha 采用单台 4 核 16 GB Linux 云服务器部署。生产编排、Caddy 自动 HTTPS、内网隔离、Prometheus/Grafana、数据库备份恢复、镜像 CI 和健康失败回滚已经配置；服务器购买、域名 DNS 和首次上线步骤见 [云服务器与 HTTPS 操作指南](docs/operations/cloud-server-and-https.md)，日常处理见 [生产运维手册](docs/operations/production-runbook.md)。真实密钥只写入服务器未提交的 `.env.prod`。
+
 面向需要持续跟踪 AI 开源项目的 Java 开发者、架构师和技术负责人的开源情报 Agent。
 
 当前处于 Alpha/P1：在 P0 GitHub Releases 真实数据链路之上，已加入登录、个人工作区隔离、账号级会话管理、长期记忆、个人项目关注、邀请制用户与权限管理、项目更新与情报分析，以及基于三个项目官方文档的本地混合检索 RAG 问答。

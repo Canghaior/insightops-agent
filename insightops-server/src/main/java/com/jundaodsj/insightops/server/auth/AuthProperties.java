@@ -9,6 +9,9 @@ public class AuthProperties {
 
     private int sessionDays = 14;
     private boolean secureCookie;
+    private int loginMaxFailures = 5;
+    private int loginWindowMinutes = 15;
+    private int loginLockMinutes = 15;
     private final Bootstrap bootstrap = new Bootstrap();
 
     public int getSessionDays() {
@@ -26,6 +29,13 @@ public class AuthProperties {
     public void setSecureCookie(boolean secureCookie) {
         this.secureCookie = secureCookie;
     }
+
+    public int getLoginMaxFailures() { return loginMaxFailures; }
+    public void setLoginMaxFailures(int value) { loginMaxFailures = value; }
+    public int getLoginWindowMinutes() { return loginWindowMinutes; }
+    public void setLoginWindowMinutes(int value) { loginWindowMinutes = value; }
+    public int getLoginLockMinutes() { return loginLockMinutes; }
+    public void setLoginLockMinutes(int value) { loginLockMinutes = value; }
 
     public Bootstrap getBootstrap() {
         return bootstrap;

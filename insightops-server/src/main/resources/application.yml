@@ -58,6 +58,9 @@ insightops:
   auth:
     session-days: ${AUTH_SESSION_DAYS:14}
     secure-cookie: ${AUTH_SECURE_COOKIE:false}
+    login-max-failures: ${AUTH_LOGIN_MAX_FAILURES:5}
+    login-window-minutes: ${AUTH_LOGIN_WINDOW_MINUTES:15}
+    login-lock-minutes: ${AUTH_LOGIN_LOCK_MINUTES:15}
     bootstrap:
       enabled: ${AUTH_BOOTSTRAP_ENABLED:false}
       username: ${AUTH_BOOTSTRAP_USERNAME:alpha-owner}

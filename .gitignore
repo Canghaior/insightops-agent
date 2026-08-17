@@ -1,5 +1,8 @@
 # Local secrets
 .env
+.env.prod
+.env.prod.*
+!.env.prod.example
 .env.local
 .env.*.local
 !.env.example
@@ -29,3 +32,5 @@ dist/
 Thumbs.db
 *.log
 .runtime/
+backups/
+.deploy/

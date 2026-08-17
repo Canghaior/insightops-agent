@@ -24,10 +24,13 @@ public class AuthController {
 
     private final AuthService authService;
     private final AccountAdminService accountAdminService;
+    private final LoginRateLimiter loginRateLimiter;
 
-    public AuthController(AuthService authService, AccountAdminService accountAdminService) {
+    public AuthController(AuthService authService, AccountAdminService accountAdminService,
+                          LoginRateLimiter loginRateLimiter) {
         this.authService = authService;
         this.accountAdminService = accountAdminService;
+        this.loginRateLimiter = loginRateLimiter;
     }
 
     @PostMapping("/login")
@@ -35,13 +38,20 @@ public class AuthController {
             @Valid @RequestBody LoginRequest body,
             HttpServletRequest request,
             HttpServletResponse response) {
+        String remoteAddress = request.getRemoteAddr();
         try {
+            loginRateLimiter.check(body.username(), remoteAddress);
             AuthService.LoginResult result = authService.login(body.username(), body.password());
+            loginRateLimiter.succeeded(body.username(), remoteAddress);
             response.addHeader(HttpHeaders.SET_COOKIE, cookie(result.token(), authService.cookieMaxAgeSeconds()));
             accountAdminService.auditSelf(result.account(), "LOGIN_SUCCEEDED");
             return new ApiResponse<>(traceId(request), view(result.account()));
         } catch (AuthService.InvalidCredentialsException exception) {
+            loginRateLimiter.failed(body.username(), remoteAddress);
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, exception.getMessage());
+        } catch (LoginRateLimiter.LoginRateLimitedException exception) {
+            response.setHeader(HttpHeaders.RETRY_AFTER, Long.toString(exception.retryAfterSeconds()));
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, exception.getMessage());
         }
     }
 

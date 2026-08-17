@@ -2,7 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
-import { cancelChat, streamChat, type ChatStreamEvent, type ModelUsage } from '@/api/agentStream'
+import {
+  cancelChat,
+  streamChat,
+  type ChatCitation,
+  type ChatStreamEvent,
+  type ModelUsage,
+} from '@/api/agentStream'
 import { getChatSessionHistory, type ChatHistoryMessage } from '@/api/chatHistory'
 import {
   deleteConversation,
@@ -36,6 +42,7 @@ interface ConversationMessage {
   retrievalCount?: number | null
   retrievalModel?: string | null
   sources?: string[]
+  citations?: ChatCitation[]
 }
 
 const question = ref('')
@@ -51,6 +58,7 @@ const hasEarlierMessages = ref(false)
 const conversationThread = ref<InstanceType<typeof globalThis.HTMLElement> | null>(null)
 let currentAssistantId = ''
 let streamController: InstanceType<typeof globalThis.AbortController> | null = null
+let historyRequestVersion = 0
 
 const suggestions = [
   '用三点解释 Spring AI 对 Java AI 应用开发的价值。',
@@ -119,7 +127,7 @@ function handleEvent(event: ChatStreamEvent) {
     return
   }
   if (event.type === 'tool_started') {
-    if (event.toolName === 'knowledge_vector_search') {
+    if (event.toolName === 'knowledge_vector_search' || event.toolName === 'knowledge_hybrid_search') {
       assistant.ragRunning = true
       return
     }
@@ -128,7 +136,7 @@ function handleEvent(event: ChatStreamEvent) {
     return
   }
   if (event.type === 'tool_completed') {
-    if (event.toolName === 'knowledge_vector_search') {
+    if (event.toolName === 'knowledge_vector_search' || event.toolName === 'knowledge_hybrid_search') {
       assistant.ragRunning = false
       assistant.retrievalCount = event.retrievalCount
       assistant.retrievalModel = event.retrievalModel
@@ -153,6 +161,7 @@ function handleEvent(event: ChatStreamEvent) {
     assistant.durationMs = event.durationMs
     assistant.timeToFirstTokenMs = event.timeToFirstTokenMs
     assistant.sources = event.sources ?? []
+    assistant.citations = event.citations ?? []
     assistant.toolRunning = false
     assistant.ragRunning = false
     void scrollConversationToBottom()
@@ -178,10 +187,11 @@ function clearStoredSession() {
 }
 
 async function loadConversations(selectLatest = false) {
+  const requestVersion = historyRequestVersion
   sessionsLoading.value = true
   try {
     conversations.value = await listConversations(true)
-    if (selectLatest && !sessionId.value) {
+    if (selectLatest && requestVersion === historyRequestVersion && !sessionId.value) {
       const latest = conversations.value.find((item) => item.status === 'ACTIVE')
       if (latest) await selectConversation(latest)
     }
@@ -190,13 +200,14 @@ async function loadConversations(selectLatest = false) {
 
 async function selectConversation(conversation: ConversationSummary) {
   if (streaming.value) return
+  const requestVersion = ++historyRequestVersion
   if (conversation.status === 'ARCHIVED') {
     await updateConversation(conversation.id, { archived: false })
     await loadConversations()
   }
   sessionId.value = conversation.id
   messages.value = []
-  await loadHistory()
+  await loadHistory(conversation.id, requestVersion)
 }
 
 async function renameConversation(conversation: ConversationSummary) {
@@ -218,12 +229,12 @@ async function removeConversation(conversation: ConversationSummary) {
   await loadConversations()
 }
 
-async function loadHistory() {
-  if (!sessionId.value) return
+async function loadHistory(selectedSessionId: string, requestVersion: number) {
   historyLoading.value = true
   historyError.value = ''
   try {
-    const history = await getChatSessionHistory(sessionId.value)
+    const history = await getChatSessionHistory(selectedSessionId)
+    if (requestVersion !== historyRequestVersion || sessionId.value !== selectedSessionId) return
     if (!history) {
       clearStoredSession()
       return
@@ -234,18 +245,23 @@ async function loadHistory() {
       content: message.content,
       createdAt: message.createdAt,
       sources: message.citations ?? [],
+      citations: message.citationDetails ?? [],
     }))
     hasEarlierMessages.value = history.hasEarlierMessages
     await scrollConversationToBottom()
   } catch {
-    historyError.value = '历史消息加载失败，可以刷新页面重试；数据库中的记录不会丢失。'
+    if (requestVersion === historyRequestVersion && sessionId.value === selectedSessionId) {
+      historyError.value = '历史消息加载失败，可以刷新页面重试；数据库中的记录不会丢失。'
+    }
   } finally {
-    historyLoading.value = false
+    if (requestVersion === historyRequestVersion) historyLoading.value = false
   }
 }
 
 function startNewConversation() {
   if (streaming.value) return
+  historyRequestVersion += 1
+  historyLoading.value = false
   clearStoredSession()
   question.value = ''
   status.value = 'idle'
@@ -279,6 +295,7 @@ async function sendQuestion() {
       status: 'connecting',
       usage: null,
       sources: [],
+      citations: [],
     },
   )
   question.value = ''
@@ -446,7 +463,7 @@ onBeforeUnmount(() => {
               <strong>{{ message.toolRunning ? '执行中' : `已获取 ${message.releaseCount ?? 0} 条 Release` }}</strong>
             </div>
             <div v-if="message.ragRunning || message.retrievalCount != null" class="tool-summary" :class="{ 'is-running': message.ragRunning }">
-              <span>RAG · knowledge_vector_search</span>
+              <span>RAG · knowledge_hybrid_search</span>
               <strong>{{ message.ragRunning
                 ? '正在生成查询向量并检索'
                 : message.retrievalModel === 'unavailable'
@@ -469,7 +486,24 @@ onBeforeUnmount(() => {
               <div><dt>总耗时</dt><dd>{{ message.durationMs ?? '—' }} ms</dd></div>
               <div><dt>Token</dt><dd>{{ message.usage.totalTokens ?? '—' }}</dd></div>
             </dl>
-            <div v-if="message.sources?.length" class="source-list">
+            <div v-if="message.citations?.length" class="source-list">
+              <strong>结构化官方引用</strong>
+              <div class="citation-grid">
+                <a
+                  v-for="citation in message.citations"
+                  :key="`${citation.label}-${citation.url}`"
+                  class="citation-card"
+                  :href="citation.url"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span>{{ citation.label }} · {{ citation.sourceType === 'GITHUB_RELEASE' ? 'Release' : citation.project }}</span>
+                  <b>{{ citation.heading || citation.title }}</b>
+                  <small v-if="citation.score != null">融合得分 {{ citation.score.toFixed(3) }}</small>
+                </a>
+              </div>
+            </div>
+            <div v-else-if="message.sources?.length" class="source-list">
               <strong>{{ sourceHeading(message) }}</strong>
               <a v-for="source in message.sources" :key="source" :href="source" target="_blank" rel="noreferrer">
                 {{ source }}
@@ -514,7 +548,8 @@ onBeforeUnmount(() => {
         <li>多轮问题与回答连续展示</li>
         <li>刷新后从数据库恢复会话</li>
         <li>复用最近 12 条消息理解追问</li>
-        <li>bge-m3 本地向量检索官方文档</li>
+        <li>bge-m3 + PostgreSQL 全文混合检索</li>
+        <li>RRF 融合排序与结构化引用卡片</li>
         <li>DeepSeek 基于证据生成并附官方来源</li>
         <li>记录 Token、耗时与 TraceId</li>
         <li>用户取消立即终止</li>

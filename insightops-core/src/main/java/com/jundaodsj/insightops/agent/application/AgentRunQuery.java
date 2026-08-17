@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.agent.application;
 
 import com.jundaodsj.insightops.identity.application.ActorContext;
+import com.jundaodsj.insightops.conversation.application.ChatCitation;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -60,6 +61,7 @@ public interface AgentRunQuery {
             Instant finishedAt,
             Instant createdAt,
             List<String> sources,
+            List<ChatCitation> citationDetails,
             List<RunStep> steps,
             List<RunToolCall> toolCalls) {
     }

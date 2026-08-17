@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentRunQuery;
+import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -70,6 +71,7 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                                model_provider, model_name, tool_rounds, prompt_tokens,
                                completion_tokens, estimated_cost_cny, failure_code,
                                failure_message, pricing_effective_date, citations::text as citations,
+                               citation_details::text as citation_details,
                                greatest(0, extract(epoch from (coalesce(finished_at, now()) -
                                    coalesce(started_at, created_at))) * 1000)::bigint as duration_ms,
                                started_at, finished_at, created_at
@@ -119,7 +121,8 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                 value.promptTokens(), value.completionTokens(), value.estimatedCostCny(),
                 value.pricingEffectiveDate(), value.failureCode(), value.failureMessage(),
                 value.durationMs(), value.startedAt(),
-                value.finishedAt(), value.createdAt(), value.sources(), steps, toolCalls));
+                value.finishedAt(), value.createdAt(), value.sources(),
+                value.citationDetails(), steps, toolCalls));
     }
 
     private RunSummary summary(ResultSet resultSet) throws SQLException {
@@ -160,7 +163,8 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                 instant(resultSet, "started_at"),
                 instant(resultSet, "finished_at"),
                 instant(resultSet, "created_at"),
-                stringList(resultSet.getString("citations")));
+                stringList(resultSet.getString("citations")),
+                citationList(resultSet.getString("citation_details")));
     }
 
     private RunStep step(ResultSet resultSet) throws SQLException {
@@ -212,6 +216,16 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
         }
     }
 
+    private List<ChatCitation> citationList(String json) {
+        if (json == null) return List.of();
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<ChatCitation>>() { });
+        }
+        catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Stored run citation details are invalid JSON", exception);
+        }
+    }
+
     private static Integer nullableInteger(ResultSet resultSet, String column) throws SQLException {
         int value = resultSet.getInt(column);
         return resultSet.wasNull() ? null : value;
@@ -247,6 +261,7 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
             java.time.Instant startedAt,
             java.time.Instant finishedAt,
             java.time.Instant createdAt,
-            List<String> sources) {
+            List<String> sources,
+            List<ChatCitation> citationDetails) {
     }
 }

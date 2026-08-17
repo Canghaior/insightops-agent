@@ -2,6 +2,7 @@ package com.jundaodsj.insightops.server.api;
 
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
+import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.memory.application.UserMemoryStore;
 import com.jundaodsj.insightops.model.application.ChatModelRequest;
@@ -259,6 +260,27 @@ public class ChatStreamController {
                         ragEvidence.stream().flatMap(item -> item.sourceUrls().stream()))
                 .distinct()
                 .toList();
+        List<ChatCitation> citationDetails = new java.util.ArrayList<>();
+        toolEvidence.ifPresent(evidence -> {
+            for (int index = 0; index < evidence.sourceUrls().size(); index++) {
+                String url = evidence.sourceUrls().get(index);
+                citationDetails.add(new ChatCitation(
+                        "R" + (index + 1), "GitHub Release", url, null, null,
+                        "GITHUB_RELEASE", null));
+            }
+        });
+        ragEvidence.ifPresent(evidence -> {
+            if (!evidence.citations().isEmpty()) {
+                citationDetails.addAll(evidence.citations());
+                return;
+            }
+            for (int index = 0; index < evidence.sourceUrls().size(); index++) {
+                String url = evidence.sourceUrls().get(index);
+                citationDetails.add(new ChatCitation(
+                        "S" + (index + 1), "官方项目文档", url, null, null,
+                        "OFFICIAL_DOCUMENT", null));
+            }
+        });
         try {
             guardrail.verifyTrustedSources(citations);
         }
@@ -298,13 +320,13 @@ public class ChatStreamController {
                                 return;
                             }
                             try {
-                                chatRunStore.succeedRun(
+                                chatRunStore.succeedRunWithCitations(
                                         runUuid,
                                         answer.toString(),
                                         event.provider(),
                                         event.model(),
                                         event.usage(),
-                                        citations,
+                                        citationDetails,
                                         Instant.now());
                             }
                             catch (RuntimeException exception) {
@@ -326,7 +348,8 @@ public class ChatStreamController {
                                     sequence.incrementAndGet(),
                                     traceId,
                                     event,
-                                    citations));
+                                    citations,
+                                    citationDetails));
                             sessionRegistry.complete(runId);
                             emitter.complete();
                         }
@@ -488,13 +511,14 @@ public class ChatStreamController {
             Integer releaseCount,
             Integer retrievalCount,
             String retrievalModel,
-            List<String> sources) {
+            List<String> sources,
+            List<ChatCitation> citations) {
 
         static ChatSseEvent started(String runId, UUID sessionId, long sequence, String traceId) {
             return new ChatSseEvent(
                     "started", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    null, null, null, null, null, List.of());
+                    null, null, null, null, null, List.of(), List.of());
         }
 
         static ChatSseEvent delta(
@@ -502,7 +526,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "delta", runId, sessionId, sequence, Instant.now(), traceId,
                     content, null, null, null, null, null, null,
-                    null, null, null, null, null, List.of());
+                    null, null, null, null, null, List.of(), List.of());
         }
 
         static ChatSseEvent completed(
@@ -511,13 +535,14 @@ public class ChatStreamController {
                 long sequence,
                 String traceId,
                 ChatStreamEvent event,
-                List<String> sources) {
+                List<String> sources,
+                List<ChatCitation> citations) {
             return new ChatSseEvent(
                     "completed", runId, sessionId, sequence, Instant.now(), traceId,
                     null, event.provider(), event.model(), event.usage(),
                     event.duration().toMillis(),
                     event.timeToFirstToken() == null ? null : event.timeToFirstToken().toMillis(),
-                    null, null, null, null, null, null, sources);
+                    null, null, null, null, null, null, sources, citations);
         }
 
         static ChatSseEvent cancelled(
@@ -525,7 +550,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "cancelled", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    null, null, null, null, null, List.of());
+                    null, null, null, null, null, List.of(), List.of());
         }
 
         static ChatSseEvent error(
@@ -533,7 +558,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "error", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, errorCode,
-                    null, null, null, null, null, List.of());
+                    null, null, null, null, null, List.of(), List.of());
         }
 
         static ChatSseEvent toolStarted(
@@ -546,7 +571,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "tool_started", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    toolName, toolCallId, null, null, null, List.of());
+                    toolName, toolCallId, null, null, null, List.of(), List.of());
         }
 
         static ChatSseEvent toolCompleted(
@@ -560,7 +585,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "tool_completed", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    toolName, toolCallId, releaseCount, null, null, List.of());
+                    toolName, toolCallId, releaseCount, null, null, List.of(), List.of());
         }
 
         static ChatSseEvent retrievalCompleted(
@@ -575,7 +600,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "tool_completed", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    toolName, toolCallId, null, resultCount, model, List.of());
+                    toolName, toolCallId, null, resultCount, model, List.of(), List.of());
         }
     }
 }

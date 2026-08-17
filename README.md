@@ -4,7 +4,7 @@
 
 面向需要持续跟踪 AI 开源项目的 Java 开发者、架构师和技术负责人的开源情报 Agent。
 
-当前处于 Alpha/P1：在 P0 GitHub Releases 真实数据链路之上，已加入登录、个人工作区隔离、账号级会话管理、长期记忆、个人项目关注、邀请制用户与权限管理、项目更新与情报分析，以及基于三个项目官方文档的本地向量 RAG 问答。
+当前处于 Alpha/P1：在 P0 GitHub Releases 真实数据链路之上，已加入登录、个人工作区隔离、账号级会话管理、长期记忆、个人项目关注、邀请制用户与权限管理、项目更新与情报分析，以及基于三个项目官方文档的本地混合检索 RAG 问答。
 
 ## 工程结构
 
@@ -167,6 +167,10 @@ GET  /api/v1/runs/{runId}
 ## P1.4-C 可追溯 RAG 研究问答
 
 研究问答会先用本地 `bge-m3` 召回官方文档候选，再按文档去重、单文档配额和 12,000 字符上下文预算选择最多 6 条证据，最后交给 DeepSeek 流式生成带 `[S#]` 和官方 URL 的回答。检索与生成共享同一个 Run；`retrieval_trace`、Agent Step、Tool Call、引用和助手消息全部保存到 PostgreSQL，刷新页面仍可恢复来源。Ollama 暂时不可用时会记录失败并安全降级，不阻断普通聊天。实现边界见 [P1.4-C 可追溯 RAG 研究问答](docs/architecture/p1-rag-research-chat.md)，真实验收见 [P1.4-C RAG 验收结果](docs/testing/results/p1-rag-e2e-2026-08-17.md)。
+
+## P1.4-D 混合检索与引用质量门禁
+
+检索现已同时执行本地 `bge-m3` 语义召回和 PostgreSQL 全文召回，再以加权 RRF 做确定性融合，并继续应用项目提示、文档去重和上下文预算。每条 `[S#]` 证据以结构化 JSONB 保存标签、项目、标题、章节、官方 URL、来源类型与融合得分；聊天刷新和 Run 详情均能恢复为可点击引用卡片。仓库内新增 12 条、三个项目各 4 条的离线评测集及自动化结构门禁。设计见 [P1.4-D 混合 RAG 质量工程](docs/architecture/p1-hybrid-rag-quality.md)，真实验收见 [P1.4-D 验收结果](docs/testing/results/p1-hybrid-rag-e2e-2026-08-17.md)。
 
 ## DeepSeek API Key
 

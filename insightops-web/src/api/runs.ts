@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import type { ChatCitation } from './agentStream'
 
 export type RunStatus = 'CREATED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'
 
@@ -51,6 +52,7 @@ export interface RunDetail extends RunSummary {
   failureMessage: string | null
   startedAt: string | null
   sources: string[]
+  citationDetails: ChatCitation[]
   steps: RunStep[]
   toolCalls: RunToolCall[]
 }

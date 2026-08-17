@@ -116,6 +116,7 @@ class AgentRunControllerTest {
                     Instant.parse("2026-08-16T00:00:00.800Z"),
                     Instant.parse("2026-08-16T00:00:00Z"),
                     List.of("https://github.com/example/releases/tag/v1"),
+                    List.of(),
                     List.of(new RunStep(
                             stepId, 1, "TOOL", "SUCCEEDED", java.util.Map.of("project", "spring-ai"),
                             java.util.Map.of("count", 1), 300L,

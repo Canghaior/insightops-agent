@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.infrastructure.persistence;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
+import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.infrastructure.model.DeepSeekCostEstimator;
 import com.jundaodsj.insightops.model.application.ModelUsage;
@@ -98,7 +99,8 @@ public class JdbcChatRunStore implements ChatRunStore {
         }
 
         List<HistoryMessage> latestFirst = jdbcClient.sql("""
-                        select id, role, content, citations, sequence_no, created_at
+                        select id, role, content, citations, citation_details,
+                               sequence_no, created_at
                         from conversation_message
                         where session_id = :sessionId
                         order by sequence_no desc
@@ -111,6 +113,7 @@ public class JdbcChatRunStore implements ChatRunStore {
                         resultSet.getString("role"),
                         resultSet.getString("content"),
                         citations(resultSet.getString("citations")),
+                        citationDetails(resultSet.getString("citation_details")),
                         resultSet.getInt("sequence_no"),
                         resultSet.getObject("created_at", OffsetDateTime.class).toInstant()))
                 .list();
@@ -199,6 +202,33 @@ public class JdbcChatRunStore implements ChatRunStore {
             ModelUsage usage,
             List<String> citations,
             Instant finishedAt) {
+        succeedRunInternal(runId, answer, provider, model, usage, citations, List.of(), finishedAt);
+    }
+
+    @Override
+    @Transactional
+    public void succeedRunWithCitations(
+            UUID runId,
+            String answer,
+            String provider,
+            String model,
+            ModelUsage usage,
+            List<ChatCitation> citationDetails,
+            Instant finishedAt) {
+        List<ChatCitation> details = citationDetails == null ? List.of() : List.copyOf(citationDetails);
+        succeedRunInternal(runId, answer, provider, model, usage,
+                details.stream().map(ChatCitation::url).distinct().toList(), details, finishedAt);
+    }
+
+    private void succeedRunInternal(
+            UUID runId,
+            String answer,
+            String provider,
+            String model,
+            ModelUsage usage,
+            List<String> citations,
+            List<ChatCitation> citationDetails,
+            Instant finishedAt) {
         RunState run = lockRun(runId);
         if (!"RUNNING".equals(run.status())) {
             return;
@@ -220,6 +250,7 @@ public class JdbcChatRunStore implements ChatRunStore {
                         set status = 'SUCCEEDED',
                             answer = :answer,
                             citations = cast(:citations as jsonb),
+                            citation_details = cast(:citationDetails as jsonb),
                             model_provider = :provider,
                             model_name = :model,
                             prompt_tokens = :promptTokens,
@@ -231,20 +262,24 @@ public class JdbcChatRunStore implements ChatRunStore {
                         """)
                 .params(parameters)
                 .param("citations", jsonArray(citations))
+                .param("citationDetails", json(citationDetails))
                 .update();
 
         lockRunSession(run.sessionId());
         jdbcClient.sql("""
                         insert into conversation_message
-                            (id, session_id, role, content, citations, sequence_no, created_at)
+                            (id, session_id, role, content, citations, citation_details,
+                             sequence_no, created_at)
                         values
                             (:id, :sessionId, 'ASSISTANT', :content,
-                             cast(:citations as jsonb), :sequenceNo, :createdAt)
+                             cast(:citations as jsonb), cast(:citationDetails as jsonb),
+                             :sequenceNo, :createdAt)
                         """)
                 .param("id", UUID.randomUUID())
                 .param("sessionId", run.sessionId())
                 .param("content", answer)
                 .param("citations", jsonArray(citations))
+                .param("citationDetails", json(citationDetails))
                 .param("sequenceNo", nextMessageSequence(run.sessionId()))
                 .param("createdAt", timestamp(finishedAt))
                 .update();
@@ -405,6 +440,26 @@ public class JdbcChatRunStore implements ChatRunStore {
         }
         catch (Exception exception) {
             throw new IllegalStateException("Unable to read stored citations", exception);
+        }
+    }
+
+    private List<ChatCitation> citationDetails(String value) {
+        if (value == null || value.isBlank()) return List.of();
+        try {
+            return List.copyOf(objectMapper.readValue(
+                    value, new TypeReference<List<ChatCitation>>() { }));
+        }
+        catch (Exception exception) {
+            throw new IllegalStateException("Unable to read structured citations", exception);
+        }
+    }
+
+    private String json(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value == null ? List.of() : value);
+        }
+        catch (Exception exception) {
+            throw new IllegalStateException("Unable to serialize structured citations", exception);
         }
     }
 

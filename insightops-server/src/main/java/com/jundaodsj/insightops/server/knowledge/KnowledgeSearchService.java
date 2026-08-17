@@ -15,19 +15,23 @@ public class KnowledgeSearchService {
     private final KnowledgeEmbeddingStore store;
     private final TextEmbeddingGateway gateway;
     private final KnowledgeEmbeddingProperties properties;
+    private final HybridSearchRanker ranker;
     private final Clock clock;
 
     @Autowired
     public KnowledgeSearchService(KnowledgeEmbeddingStore store, TextEmbeddingGateway gateway,
-                                  KnowledgeEmbeddingProperties properties) {
-        this(store, gateway, properties, Clock.systemUTC());
+                                  KnowledgeEmbeddingProperties properties,
+                                  HybridSearchRanker ranker) {
+        this(store, gateway, properties, ranker, Clock.systemUTC());
     }
 
     KnowledgeSearchService(KnowledgeEmbeddingStore store, TextEmbeddingGateway gateway,
-                           KnowledgeEmbeddingProperties properties, Clock clock) {
+                           KnowledgeEmbeddingProperties properties, HybridSearchRanker ranker,
+                           Clock clock) {
         this.store = store;
         this.gateway = gateway;
         this.properties = properties;
+        this.ranker = ranker;
         this.clock = clock;
     }
 
@@ -36,31 +40,56 @@ public class KnowledgeSearchService {
     }
 
     public SearchResponse search(UUID runId, UUID workspaceId, String query, int limit) {
-        if (!properties.isEnabled()) {
-            throw new EmbeddingUnavailableException("Semantic retrieval is not enabled");
-        }
         Instant startedAt = clock.instant();
-        List<float[]> vectors;
+        List<KnowledgeEmbeddingStore.SearchResult> vectorResults = List.of();
+        boolean vectorAvailable = properties.isEnabled();
+        if (vectorAvailable) {
+            try {
+                List<float[]> vectors = gateway.embed(List.of(query));
+                if (vectors.size() != 1 || vectors.getFirst() == null
+                        || vectors.getFirst().length != properties.getDimensions()) {
+                    throw new IllegalStateException("Embedding model returned an invalid vector");
+                }
+                vectorResults = store.search(workspaceId, properties.getModel(), vectors.getFirst(),
+                        Math.max(1, Math.min(50, limit * 2)), properties.getMinimumScore());
+            }
+            catch (RuntimeException exception) {
+                vectorAvailable = false;
+            }
+        }
+        List<KnowledgeEmbeddingStore.SearchResult> keywordResults;
         try {
-            vectors = gateway.embed(List.of(query));
-        } catch (RuntimeException exception) {
-            throw new EmbeddingUnavailableException("Embedding service is temporarily unavailable");
+            keywordResults = store.searchKeyword(workspaceId, query,
+                    Math.max(1, Math.min(50, limit * 2)));
         }
-        if (vectors.size() != 1 || vectors.getFirst() == null
-                || vectors.getFirst().length != properties.getDimensions()) {
-            throw new EmbeddingUnavailableException("Embedding model returned an invalid vector");
+        catch (RuntimeException exception) {
+            if (!vectorAvailable) {
+                throw new EmbeddingUnavailableException("Hybrid retrieval is temporarily unavailable");
+            }
+            keywordResults = List.of();
         }
-        var results = store.search(workspaceId, properties.getModel(), vectors.getFirst(),
-                Math.max(1, Math.min(20, limit)), properties.getMinimumScore());
+        List<KnowledgeEmbeddingStore.SearchResult> results = ranker.fuse(
+                query, vectorResults, keywordResults, limit);
         long durationMs = Math.max(0, java.time.Duration.between(startedAt, clock.instant()).toMillis());
-        store.recordRetrieval(runId, workspaceId, query, "VECTOR", results.size(), durationMs,
+        String mode = vectorAvailable && !keywordResults.isEmpty() ? "HYBRID"
+                : vectorAvailable ? "VECTOR" : "KEYWORD";
+        store.recordRetrieval(runId, workspaceId, query, mode, results.size(), durationMs,
                 results, clock.instant());
-        return new SearchResponse(query, properties.getProvider(), properties.getModel(),
+        String provider = "HYBRID".equals(mode) ? properties.getProvider() + "+postgresql"
+                : "VECTOR".equals(mode) ? properties.getProvider() : "postgresql";
+        String model = "HYBRID".equals(mode) ? properties.getModel() + "+fts"
+                : "VECTOR".equals(mode) ? properties.getModel() : "fts";
+        return new SearchResponse(query, provider, model, mode, vectorAvailable,
                 durationMs, results);
     }
 
-    public record SearchResponse(String query, String provider, String model, long durationMs,
+    public record SearchResponse(String query, String provider, String model, String mode,
+                                 boolean vectorAvailable, long durationMs,
                                  List<KnowledgeEmbeddingStore.SearchResult> results) {
+        public SearchResponse(String query, String provider, String model, long durationMs,
+                              List<KnowledgeEmbeddingStore.SearchResult> results) {
+            this(query, provider, model, "VECTOR", true, durationMs, results);
+        }
     }
 
     public static class EmbeddingUnavailableException extends RuntimeException {

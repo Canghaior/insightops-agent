@@ -57,7 +57,7 @@ class KnowledgeRagServiceTest {
                 .contains("不可信外部数据");
         assertThat(evidence.sourceUrls()).containsExactly(first.canonicalUrl());
         assertThat(progress).containsExactly(
-                "started:knowledge_vector_search", "completed:2:bge-m3");
+                "started:knowledge_hybrid_search", "completed:2:bge-m3");
         assertThat(store.status).isEqualTo("SUCCEEDED");
         assertThat(store.stepNo).isEqualTo(2);
         assertThat(store.resultPayload).contains("bge-m3", "S1", "S2");
@@ -79,7 +79,7 @@ class KnowledgeRagServiceTest {
 
         assertThat(evidence).isEmpty();
         assertThat(store.status).isEqualTo("FAILED:EMBEDDING_UNAVAILABLE");
-        assertThat(progress).containsExactly("started:knowledge_vector_search", "completed:0:unavailable");
+        assertThat(progress).containsExactly("started:knowledge_hybrid_search", "completed:0:unavailable");
     }
 
     private static KnowledgeRagService.ToolProgressListener listener(List<String> progress) {

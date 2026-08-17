@@ -1,10 +1,12 @@
 import { apiClient } from './client'
+import type { ChatCitation } from './agentStream'
 
 export interface ChatHistoryMessage {
   id: string
   role: 'SYSTEM' | 'USER' | 'ASSISTANT' | 'TOOL'
   content: string
   citations: string[]
+  citationDetails: ChatCitation[]
   sequenceNo: number
   createdAt: string
 }

@@ -15,12 +15,21 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Repository
 public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
+    private static final Pattern TECHNICAL_TERM = Pattern.compile("[A-Za-z][A-Za-z0-9._+-]{2,}");
+    private static final Set<String> KEYWORD_STOP_WORDS = Set.of(
+            "the", "and", "for", "with", "from", "using", "use", "how", "what",
+            "official", "documentation", "knowledge", "please", "explain");
     private final JdbcClient jdbc;
     private final ObjectMapper json;
 
@@ -239,6 +248,59 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
                         rs.getString("heading_path"), rs.getString("content"),
                         rs.getString("language"), rs.getString("trust_tier"), rs.getDouble("score")))
                 .list();
+    }
+
+    @Override
+    public List<SearchResult> searchKeyword(UUID workspaceId, String query, int limit) {
+        String keywordQuery = keywordExpression(query);
+        if (keywordQuery.isBlank()) {
+            return List.of();
+        }
+        return jdbc.sql("""
+                select chunk.id as chunk_id, source.project_id,
+                       project.repository_name as project_name, source.name as source_name,
+                       document.title, document.canonical_url, chunk.heading_path, chunk.content,
+                       document.language, source.trust_tier,
+                       ts_rank_cd(to_tsvector('simple', coalesce(chunk.content, '')),
+                           websearch_to_tsquery('simple', :query), 32) as score
+                from knowledge_chunk chunk
+                join knowledge_document document
+                  on document.current_revision_id=chunk.revision_id and document.active=true
+                join knowledge_source source on source.id=document.source_id and source.enabled=true
+                join tracked_project project on project.id=source.project_id
+                where source.workspace_id=:workspaceId
+                  and to_tsvector('simple', coalesce(chunk.content, ''))
+                      @@ websearch_to_tsquery('simple', :query)
+                order by score desc, chunk.id
+                limit :limit
+                """)
+                .param("workspaceId", workspaceId)
+                .param("query", keywordQuery)
+                .param("limit", Math.max(1, Math.min(50, limit)))
+                .query((rs, rowNum) -> new SearchResult(
+                        rs.getObject("chunk_id", UUID.class), rs.getObject("project_id", UUID.class),
+                        rs.getString("project_name"), rs.getString("source_name"),
+                        rs.getString("title"), rs.getString("canonical_url"),
+                        rs.getString("heading_path"), rs.getString("content"),
+                        rs.getString("language"), rs.getString("trust_tier"), rs.getDouble("score")))
+                .list();
+    }
+
+    static String keywordExpression(String query) {
+        if (query == null || query.isBlank()) {
+            return "";
+        }
+        LinkedHashSet<String> terms = new LinkedHashSet<>();
+        Matcher matcher = TECHNICAL_TERM.matcher(query);
+        while (matcher.find() && terms.size() < 8) {
+            String term = matcher.group().toLowerCase(Locale.ROOT);
+            if (!KEYWORD_STOP_WORDS.contains(term)) {
+                terms.add(term);
+            }
+        }
+        return terms.stream().map(term -> "\"" + term + "\"")
+                .reduce((left, right) -> left + " OR " + right)
+                .orElse("");
     }
 
     @Override

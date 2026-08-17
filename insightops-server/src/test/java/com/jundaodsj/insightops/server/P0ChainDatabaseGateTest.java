@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.server;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentRunQuery;
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
+import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.identity.application.AccountWorkspaceStore;
 import com.jundaodsj.insightops.identity.application.AdminAccountStore;
@@ -111,7 +112,7 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(13);
+        assertThat(migration.migrationsExecuted).isEqualTo(14);
 
         jdbcClient = JdbcClient.create(dataSource);
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
@@ -417,14 +418,25 @@ class P0ChainDatabaseGateTest {
         UUID developerSession = runStore.startRun(
                 developer, developerRun, null, "isolation-" + UUID.randomUUID(),
                 "developer private question", Instant.now());
-        runStore.succeedRun(
+        ChatCitation citation = new ChatCitation(
+                "S1",
+                "Spring AI Reference",
+                "https://docs.spring.io/spring-ai/reference/",
+                "spring-ai",
+                "Overview",
+                "OFFICIAL_DOCUMENT",
+                0.91d);
+        runStore.succeedRunWithCitations(
                 developerRun, "developer private answer", "deepseek", "deepseek-v4-flash",
-                new ModelUsage(10, 5, 15, 0L, 0L), List.of(), Instant.now());
+                new ModelUsage(10, 5, 15, 0L, 0L), List.of(citation), Instant.now());
 
-        assertThat(runQuery.findRun(developer, developerRun)).isPresent();
+        AgentRunQuery.RunDetail developerRunDetail = runQuery.findRun(developer, developerRun).orElseThrow();
+        assertThat(developerRunDetail.citationDetails()).containsExactly(citation);
         assertThat(runQuery.findRun(architect, developerRun)).isEmpty();
         assertThat(runQuery.findRun(ACTOR, developerRun)).isEmpty();
-        assertThat(runStore.sessionHistory(developer, developerSession, 100)).isPresent();
+        ChatRunStore.SessionHistory developerHistory = runStore.sessionHistory(
+                developer, developerSession, 100).orElseThrow();
+        assertThat(developerHistory.messages().getLast().citationDetails()).containsExactly(citation);
         assertThat(runStore.sessionHistory(architect, developerSession, 100)).isEmpty();
         assertThat(runStore.ownsRun(architect, developerRun)).isFalse();
         assertThat(conversationManager.list(developer, true)).extracting("id").contains(developerSession);

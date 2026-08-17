@@ -2,6 +2,7 @@ package com.jundaodsj.insightops.server.chat;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeEmbeddingStore;
 import com.jundaodsj.insightops.server.knowledge.KnowledgeSearchService;
 import com.jundaodsj.insightops.tool.application.AgentToolExecutionStore;
@@ -21,7 +22,7 @@ import java.util.UUID;
 
 @Service
 public class KnowledgeRagService {
-    public static final String TOOL_NAME = "knowledge_vector_search";
+    public static final String TOOL_NAME = "knowledge_hybrid_search";
     private static final Logger LOGGER = LoggerFactory.getLogger(KnowledgeRagService.class);
 
     private final KnowledgeSearchService searchService;
@@ -118,9 +119,13 @@ public class KnowledgeRagService {
                 <official_knowledge_evidence>
                 """);
         LinkedHashSet<String> urls = new LinkedHashSet<>();
+        List<ChatCitation> citations = new ArrayList<>();
         for (int index = 0; index < selected.size(); index++) {
             var item = selected.get(index);
             urls.add(item.canonicalUrl());
+            citations.add(new ChatCitation(
+                    "S" + (index + 1), item.title(), item.canonicalUrl(), item.projectName(),
+                    item.headingPath(), "OFFICIAL_DOCUMENT", item.score()));
             prompt.append("[S").append(index + 1).append("]\n")
                     .append("项目：").append(clean(item.projectName())).append('\n')
                     .append("文档：").append(clean(item.title())).append('\n')
@@ -130,8 +135,9 @@ public class KnowledgeRagService {
                     .append("摘录：\n").append(item.content()).append("\n\n");
         }
         prompt.append("</official_knowledge_evidence>\n");
-        return new RagEvidence(prompt.toString(), List.copyOf(urls), toolCallId,
-                response.provider(), response.model(), response.durationMs(), selected);
+        return new RagEvidence(prompt.toString(), List.copyOf(urls), List.copyOf(citations),
+                toolCallId, response.provider(), response.model(), response.mode(),
+                response.vectorAvailable(), response.durationMs(), selected);
     }
 
     private Map<String, Object> resultPayload(RagEvidence evidence) {
@@ -146,6 +152,7 @@ public class KnowledgeRagService {
                     "score", item.score()));
         }
         return Map.of("provider", evidence.provider(), "model", evidence.model(),
+                "mode", evidence.mode(), "vectorAvailable", evidence.vectorAvailable(),
                 "retrievalDurationMs", evidence.retrievalDurationMs(), "sources", sources);
     }
 
@@ -172,9 +179,17 @@ public class KnowledgeRagService {
     }
 
     public record RagEvidence(String systemPromptAppendix, List<String> sourceUrls,
-                              UUID toolCallId, String provider, String model,
-                              long retrievalDurationMs,
+                              List<ChatCitation> citations, UUID toolCallId,
+                              String provider, String model, String mode,
+                              boolean vectorAvailable, long retrievalDurationMs,
                               List<KnowledgeEmbeddingStore.SearchResult> results) {
+        public RagEvidence(String systemPromptAppendix, List<String> sourceUrls,
+                           UUID toolCallId, String provider, String model,
+                           long retrievalDurationMs,
+                           List<KnowledgeEmbeddingStore.SearchResult> results) {
+            this(systemPromptAppendix, sourceUrls, List.of(), toolCallId, provider, model,
+                    "VECTOR", true, retrievalDurationMs, results);
+        }
     }
 
     public interface ToolProgressListener {

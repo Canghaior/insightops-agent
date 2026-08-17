@@ -33,6 +33,19 @@ public interface ChatRunStore {
             List<String> citations,
             Instant finishedAt);
 
+    default void succeedRunWithCitations(
+            UUID runId,
+            String answer,
+            String provider,
+            String model,
+            ModelUsage usage,
+            List<ChatCitation> citations,
+            Instant finishedAt) {
+        succeedRun(runId, answer, provider, model, usage,
+                citations == null ? List.of() : citations.stream()
+                        .map(ChatCitation::url).distinct().toList(), finishedAt);
+    }
+
     void cancelRun(UUID runId, String partialAnswer, Instant finishedAt);
 
     void failRun(
@@ -56,7 +69,12 @@ public interface ChatRunStore {
             String role,
             String content,
             List<String> citations,
+            List<ChatCitation> citationDetails,
             int sequenceNo,
             Instant createdAt) {
+        public HistoryMessage(UUID id, String role, String content, List<String> citations,
+                              int sequenceNo, Instant createdAt) {
+            this(id, role, content, citations, List.of(), sequenceNo, createdAt);
+        }
     }
 }

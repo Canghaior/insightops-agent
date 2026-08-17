@@ -8,6 +8,16 @@ export interface ModelUsage {
   cacheWriteInputTokens: number | null
 }
 
+export interface ChatCitation {
+  label: string
+  title: string
+  url: string
+  project: string | null
+  heading: string | null
+  sourceType: 'OFFICIAL_DOCUMENT' | 'GITHUB_RELEASE'
+  score: number | null
+}
+
 export interface ChatStreamEvent {
   type: 'started' | 'tool_started' | 'tool_completed' | 'delta' | 'completed' | 'cancelled' | 'error'
   runId: string
@@ -28,6 +38,7 @@ export interface ChatStreamEvent {
   retrievalCount: number | null
   retrievalModel: string | null
   sources: string[]
+  citations: ChatCitation[]
 }
 
 const eventTypes = new Set<ChatStreamEvent['type']>([

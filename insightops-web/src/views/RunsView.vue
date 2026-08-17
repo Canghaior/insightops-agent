@@ -240,7 +240,17 @@ onMounted(loadRuns)
             </article>
           </section>
 
-          <section v-if="selectedRun.sources.length" class="detail-block detail-sources">
+          <section v-if="selectedRun.citationDetails?.length" class="detail-block detail-sources">
+            <h3>结构化引用</h3>
+            <a
+              v-for="citation in selectedRun.citationDetails"
+              :key="`${citation.label}-${citation.url}`"
+              :href="citation.url"
+              target="_blank"
+              rel="noreferrer"
+            >{{ citation.label }} · {{ citation.project || 'GitHub Release' }} · {{ citation.heading || citation.title }}</a>
+          </section>
+          <section v-else-if="selectedRun.sources.length" class="detail-block detail-sources">
             <span class="eyebrow">Official Sources</span>
             <a v-for="source in selectedRun.sources" :key="source" :href="source" target="_blank" rel="noreferrer">{{ source }}</a>
           </section>

@@ -20,7 +20,10 @@ import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserMemoryStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcConversationManager;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcProjectUpdateStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcIntelligenceStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcKnowledgeStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserProjectWatchStore;
+import com.jundaodsj.insightops.infrastructure.knowledge.KnowledgeDocumentChunker;
+import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
 import com.jundaodsj.insightops.model.application.ChatStreamEvent;
 import com.jundaodsj.insightops.model.application.ChatStreamSession;
 import com.jundaodsj.insightops.model.application.ModelUsage;
@@ -78,6 +81,7 @@ class P0ChainDatabaseGateTest {
     private static JdbcAdminAccountStore adminAccountStore;
     private static JdbcProjectUpdateStore projectUpdateStore;
     private static JdbcIntelligenceStore intelligenceStore;
+    private static JdbcKnowledgeStore knowledgeStore;
 
     @BeforeAll
     static void prepareIsolatedSchema() {
@@ -95,12 +99,13 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(11);
+        assertThat(migration.migrationsExecuted).isEqualTo(12);
 
         jdbcClient = JdbcClient.create(dataSource);
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
         projectUpdateStore = new JdbcProjectUpdateStore(jdbcClient, objectMapper());
         intelligenceStore = new JdbcIntelligenceStore(jdbcClient, objectMapper());
+        knowledgeStore = new JdbcKnowledgeStore(jdbcClient, objectMapper());
         DeepSeekCostEstimator estimator = new DeepSeekCostEstimator(pricing());
         runStore = new JdbcChatRunStore(jdbcClient, estimator);
         runQuery = new JdbcAgentRunQuery(jdbcClient, objectMapper());
@@ -423,6 +428,46 @@ class P0ChainDatabaseGateTest {
                 .filter(project -> project.id().equals(projectId)).findFirst().orElseThrow().enabled()).isTrue();
         assertThat(projectWatchStore.list(architect).stream()
                 .filter(project -> project.id().equals(projectId)).findFirst().orElseThrow().enabled()).isFalse();
+    }
+
+    @Test
+    void officialDocumentCollectionPersistsChunksAndDeduplicatesUnchangedRevisions() {
+        UUID sourceId = UUID.fromString("00000000-0000-0000-0000-000000000401");
+        Instant firstRun = Instant.parse("2026-08-17T10:00:00Z");
+        assertThat(knowledgeStore.claimDueSources(firstRun, Duration.ofMinutes(5), 3)).isEmpty();
+        assertThat(knowledgeStore.requestSync(ACTOR.workspaceId(), sourceId, firstRun)).isTrue();
+
+        KnowledgeStore.SourceTask firstTask = knowledgeStore.claimDueSources(
+                firstRun.plusSeconds(1), Duration.ofMinutes(5), 1).getFirst();
+        String content = "# Spring AI\n\n" + "Official Spring AI reference documentation. ".repeat(25);
+        var chunks = new KnowledgeDocumentChunker().chunk(content, 200, 20);
+        var page = new KnowledgeStore.DocumentPage(
+                "https://docs.spring.io/spring-ai/reference/", "Spring AI Reference", "en", null,
+                "a".repeat(64), content, null, null, chunks);
+        var firstResult = knowledgeStore.completeSuccessfulSync(firstTask, List.of(page),
+                firstRun.plusSeconds(2), firstRun.plus(Duration.ofHours(24)));
+
+        assertThat(firstResult.newDocuments()).isEqualTo(1);
+        assertThat(firstResult.chunkCount()).isEqualTo(chunks.size());
+        var firstStatus = knowledgeStore.sourceStatus(ACTOR.workspaceId()).stream()
+                .filter(source -> source.sourceId().equals(sourceId)).findFirst().orElseThrow();
+        assertThat(firstStatus.documentCount()).isEqualTo(1);
+        assertThat(firstStatus.revisionCount()).isEqualTo(1);
+        assertThat(firstStatus.chunkCount()).isEqualTo(chunks.size());
+
+        Instant secondRun = firstRun.plusSeconds(10);
+        assertThat(knowledgeStore.requestSync(ACTOR.workspaceId(), sourceId, secondRun)).isTrue();
+        KnowledgeStore.SourceTask secondTask = knowledgeStore.claimDueSources(
+                secondRun.plusSeconds(1), Duration.ofMinutes(5), 1).getFirst();
+        var secondResult = knowledgeStore.completeSuccessfulSync(secondTask, List.of(page),
+                secondRun.plusSeconds(2), secondRun.plus(Duration.ofHours(24)));
+
+        assertThat(secondResult.unchangedDocuments()).isEqualTo(1);
+        assertThat(secondResult.chunkCount()).isZero();
+        var secondStatus = knowledgeStore.sourceStatus(ACTOR.workspaceId()).stream()
+                .filter(source -> source.sourceId().equals(sourceId)).findFirst().orElseThrow();
+        assertThat(secondStatus.revisionCount()).isEqualTo(1);
+        assertThat(secondStatus.chunkCount()).isEqualTo(chunks.size());
     }
 
     private static ActorContext actor(String userId) {

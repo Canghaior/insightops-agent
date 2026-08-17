@@ -11,6 +11,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const canManageAccounts = computed(() => auth.account?.systemRole === 'SYSTEM_ADMIN' || auth.account?.role === 'OWNER')
+const isSystemAdmin = computed(() => auth.account?.systemRole === 'SYSTEM_ADMIN')
 const unreadUpdates = ref(0)
 const unreadNotifications = ref(0)
 const navigation = [
@@ -66,6 +67,7 @@ async function signOut() {
       </nav>
       <nav v-if="canManageAccounts" class="navigation admin-navigation" aria-label="管理导航">
         <RouterLink to="/admin/users"><el-icon><UserFilled /></el-icon><span>用户管理</span></RouterLink>
+        <RouterLink v-if="isSystemAdmin" to="/admin/knowledge"><el-icon><FolderOpened /></el-icon><span>知识库采集</span></RouterLink>
       </nav>
       <div class="scope-note account-card">
         <span class="eyebrow">当前账号</span>

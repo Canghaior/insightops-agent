@@ -135,6 +135,8 @@ GET  /api/v1/notifications/unread-count
 POST /api/v1/notifications/{notificationId}/read
 GET  /api/v1/admin/intelligence
 POST /api/v1/admin/intelligence/events/{eventId}/analyze
+GET  /api/v1/admin/knowledge/sources
+POST /api/v1/admin/knowledge/sources/{sourceId}/sync
 GET  /api/v1/runs?page=0&size=20&status=SUCCEEDED
 GET  /api/v1/runs/{runId}
 ```
@@ -150,6 +152,10 @@ P0 聊天入口已启用最小 Guardrail：统一限制输入长度和控制字�
 ## P1.3 技术情报分析
 
 新采集的官方 GitHub Release 会进入受每日额度限制的 DeepSeek 结构化分析队列；V11 上线前已有 Release 默认不自动分析，只有系统管理员显式请求时才会产生模型调用。结果包括风险等级、建议、Java 影响、升级价值、行动项、官方证据 URL、Token 和估算成本，并通过站内通知和可配置的日/周摘要展示。摘要本身不再调用模型。设计边界见 [P1.3 技术情报分析](docs/architecture/p1-intelligence-analysis.md)。
+
+## P1.4-A 官方文档知识库基础
+
+系统管理员可在“知识库采集”页面查看并触发 Spring AI、LangChain4j 和 Dify 官方文档采集。Worker 严格限制官方 HTTPS 域名和路径，执行 robots.txt、DNS、重定向、页数、深度、大小、超时与频率检查，并将规范 URL、原文修订和标题感知切片去重保存到 PostgreSQL。该能力默认关闭且首次必须手动触发；本阶段不生成向量、不执行 RAG，也不调用 DeepSeek。设计边界见 [P1.4-A 官方文档知识库基础](docs/architecture/p1-official-document-knowledge-base.md)。
 
 ## DeepSeek API Key
 

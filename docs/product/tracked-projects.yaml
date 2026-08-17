@@ -1,9 +1,8 @@
 schemaVersion: 2
-updatedAt: "2026-08-16"
-scope: "alpha-p0"
+updatedAt: "2026-08-17"
+scope: "alpha-p1.4-a"
 
-# P0 只启用 GitHub Release API。官网、仓库、文档、博客和 Atom 在本文件中完成登记，
-# 但不代表已经进入采集链路；后续启用时必须先补去重、失败重试和内容质量测试。
+# P1.4-A 在 GitHub Release API 之外启用三项官方文档源。官网、博客和 Atom 仍只登记不采集。
 collectionDefaults:
   githubRelease: true
   otherOfficialSources: false
@@ -66,8 +65,8 @@ projects:
         url: "https://docs.spring.io/spring-ai/reference/"
         trustTier: "T1_PROJECT_DOMAIN"
         updateFrequency: "随版本和文档修订持续更新"
-        collectionEnabled: false
-        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+        collectionEnabled: true
+        verification: { status: "VERIFIED", checkedAt: "2026-08-17" }
       - id: "spring-ai-blog"
         type: "official_blog"
         name: "Spring 官方博客"
@@ -140,8 +139,8 @@ projects:
         url: "https://docs.langchain4j.dev/"
         trustTier: "T1_PROJECT_DOMAIN"
         updateFrequency: "随版本和文档修订持续更新"
-        collectionEnabled: false
-        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+        collectionEnabled: true
+        verification: { status: "VERIFIED", checkedAt: "2026-08-17" }
       - id: "langchain4j-release-notes"
         type: "official_announcement"
         name: "LangChain4j Latest Release Notes"
@@ -215,8 +214,8 @@ projects:
         url: "https://docs.dify.ai/"
         trustTier: "T1_PROJECT_DOMAIN"
         updateFrequency: "随产品和文档修订持续更新"
-        collectionEnabled: false
-        verification: { status: "VERIFIED", checkedAt: "2026-08-16" }
+        collectionEnabled: true
+        verification: { status: "VERIFIED", checkedAt: "2026-08-17" }
       - id: "dify-blog"
         type: "official_blog"
         name: "Dify Blog"

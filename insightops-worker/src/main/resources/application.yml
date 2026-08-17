@@ -47,6 +47,21 @@ insightops:
     poll-delay-ms: ${INTELLIGENCE_ANALYSIS_POLL_DELAY_MS:30000}
     digest-initial-delay-ms: ${INTELLIGENCE_DIGEST_INITIAL_DELAY_MS:15000}
     digest-poll-delay-ms: ${INTELLIGENCE_DIGEST_POLL_DELAY_MS:300000}
+  knowledge:
+    collection:
+      enabled: ${DOCUMENT_COLLECTION_ENABLED:false}
+      batch-size: ${DOCUMENT_COLLECTION_BATCH_SIZE:1}
+      sync-interval-hours: ${DOCUMENT_COLLECTION_INTERVAL_HOURS:24}
+      lock-minutes: ${DOCUMENT_COLLECTION_LOCK_MINUTES:10}
+      max-pages-per-source: ${DOCUMENT_CRAWL_MAX_PAGES_PER_SOURCE:200}
+      max-depth: ${DOCUMENT_CRAWL_MAX_DEPTH:4}
+      max-bytes-per-page: ${DOCUMENT_CRAWL_MAX_BYTES_PER_PAGE:2097152}
+      request-timeout-seconds: ${DOCUMENT_CRAWL_REQUEST_TIMEOUT_SECONDS:20}
+      request-delay-ms: ${DOCUMENT_CRAWL_REQUEST_DELAY_MS:500}
+      chunk-max-tokens: ${DOCUMENT_CHUNK_MAX_TOKENS:600}
+      chunk-overlap-tokens: ${DOCUMENT_CHUNK_OVERLAP_TOKENS:80}
+      initial-delay-ms: ${DOCUMENT_COLLECTION_INITIAL_DELAY_MS:20000}
+      poll-delay-ms: ${DOCUMENT_COLLECTION_POLL_DELAY_MS:60000}
   tool:
     github:
       base-url: ${GITHUB_API_BASE_URL:https://api.github.com}

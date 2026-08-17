@@ -56,6 +56,41 @@ export interface IntelligenceAdminOverview {
   items: AnalysisAdminStatus[]
 }
 
+export interface KnowledgeCollectionJob {
+  jobId: string
+  status: 'RUNNING' | 'SUCCEEDED' | 'FAILED'
+  pageCount: number
+  newDocumentCount: number
+  changedDocumentCount: number
+  unchangedDocumentCount: number
+  chunkCount: number
+  errorCode: string | null
+  errorMessage: string | null
+  startedAt: string
+  finishedAt: string | null
+}
+
+export interface KnowledgeSourceStatus {
+  sourceId: string
+  projectId: string
+  projectName: string
+  sourceKey: string
+  name: string
+  sourceType: string
+  rootUrl: string
+  trustTier: string
+  enabled: boolean
+  status: 'NEVER' | 'RUNNING' | 'SUCCEEDED' | 'RETRY_WAIT' | 'FAILED'
+  lastSyncAt: string | null
+  nextSyncAt: string
+  consecutiveFailures: number
+  lastError: string | null
+  documentCount: number
+  revisionCount: number
+  chunkCount: number
+  lastJob: KnowledgeCollectionJob | null
+}
+
 export async function listUsers(): Promise<ManagedUser[]> {
   const response = await apiClient.get<{ data: ManagedUser[] }>('/admin/users')
   return response.data.data
@@ -101,4 +136,13 @@ export async function getIntelligenceAdminOverview(): Promise<IntelligenceAdminO
 
 export async function requestIntelligenceAnalysis(eventId: string): Promise<void> {
   await apiClient.post(`/admin/intelligence/events/${eventId}/analyze`)
+}
+
+export async function listKnowledgeSources(): Promise<KnowledgeSourceStatus[]> {
+  const response = await apiClient.get<{ data: KnowledgeSourceStatus[] }>('/admin/knowledge/sources')
+  return response.data.data
+}
+
+export async function requestKnowledgeSync(sourceId: string): Promise<void> {
+  await apiClient.post(`/admin/knowledge/sources/${sourceId}/sync`)
 }

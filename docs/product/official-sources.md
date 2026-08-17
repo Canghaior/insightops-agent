@@ -1,16 +1,16 @@
 # Alpha 官方来源登记说明
 
-更新时间：2026-08-16
+更新时间：2026-08-17
 
 ## 结论
 
-P0-004 已为 Spring AI、LangChain4j 和 Dify 建立可机器校验的官方来源登记表，完整配置见 [tracked-projects.yaml](tracked-projects.yaml)。登记来源不等于启用采集：Alpha/P0 仍只调用三个官方 GitHub 仓库的 Release API，文档、博客和 Atom 均保持关闭。
+P1.4-A 已将 Spring AI、LangChain4j 和 Dify 的官方文档接入受限采集链路，完整登记见 [tracked-projects.yaml](tracked-projects.yaml)。首次采集必须由系统管理员触发；博客、官网和 Atom 仍保持关闭。
 
-| 项目 | 官网 | GitHub / Release | 官方文档 | 博客或公告 | 可订阅来源 | P0 启用 |
+| 项目 | 官网 | GitHub / Release | 官方文档 | 博客或公告 | 可订阅来源 | 当前启用 |
 |---|---|---|---|---|---|---|
-| Spring AI | Spring 项目页 | 官方仓库与 Releases | Spring AI Reference | Spring 官方博客，按 `Spring AI` 过滤 | Spring Blog Atom、GitHub Release Atom | GitHub Release API |
-| LangChain4j | `langchain4j.dev` | 官方仓库与 Releases | LangChain4j Documentation | Latest Release Notes；未发现独立官方博客 | GitHub Release Atom | GitHub Release API |
-| Dify | `dify.ai` | 官方仓库与 Releases | Dify Documentation | Dify Blog | GitHub Release Atom；未发现独立博客 RSS/Atom | GitHub Release API |
+| Spring AI | Spring 项目页 | 官方仓库与 Releases | Spring AI Reference | Spring 官方博客，按 `Spring AI` 过滤 | Spring Blog Atom、GitHub Release Atom | Release API + 官方文档 |
+| LangChain4j | `langchain4j.dev` | 官方仓库与 Releases | LangChain4j Documentation | Latest Release Notes；未发现独立官方博客 | GitHub Release Atom | Release API + 官方文档 |
+| Dify | `dify.ai` | 官方仓库与 Releases | Dify Documentation | Dify Blog | GitHub Release Atom；未发现独立博客 RSS/Atom | Release API + 官方文档 |
 
 ## 可信度规则
 
@@ -26,12 +26,13 @@ P0-004 已为 Spring AI、LangChain4j 和 Dify 建立可机器校验的官方来
 - Dify 官网直接链接其 Documentation、Blog 和官方 GitHub；本次未找到 Dify Blog 的独立 RSS/Atom。
 - 三个 GitHub 官方仓库均存在 Releases 页面，P0 使用对应 REST API，Atom 只登记不采集。
 
-## 后续启用门槛
+## P1.4-A 已落实的门槛
 
-文档、博客或 Atom 进入采集链路前，至少需要完成：
+官方文档采集链路已完成：
 
-1. 定义增量游标、内容指纹和跨来源去重规则。
-2. 增加超时、限流、失败重试和来源降级策略。
-3. 对 Spring 全站博客 Feed 增加 Spring AI 项目过滤。
-4. 用真实样本验证发布时间、标题、正文、版本号和原始链接抽取质量。
-5. 在 Alpha 报告中区分“官方事实”“模型归纳”和“待核实信息”。
+1. 以规范 URL 和 SHA-256 内容指纹实现文档、历史版本与切片去重。
+2. 限定 HTTPS 域名/路径、校验 DNS 与重定向、遵守 robots.txt，并限制页数、深度、响应大小和请求频率。
+3. 保存原文、版本、标题、语言、ETag、Last-Modified、切片和采集任务审计。
+4. 失败按类型退避，系统管理员可查看状态并手动触发。
+
+博客与 Atom 尚未启用；向量化、检索和回答注入属于 P1.4-B/C。

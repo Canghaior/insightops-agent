@@ -23,6 +23,12 @@ const router = createRouter({
       component: () => import('@/views/AdminUsersView.vue'),
       meta: { manager: true },
     },
+    {
+      path: '/admin/knowledge',
+      name: 'admin-knowledge',
+      component: () => import('@/views/AdminKnowledgeView.vue'),
+      meta: { systemAdmin: true },
+    },
   ],
 })
 
@@ -37,6 +43,9 @@ router.beforeEach(async (to) => {
   }
   if (to.meta.manager && auth.account
       && auth.account.systemRole !== 'SYSTEM_ADMIN' && auth.account.role !== 'OWNER') {
+    return { name: 'dashboard' }
+  }
+  if (to.meta.systemAdmin && auth.account?.systemRole !== 'SYSTEM_ADMIN') {
     return { name: 'dashboard' }
   }
   if (to.name === 'login' && auth.account) return { name: 'dashboard' }

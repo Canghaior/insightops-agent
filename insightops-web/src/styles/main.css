@@ -143,6 +143,22 @@ a { color: inherit; text-decoration: none; }
 .collection-card dt { color: var(--muted); font-size: 10px; }
 .collection-card dd { margin: 0; font-size: 10px; text-align: right; }
 .collection-card footer { color: var(--muted); font-size: 10px; }
+.knowledge-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
+.knowledge-summary article { display: flex; align-items: center; justify-content: space-between; }
+.knowledge-summary span { color: var(--muted); }
+.knowledge-summary strong { font-size: 28px; }
+.knowledge-safety-note { margin-bottom: 18px; border-color: rgba(103, 212, 180, .25); }
+.knowledge-safety-note p { margin: 8px 0 0; color: var(--muted); line-height: 1.7; }
+.knowledge-source-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.knowledge-source-card header, .knowledge-source-card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.knowledge-source-card h3 { margin: 5px 0; font-size: 20px; }
+.knowledge-source-card > a { display: block; margin: 12px 0; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-source-card dl { display: grid; gap: 8px; margin: 18px 0; }
+.knowledge-source-card dl div { display: flex; justify-content: space-between; gap: 12px; }
+.knowledge-source-card dt { color: var(--muted); }
+.knowledge-source-card dd { margin: 0; text-align: right; }
+.knowledge-job { display: flex; justify-content: space-between; gap: 10px; padding: 10px; margin-bottom: 14px; border-radius: 10px; background: rgba(0, 0, 0, .16); }
+.knowledge-job span, .knowledge-source-card footer > span { color: var(--muted); font-size: 11px; }
 .updates-heading { align-items: center; }
 .update-summary { display: flex; align-items: baseline; gap: 8px; }
 .update-summary strong { color: var(--accent); font-size: 34px; }
@@ -405,6 +421,7 @@ a { color: inherit; text-decoration: none; }
   .memory-form, .memory-list { grid-template-columns: 1fr; }
   .admin-create-form, .admin-user-row, .audit-list article { grid-template-columns: 1fr; }
   .collection-grid { grid-template-columns: 1fr; }
+  .knowledge-summary, .knowledge-source-grid { grid-template-columns: 1fr; }
   .intelligence-grid, .digest-preference-form { grid-template-columns: 1fr; }
   .digest-preference-form fieldset { grid-column: auto; flex-direction: column; }
   .update-controls, .update-card header, .update-card footer { align-items: stretch; flex-direction: column; }

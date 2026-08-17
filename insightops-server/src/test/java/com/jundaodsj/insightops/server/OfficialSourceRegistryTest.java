@@ -29,11 +29,11 @@ class OfficialSourceRegistryTest {
             "dify", Set.of("dify.ai", "docs.dify.ai", "github.com", "api.github.com"));
 
     @Test
-    void registryContainsOnlyVerifiedOfficialSourcesAndEnablesOnlyGitHubRelease() throws IOException {
+    void registryContainsOnlyVerifiedOfficialSourcesAndEnablesReleaseAndDocumentation() throws IOException {
         Map<String, Object> registry = loadRegistry();
 
         assertThat(registry.get("schemaVersion")).isEqualTo(2);
-        assertThat(registry.get("scope")).isEqualTo("alpha-p0");
+        assertThat(registry.get("scope")).isEqualTo("alpha-p1.4-a");
 
         List<Map<String, Object>> projects = list(registry, "projects");
         assertThat(projects).extracting(project -> string(project, "id"))
@@ -64,8 +64,9 @@ class OfficialSourceRegistryTest {
                 assertThat(string(source, "updateFrequency")).isNotBlank();
 
                 boolean enabled = Boolean.TRUE.equals(source.get("collectionEnabled"));
-                assertThat(enabled).as("only github_release may be enabled in P0: %s", sourceId)
-                        .isEqualTo("github_release".equals(string(source, "type")));
+                assertThat(enabled).as("only release and official docs may be enabled in P1.4-A: %s", sourceId)
+                        .isEqualTo(Set.of("github_release", "official_documentation")
+                                .contains(string(source, "type")));
 
                 Map<String, Object> verification = map(source, "verification");
                 assertThat(string(verification, "status")).isEqualTo("VERIFIED");

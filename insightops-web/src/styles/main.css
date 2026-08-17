@@ -159,7 +159,7 @@ a { color: inherit; text-decoration: none; }
 .knowledge-source-card dd { margin: 0; text-align: right; }
 .knowledge-job { display: flex; justify-content: space-between; gap: 10px; padding: 10px; margin-bottom: 14px; border-radius: 10px; background: rgba(0, 0, 0, .16); }
 .knowledge-job span, .knowledge-source-card footer > span { color: var(--muted); font-size: 11px; }
-.embedding-panel, .knowledge-search-panel { margin-bottom: 18px; }
+.embedding-panel, .rag-evaluation-panel, .knowledge-search-panel { margin-bottom: 18px; }
 .embedding-panel header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .embedding-panel h3, .knowledge-search-panel h3 { margin: 5px 0 12px; }
 .embedding-panel header > strong { color: var(--accent); font-size: 28px; }
@@ -167,6 +167,18 @@ a { color: inherit; text-decoration: none; }
 .embedding-progress i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .25s ease; }
 .embedding-stats { display: flex; flex-wrap: wrap; gap: 18px; margin: 14px 0; color: var(--muted); }
 .embedding-stats b { color: var(--text); }
+.rag-evaluation-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.rag-evaluation-panel h3 { margin: 5px 0 8px; }
+.rag-evaluation-panel header p { max-width: 720px; margin: 0; color: var(--muted); line-height: 1.6; }
+.evaluation-action { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.evaluation-metrics { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; margin: 18px 0 12px; }
+.evaluation-metrics > span { display: grid; gap: 5px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(0, 0, 0, .14); }
+.evaluation-metrics small, .rag-evaluation-panel > small, .muted-copy { color: var(--muted); }
+.evaluation-metrics b { font-size: 17px; }
+.evaluation-failures { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+.evaluation-failures summary { color: var(--warning); cursor: pointer; }
+.evaluation-failures div { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.evaluation-failures span { color: var(--muted); font-size: 11px; }
 .knowledge-search-form { display: flex; gap: 10px; }
 .knowledge-search-form input { flex: 1; min-width: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; color: var(--text); background: rgba(0, 0, 0, .18); }
 .knowledge-search-panel > small { display: block; margin-top: 10px; color: var(--muted); }
@@ -444,6 +456,8 @@ a { color: inherit; text-decoration: none; }
   .admin-create-form, .admin-user-row, .audit-list article { grid-template-columns: 1fr; }
   .collection-grid { grid-template-columns: 1fr; }
   .knowledge-summary, .knowledge-source-grid { grid-template-columns: 1fr; }
+  .rag-evaluation-panel > header, .evaluation-action { align-items: stretch; flex-direction: column; }
+  .evaluation-metrics { grid-template-columns: 1fr 1fr; }
   .intelligence-grid, .digest-preference-form { grid-template-columns: 1fr; }
   .digest-preference-form fieldset { grid-column: auto; flex-direction: column; }
   .update-controls, .update-card header, .update-card footer { align-items: stretch; flex-direction: column; }

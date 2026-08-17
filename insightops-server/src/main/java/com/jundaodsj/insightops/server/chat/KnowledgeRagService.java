@@ -5,10 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeEmbeddingStore;
 import com.jundaodsj.insightops.server.knowledge.KnowledgeSearchService;
+import com.jundaodsj.insightops.server.knowledge.KnowledgeAnswerabilityPolicy;
 import com.jundaodsj.insightops.tool.application.AgentToolExecutionStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -29,15 +31,27 @@ public class KnowledgeRagService {
     private final AgentToolExecutionStore executionStore;
     private final KnowledgeRagProperties properties;
     private final ObjectMapper objectMapper;
+    private final KnowledgeAnswerabilityPolicy answerabilityPolicy;
 
+    @Autowired
     public KnowledgeRagService(KnowledgeSearchService searchService,
                                AgentToolExecutionStore executionStore,
                                KnowledgeRagProperties properties,
-                               ObjectMapper objectMapper) {
+                               ObjectMapper objectMapper,
+                               KnowledgeAnswerabilityPolicy answerabilityPolicy) {
         this.searchService = searchService;
         this.executionStore = executionStore;
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.answerabilityPolicy = answerabilityPolicy;
+    }
+
+    KnowledgeRagService(KnowledgeSearchService searchService,
+                        AgentToolExecutionStore executionStore,
+                        KnowledgeRagProperties properties,
+                        ObjectMapper objectMapper) {
+        this(searchService, executionStore, properties, objectMapper,
+                new KnowledgeAnswerabilityPolicy());
     }
 
     public Optional<RagEvidence> retrieve(UUID runId, UUID workspaceId, String query,
@@ -55,13 +69,15 @@ public class KnowledgeRagService {
 
         try {
             var response = searchService.search(runId, workspaceId, query, candidateLimit());
-            List<KnowledgeEmbeddingStore.SearchResult> selected = select(response.results());
-            RagEvidence evidence = evidence(response, selected, toolCallId);
+            boolean answerable = answerabilityPolicy.assess(query, response.results()).answerable();
+            List<KnowledgeEmbeddingStore.SearchResult> selected = answerable
+                    ? select(response.results()) : List.of();
+            RagEvidence evidence = evidence(response, selected, toolCallId, answerable);
             long durationMs = Duration.between(startedAt, Instant.now()).toMillis();
             executionStore.succeedTool(runId, stepId, toolCallId, json(resultPayload(evidence)),
                     durationMs, Instant.now());
             listener.onCompleted(toolCallId, TOOL_NAME, selected.size(), response.model());
-            return selected.isEmpty() ? Optional.empty() : Optional.of(evidence);
+            return Optional.of(evidence);
         }
         catch (KnowledgeSearchService.EmbeddingUnavailableException exception) {
             fail(stepId, toolCallId, "EMBEDDING_UNAVAILABLE", startedAt);
@@ -110,7 +126,16 @@ public class KnowledgeRagService {
 
     private RagEvidence evidence(KnowledgeSearchService.SearchResponse response,
                                  List<KnowledgeEmbeddingStore.SearchResult> selected,
-                                 UUID toolCallId) {
+                                 UUID toolCallId, boolean answerable) {
+        if (!answerable) {
+            return new RagEvidence("""
+
+                    官方知识库证据判定：当前问题不属于 Spring AI、LangChain4j 或 Dify 的已收录官方文档范围，
+                    或检索结果没有命中问题所指项目。必须明确回答“当前官方证据不足”，不得依赖模型记忆补充事实。
+                    """, List.of(), List.of(), toolCallId, response.provider(), response.model(),
+                    response.mode(), response.vectorAvailable(), false,
+                    response.durationMs(), List.of());
+        }
         StringBuilder prompt = new StringBuilder("""
 
                 官方知识库检索证据：
@@ -137,7 +162,7 @@ public class KnowledgeRagService {
         prompt.append("</official_knowledge_evidence>\n");
         return new RagEvidence(prompt.toString(), List.copyOf(urls), List.copyOf(citations),
                 toolCallId, response.provider(), response.model(), response.mode(),
-                response.vectorAvailable(), response.durationMs(), selected);
+                response.vectorAvailable(), true, response.durationMs(), selected);
     }
 
     private Map<String, Object> resultPayload(RagEvidence evidence) {
@@ -153,6 +178,7 @@ public class KnowledgeRagService {
         }
         return Map.of("provider", evidence.provider(), "model", evidence.model(),
                 "mode", evidence.mode(), "vectorAvailable", evidence.vectorAvailable(),
+                "answerable", evidence.answerable(),
                 "retrievalDurationMs", evidence.retrievalDurationMs(), "sources", sources);
     }
 
@@ -181,14 +207,14 @@ public class KnowledgeRagService {
     public record RagEvidence(String systemPromptAppendix, List<String> sourceUrls,
                               List<ChatCitation> citations, UUID toolCallId,
                               String provider, String model, String mode,
-                              boolean vectorAvailable, long retrievalDurationMs,
+                              boolean vectorAvailable, boolean answerable, long retrievalDurationMs,
                               List<KnowledgeEmbeddingStore.SearchResult> results) {
         public RagEvidence(String systemPromptAppendix, List<String> sourceUrls,
                            UUID toolCallId, String provider, String model,
                            long retrievalDurationMs,
                            List<KnowledgeEmbeddingStore.SearchResult> results) {
             this(systemPromptAppendix, sourceUrls, List.of(), toolCallId, provider, model,
-                    "VECTOR", true, retrievalDurationMs, results);
+                    "VECTOR", true, true, retrievalDurationMs, results);
         }
     }
 

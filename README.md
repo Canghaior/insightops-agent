@@ -139,6 +139,8 @@ GET  /api/v1/admin/knowledge/sources
 POST /api/v1/admin/knowledge/sources/{sourceId}/sync
 GET  /api/v1/admin/knowledge/embeddings
 POST /api/v1/admin/knowledge/embeddings/retry
+GET  /api/v1/admin/knowledge/evaluations/latest
+POST /api/v1/admin/knowledge/evaluations
 POST /api/v1/knowledge/search
 GET  /api/v1/runs?page=0&size=20&status=SUCCEEDED
 GET  /api/v1/runs/{runId}
@@ -171,6 +173,10 @@ GET  /api/v1/runs/{runId}
 ## P1.4-D 混合检索与引用质量门禁
 
 检索现已同时执行本地 `bge-m3` 语义召回和 PostgreSQL 全文召回，再以加权 RRF 做确定性融合，并继续应用项目提示、文档去重和上下文预算。每条 `[S#]` 证据以结构化 JSONB 保存标签、项目、标题、章节、官方 URL、来源类型与融合得分；聊天刷新和 Run 详情均能恢复为可点击引用卡片。仓库内新增 12 条、三个项目各 4 条的离线评测集及自动化结构门禁。设计见 [P1.4-D 混合 RAG 质量工程](docs/architecture/p1-hybrid-rag-quality.md)，真实验收见 [P1.4-D 验收结果](docs/testing/results/p1-hybrid-rag-e2e-2026-08-17.md)。
+
+## P1.4-E RAG 自动化质量评测
+
+系统管理员可在“知识库采集”页面一键运行固定的 15 题质量集：12 道覆盖 Spring AI、LangChain4j、Dify 的可回答题和 3 道越界拒答题。每次必跑本地混合检索指标，并默认从三个项目各抽一题调用 DeepSeek 检查引用准确率、引用覆盖率和回答忠实度。汇总指标、门禁结果和每题明细保存到 PostgreSQL，可重复运行并查看最近结果；越界问题会被强制判为“当前官方证据不足”。设计见 [P1.4-E RAG 自动化质量评测](docs/architecture/p1-rag-evaluation-quality-gate.md)，真实验收见 [P1.4-E 验收结果](docs/testing/results/p1-rag-evaluation-e2e-2026-08-17.md)。
 
 ## DeepSeek API Key
 

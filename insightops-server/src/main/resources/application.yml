@@ -47,6 +47,14 @@ insightops:
       max-evidence-chunks: ${RAG_MAX_EVIDENCE_CHUNKS:6}
       max-chunks-per-document: ${RAG_MAX_CHUNKS_PER_DOCUMENT:2}
       max-context-characters: ${RAG_MAX_CONTEXT_CHARACTERS:12000}
+    evaluation:
+      minimum-recall-at-k: ${RAG_EVAL_MIN_RECALL_AT_K:0.90}
+      minimum-mrr: ${RAG_EVAL_MIN_MRR:0.65}
+      minimum-term-coverage: ${RAG_EVAL_MIN_TERM_COVERAGE:0.55}
+      minimum-no-answer-accuracy: ${RAG_EVAL_MIN_NO_ANSWER_ACCURACY:1.0}
+      minimum-citation-precision: ${RAG_EVAL_MIN_CITATION_PRECISION:0.90}
+      minimum-citation-coverage: ${RAG_EVAL_MIN_CITATION_COVERAGE:0.50}
+      minimum-faithfulness: ${RAG_EVAL_MIN_FAITHFULNESS:0.75}
   auth:
     session-days: ${AUTH_SESSION_DAYS:14}
     secure-cookie: ${AUTH_SECURE_COOKIE:false}

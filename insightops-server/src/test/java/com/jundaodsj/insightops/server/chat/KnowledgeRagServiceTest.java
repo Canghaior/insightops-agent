@@ -82,6 +82,33 @@ class KnowledgeRagServiceTest {
         assertThat(progress).containsExactly("started:knowledge_hybrid_search", "completed:0:unavailable");
     }
 
+    @Test
+    void rejectsOutOfScopeQuestionEvenWhenVectorSearchReturnsAResult() {
+        UUID runId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        KnowledgeSearchService search = mock(KnowledgeSearchService.class);
+        var unrelated = result("Spring AI", "https://docs.spring.io/spring-ai/reference/index.html",
+                "Overview", "Spring AI integrates AI models into Spring applications.", 0.52);
+        when(search.search(eq(runId), eq(workspaceId), eq("Kubernetes Ingress TLS 怎么配置？"), eq(12)))
+                .thenReturn(new KnowledgeSearchService.SearchResponse(
+                        "Kubernetes Ingress TLS 怎么配置？", "ollama", "bge-m3", 8,
+                        List.of(unrelated)));
+        RecordingStore store = new RecordingStore();
+        List<String> progress = new ArrayList<>();
+        KnowledgeRagService service = new KnowledgeRagService(search, store, properties(true),
+                new ObjectMapper());
+
+        var evidence = service.retrieve(runId, workspaceId, "Kubernetes Ingress TLS 怎么配置？",
+                listener(progress)).orElseThrow();
+
+        assertThat(evidence.answerable()).isFalse();
+        assertThat(evidence.sourceUrls()).isEmpty();
+        assertThat(evidence.results()).isEmpty();
+        assertThat(evidence.systemPromptAppendix()).contains("当前官方证据不足");
+        assertThat(progress).containsExactly("started:knowledge_hybrid_search", "completed:0:bge-m3");
+        assertThat(store.resultPayload).contains("\"answerable\":false");
+    }
+
     private static KnowledgeRagService.ToolProgressListener listener(List<String> progress) {
         return new KnowledgeRagService.ToolProgressListener() {
             @Override public void onStarted(UUID id, String name) { progress.add("started:" + name); }

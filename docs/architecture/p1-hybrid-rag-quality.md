@@ -43,9 +43,9 @@ V14 为 `agent_run` 和 `conversation_message` 增加 `citation_details JSONB`�
 
 ## 离线评测集
 
-`docs/evals/p1-rag-questions.jsonl` 当前包含 12 条已审核问题，Spring AI、LangChain4j、Dify 各 4 条。每条记录声明问题、期望项目、关键术语和是否必须返回证据。自动化测试验证 JSONL 可解析、ID/问题唯一、字段完整以及 4/4/4 平衡。
+`docs/evals/p1-rag-questions.jsonl` 已在 P1.4-E 扩充为 15 条已审核问题：Spring AI、LangChain4j、Dify 各 4 条可回答题，另含 3 条越界拒答题。每条记录声明问题、是否可回答、期望项目、关键术语和是否必须返回证据。自动化测试验证 JSONL 可解析、ID/问题唯一、字段完整以及 4/4/4 + 3 的平衡结构。
 
-当前门禁验证数据质量与融合算法的确定性；下一步可在不改变数据格式的前提下增加 Recall@K、MRR、引用覆盖率、忠实度和无答案正确率。
+P1.4-E 已在该数据集上实现 Recall@10、MRR、术语覆盖、引用准确/覆盖率、忠实度和无答案正确率。完整设计与真实基线见 [P1.4-E RAG 自动化质量评测](p1-rag-evaluation-quality-gate.md)。
 
 ## 降级与边界
 

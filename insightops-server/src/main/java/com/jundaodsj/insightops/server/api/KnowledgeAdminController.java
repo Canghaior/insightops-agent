@@ -5,6 +5,12 @@ import com.jundaodsj.insightops.knowledge.application.KnowledgeEmbeddingStore;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import com.jundaodsj.insightops.server.knowledge.KnowledgeEmbeddingProperties;
+import com.jundaodsj.insightops.server.knowledge.RagEvaluationService;
+import com.jundaodsj.insightops.knowledge.application.RagEvaluationStore;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import org.springframework.web.bind.annotation.RequestBody;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -26,19 +32,51 @@ public class KnowledgeAdminController {
     private final KnowledgeStore store;
     private final KnowledgeEmbeddingStore embeddingStore;
     private final KnowledgeEmbeddingProperties embeddingProperties;
+    private final RagEvaluationService evaluationService;
 
     @Autowired
     public KnowledgeAdminController(KnowledgeStore store, KnowledgeEmbeddingStore embeddingStore,
-                                    KnowledgeEmbeddingProperties embeddingProperties) {
+                                    KnowledgeEmbeddingProperties embeddingProperties,
+                                    RagEvaluationService evaluationService) {
         this.store = store;
         this.embeddingStore = embeddingStore;
         this.embeddingProperties = embeddingProperties;
+        this.evaluationService = evaluationService;
     }
 
     KnowledgeAdminController(KnowledgeStore store) {
         this.store = store;
         this.embeddingStore = null;
         this.embeddingProperties = null;
+        this.evaluationService = null;
+    }
+
+    @GetMapping("/evaluations/latest")
+    public ApiResponse<RagEvaluationStore.Report> latestEvaluation(HttpServletRequest request) {
+        var account = requireSystemAdmin(request);
+        return new ApiResponse<>((String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE),
+                evaluationService.latest(account.workspaceId()).orElse(null));
+    }
+
+    @PostMapping("/evaluations")
+    public ApiResponse<RagEvaluationStore.Report> evaluate(
+            @Valid @RequestBody(required = false) EvaluationRequest input,
+            HttpServletRequest request) {
+        var account = requireSystemAdmin(request);
+        int sampleSize = input == null || input.generationSampleSize() == null
+                ? 3 : input.generationSampleSize();
+        boolean judge = input == null || input.judgeFaithfulness() == null
+                || input.judgeFaithfulness();
+        try {
+            var report = evaluationService.run(account.workspaceId(), sampleSize, judge);
+            return new ApiResponse<>((String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE), report);
+        }
+        catch (RagEvaluationService.EvaluationAlreadyRunningException exception) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, exception.getMessage());
+        }
+        catch (RagEvaluationService.EvaluationModelUnavailableException exception) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage());
+        }
     }
 
     @GetMapping("/embeddings")
@@ -84,4 +122,7 @@ public class KnowledgeAdminController {
 
     public record RetryResponse(int resetCount) {
     }
+
+    public record EvaluationRequest(@Min(0) @Max(6) Integer generationSampleSize,
+                                    Boolean judgeFaithfulness) { }
 }

@@ -29,22 +29,33 @@ class P1RagEvaluationDatasetTest {
                 })
                 .toList();
 
-        assertThat(records).hasSizeGreaterThanOrEqualTo(12);
+        assertThat(records).hasSize(15);
         Set<String> ids = new HashSet<>();
         for (JsonNode item : records) {
             assertThat(ids.add(text(item, "id"))).isTrue();
             assertThat(text(item, "question")).isNotBlank();
-            assertThat(text(item, "expectedProject")).isIn(PROJECTS);
+            boolean answerable = item.path("answerable").asBoolean();
+            if (answerable) {
+                assertThat(text(item, "expectedProject")).isIn(PROJECTS);
+                assertThat(text(item, "sourceDomain")).startsWith("docs.");
+                assertTextArray(item, "mustHitTerms", true);
+                assertTextArray(item, "answerMustInclude", true);
+            }
+            else {
+                assertThat(item.path("expectedProject").isNull()).isTrue();
+                assertThat(item.path("sourceDomain").isNull()).isTrue();
+                assertTextArray(item, "mustHitTerms", false);
+                assertTextArray(item, "answerMustInclude", false);
+            }
             assertThat(text(item, "category")).isNotBlank();
-            assertThat(text(item, "sourceDomain")).startsWith("docs.");
             assertThat(text(item, "status")).isEqualTo("verified");
-            assertTextArray(item, "mustHitTerms");
-            assertTextArray(item, "answerMustInclude");
         }
-        Map<String, Long> coverage = records.stream().collect(Collectors.groupingBy(
+        Map<String, Long> coverage = records.stream().filter(item -> item.path("answerable").asBoolean())
+                .collect(Collectors.groupingBy(
                 item -> item.path("expectedProject").asText(), Collectors.counting()));
         assertThat(coverage).containsEntry("spring-ai", 4L)
                 .containsEntry("langchain4j", 4L).containsEntry("dify", 4L);
+        assertThat(records.stream().filter(item -> !item.path("answerable").asBoolean())).hasSize(3);
     }
 
     private static String text(JsonNode item, String field) {
@@ -53,9 +64,9 @@ class P1RagEvaluationDatasetTest {
         return item.path(field).asText();
     }
 
-    private static void assertTextArray(JsonNode item, String field) {
+    private static void assertTextArray(JsonNode item, String field, boolean nonEmpty) {
         assertThat(item.path(field).isArray()).as("%s must be an array", field).isTrue();
-        assertThat(item.path(field).size()).isGreaterThan(0);
+        if (nonEmpty) assertThat(item.path(field).size()).isGreaterThan(0);
         assertThat(item.path(field).valueStream().allMatch(JsonNode::isTextual)).isTrue();
     }
 

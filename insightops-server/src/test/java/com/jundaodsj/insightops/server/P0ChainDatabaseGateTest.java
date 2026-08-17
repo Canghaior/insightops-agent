@@ -112,7 +112,7 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(14);
+        assertThat(migration.migrationsExecuted).isEqualTo(15);
 
         jdbcClient = JdbcClient.create(dataSource);
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);

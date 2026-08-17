@@ -87,7 +87,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (-not $SkipBuild) {
-    & $mavenCommand -pl insightops-server,insightops-worker -am package -DskipTests
+    # Clean executable JARs first: Spring Boot can otherwise reuse an unchanged worker
+    # archive whose nested infrastructure dependency predates a new Flyway migration.
+    & $mavenCommand -pl insightops-server,insightops-worker -am clean package -DskipTests
     if ($LASTEXITCODE -ne 0) {
         throw 'Backend build failed.'
     }

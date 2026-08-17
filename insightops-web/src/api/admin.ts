@@ -135,8 +135,56 @@ export interface KnowledgeSearchResponse {
   query: string
   provider: string
   model: string
+  mode: string
+  vectorAvailable: boolean
   durationMs: number
   results: KnowledgeSearchResult[]
+}
+
+export interface RagEvaluationCase {
+  caseKey: string
+  question: string
+  expectedAnswerable: boolean
+  expectedProject: string | null
+  predictedAnswerable: boolean
+  answerabilityCorrect: boolean
+  projectHit: boolean
+  reciprocalRank: number
+  termCoverage: number
+  retrievalMode: string
+  topProjects: string[]
+  sourceUrls: string[]
+  citationPrecision: number | null
+  citationCoverage: number | null
+  faithfulness: number | null
+  judgeReason: string | null
+  generatedAnswer: string | null
+}
+
+export interface RagEvaluationSummary {
+  recallAtK: number
+  meanReciprocalRank: number
+  projectHitRate: number
+  termCoverage: number
+  noAnswerAccuracy: number
+  citationPrecision: number | null
+  citationCoverage: number | null
+  faithfulness: number | null
+  passed: boolean
+  modelName: string | null
+}
+
+export interface RagEvaluationReport {
+  id: string
+  datasetName: string
+  status: 'RUNNING' | 'PASSED' | 'FAILED' | 'ERROR'
+  caseCount: number
+  generationSampleSize: number
+  summary: RagEvaluationSummary | null
+  errorMessage: string | null
+  startedAt: string
+  finishedAt: string | null
+  cases: RagEvaluationCase[]
 }
 
 export async function listUsers(): Promise<ManagedUser[]> {
@@ -207,5 +255,22 @@ export async function retryKnowledgeEmbeddings(): Promise<number> {
 
 export async function searchKnowledge(query: string, limit = 8): Promise<KnowledgeSearchResponse> {
   const response = await apiClient.post<{ data: KnowledgeSearchResponse }>('/knowledge/search', { query, limit })
+  return response.data.data
+}
+
+export async function getLatestRagEvaluation(): Promise<RagEvaluationReport | null> {
+  const response = await apiClient.get<{ data: RagEvaluationReport | null }>('/admin/knowledge/evaluations/latest')
+  return response.data.data
+}
+
+export async function runRagEvaluation(
+  generationSampleSize = 3,
+  judgeFaithfulness = true,
+): Promise<RagEvaluationReport> {
+  const response = await apiClient.post<{ data: RagEvaluationReport }>(
+    '/admin/knowledge/evaluations',
+    { generationSampleSize, judgeFaithfulness },
+    { timeout: 120_000 },
+  )
   return response.data.data
 }

@@ -3,14 +3,18 @@ import axios from 'axios'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import {
+  getLatestRagEvaluation,
   getKnowledgeEmbeddingOverview,
   listKnowledgeSources,
   retryKnowledgeEmbeddings,
   requestKnowledgeSync,
+  runRagEvaluation,
   searchKnowledge,
   type KnowledgeEmbeddingOverview,
   type KnowledgeSearchResult,
   type KnowledgeSourceStatus,
+  type RagEvaluationCase,
+  type RagEvaluationReport,
 } from '@/api/admin'
 
 const sources = ref<KnowledgeSourceStatus[]>([])
@@ -24,6 +28,8 @@ const searchQuery = ref('')
 const searching = ref(false)
 const searchResults = ref<KnowledgeSearchResult[]>([])
 const searchMeta = ref('')
+const evaluation = ref<RagEvaluationReport | null>(null)
+const evaluating = ref(false)
 let refreshTimer: ReturnType<typeof globalThis.setInterval> | undefined
 
 const totals = computed(() => sources.value.reduce((value, source) => ({
@@ -41,14 +47,28 @@ async function load(silent = false) {
   if (!silent) loading.value = true
   if (!silent) error.value = ''
   try {
-    const [sourceData, embeddingData] = await Promise.all([
-      listKnowledgeSources(), getKnowledgeEmbeddingOverview(),
+    const [sourceData, embeddingData, evaluationData] = await Promise.all([
+      listKnowledgeSources(), getKnowledgeEmbeddingOverview(), getLatestRagEvaluation(),
     ])
     sources.value = sourceData
     embeddings.value = embeddingData
+    evaluation.value = evaluationData
   }
   catch (caught: unknown) { error.value = message(caught) }
   finally { if (!silent) loading.value = false }
+}
+
+async function evaluateRag() {
+  evaluating.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    evaluation.value = await runRagEvaluation(3, true)
+    notice.value = evaluation.value.summary?.passed
+      ? 'RAG 质量评测已通过。15 道题的完整结果已经保存。'
+      : 'RAG 质量评测已完成，但有指标未达到门禁，请查看失败题目。'
+  } catch (caught: unknown) { error.value = message(caught) }
+  finally { evaluating.value = false }
 }
 
 async function retryEmbeddings() {
@@ -121,6 +141,24 @@ function statusClass(source: KnowledgeSourceStatus): string {
   return ''
 }
 
+function percent(value: number | null | undefined): string {
+  return value == null ? '未评测' : `${(value * 100).toFixed(1)}%`
+}
+
+function evaluationStatus(): string {
+  if (!evaluation.value) return '尚未运行'
+  const labels: Record<string, string> = {
+    PASSED: '通过', FAILED: '未通过', ERROR: '执行错误', RUNNING: '运行中',
+  }
+  return labels[evaluation.value.status] ?? evaluation.value.status
+}
+
+function failedCase(item: RagEvaluationCase): boolean {
+  return !item.answerabilityCorrect || (item.expectedAnswerable && !item.projectHit)
+    || (item.citationPrecision != null && item.citationPrecision < 0.9)
+    || (item.faithfulness != null && item.faithfulness < 0.75)
+}
+
 onMounted(() => {
   void load()
   refreshTimer = globalThis.setInterval(() => {
@@ -137,7 +175,7 @@ onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer)
 <template>
   <section>
     <div class="section-heading">
-      <div><span class="eyebrow">P1.4-B · 向量检索</span><h2>知识库与 Embedding 管理</h2></div>
+      <div><span class="eyebrow">P1.4-E · 质量评测</span><h2>知识库、Embedding 与 RAG 质量管理</h2></div>
       <button class="secondary-button" :disabled="loading" @click="load()">刷新状态</button>
     </div>
 
@@ -172,6 +210,45 @@ onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer)
       <button v-if="embeddings.failed" class="secondary-button" :disabled="retryingEmbeddings" @click="retryEmbeddings">
         {{ retryingEmbeddings ? '提交中…' : '重试失败切片' }}
       </button>
+    </article>
+
+    <article class="panel rag-evaluation-panel">
+      <header>
+        <div>
+          <span class="eyebrow">自动化质量门禁</span>
+          <h3>RAG 评测集</h3>
+          <p>固定运行 15 道题：12 道三项目知识题与 3 道越界题；抽样 3 题调用 DeepSeek 检查引用和忠实度。</p>
+        </div>
+        <div class="evaluation-action">
+          <i class="status-pill" :class="evaluation?.status === 'PASSED' ? 'status-succeeded' : evaluation ? 'status-failed' : ''">
+            {{ evaluationStatus() }}
+          </i>
+          <button class="send-button" :disabled="evaluating" @click="evaluateRag">
+            {{ evaluating ? '评测中…' : '一键运行评测' }}
+          </button>
+        </div>
+      </header>
+      <template v-if="evaluation?.summary">
+        <div class="evaluation-metrics">
+          <span><small>Recall@10</small><b>{{ percent(evaluation.summary.recallAtK) }}</b></span>
+          <span><small>MRR</small><b>{{ percent(evaluation.summary.meanReciprocalRank) }}</b></span>
+          <span><small>术语覆盖</small><b>{{ percent(evaluation.summary.termCoverage) }}</b></span>
+          <span><small>拒答准确率</small><b>{{ percent(evaluation.summary.noAnswerAccuracy) }}</b></span>
+          <span><small>引用准确率</small><b>{{ percent(evaluation.summary.citationPrecision) }}</b></span>
+          <span><small>引用覆盖率</small><b>{{ percent(evaluation.summary.citationCoverage) }}</b></span>
+          <span><small>忠实度</small><b>{{ percent(evaluation.summary.faithfulness) }}</b></span>
+        </div>
+        <small>数据集 {{ evaluation.datasetName }} · {{ evaluation.caseCount }} 题 · {{ time(evaluation.finishedAt || evaluation.startedAt) }} · {{ evaluation.summary.modelName || '仅检索' }}</small>
+        <details v-if="evaluation.cases.some(failedCase)" class="evaluation-failures">
+          <summary>查看未达标题目（{{ evaluation.cases.filter(failedCase).length }}）</summary>
+          <div v-for="item in evaluation.cases.filter(failedCase)" :key="item.caseKey">
+            <b>{{ item.caseKey }} · {{ item.question }}</b>
+            <span>预期 {{ item.expectedProject || '拒答' }} · 实际 {{ item.predictedAnswerable ? (item.topProjects[0] || '有结果') : '拒答' }}</span>
+          </div>
+        </details>
+      </template>
+      <p v-else-if="evaluation?.errorMessage" class="stream-error">{{ evaluation.errorMessage }}</p>
+      <p v-else class="muted-copy">首次运行会生成基线，结果及每题明细会保存到 PostgreSQL。</p>
     </article>
 
     <article class="panel knowledge-search-panel">

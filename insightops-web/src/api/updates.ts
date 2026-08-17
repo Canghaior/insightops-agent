@@ -13,6 +13,11 @@ export interface ProjectUpdate {
   occurredAt: string
   collectedAt: string
   read: boolean
+  analysisId: string | null
+  analysisStatus: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'RETRY_WAIT' | 'FAILED' | null
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | null
+  recommendation: 'WATCH' | 'TRY' | 'UPGRADE' | null
+  intelligenceSummary: string | null
 }
 
 export interface UpdatePage {

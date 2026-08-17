@@ -6,6 +6,7 @@ import com.jundaodsj.insightops.conversation.application.ChatRunStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.identity.application.AccountWorkspaceStore;
 import com.jundaodsj.insightops.identity.application.AdminAccountStore;
+import com.jundaodsj.insightops.intelligence.application.IntelligenceStore;
 import com.jundaodsj.insightops.project.application.ProjectUpdateStore;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekPricingProperties;
@@ -18,6 +19,7 @@ import com.jundaodsj.insightops.infrastructure.persistence.JdbcChatRunStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserMemoryStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcConversationManager;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcProjectUpdateStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcIntelligenceStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserProjectWatchStore;
 import com.jundaodsj.insightops.model.application.ChatStreamEvent;
 import com.jundaodsj.insightops.model.application.ChatStreamSession;
@@ -75,6 +77,7 @@ class P0ChainDatabaseGateTest {
     private static JdbcClient jdbcClient;
     private static JdbcAdminAccountStore adminAccountStore;
     private static JdbcProjectUpdateStore projectUpdateStore;
+    private static JdbcIntelligenceStore intelligenceStore;
 
     @BeforeAll
     static void prepareIsolatedSchema() {
@@ -92,11 +95,12 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(10);
+        assertThat(migration.migrationsExecuted).isEqualTo(11);
 
         jdbcClient = JdbcClient.create(dataSource);
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
         projectUpdateStore = new JdbcProjectUpdateStore(jdbcClient, objectMapper());
+        intelligenceStore = new JdbcIntelligenceStore(jdbcClient, objectMapper());
         DeepSeekCostEstimator estimator = new DeepSeekCostEstimator(pricing());
         runStore = new JdbcChatRunStore(jdbcClient, estimator);
         runQuery = new JdbcAgentRunQuery(jdbcClient, objectMapper());
@@ -132,6 +136,8 @@ class P0ChainDatabaseGateTest {
                 "$2a$12$test", "USER", "MEMBER", now);
         ActorContext secondActor = new ActorContext(secondUserId, ACTOR.workspaceId());
         assertThat(projectWatchStore.setEnabled(secondActor, spring.id(), true, now)).isPresent();
+        long actorUnreadBefore = projectUpdateStore.unreadCount(ACTOR);
+        long secondUnreadBefore = projectUpdateStore.unreadCount(secondActor);
         GitHubRelease release = new GitHubRelease(
                 "spring-ai", "Spring AI", "v2.1.0", "Spring AI 2.1.0",
                 now.minus(Duration.ofDays(1)),
@@ -141,19 +147,21 @@ class P0ChainDatabaseGateTest {
         ProjectUpdateStore.SyncResult first = projectUpdateStore.completeSuccessfulSync(
                 spring, List.of(release), now, now.plus(Duration.ofHours(6)));
         assertThat(first.newEventCount()).isEqualTo(1);
-        assertThat(projectUpdateStore.unreadCount(ACTOR)).isEqualTo(1);
-        assertThat(projectUpdateStore.unreadCount(secondActor)).isEqualTo(1);
+        assertThat(projectUpdateStore.unreadCount(ACTOR)).isEqualTo(actorUnreadBefore + 1);
+        assertThat(projectUpdateStore.unreadCount(secondActor)).isEqualTo(secondUnreadBefore + 1);
 
         ProjectUpdateStore.UpdatePage updates = projectUpdateStore.listUpdates(ACTOR, 0, 20, null, true);
-        assertThat(updates.items()).singleElement().satisfies(update -> {
+        assertThat(updates.items()).filteredOn(update -> update.versionTag().equals("v2.1.0"))
+                .singleElement().satisfies(update -> {
             assertThat(update.versionTag()).isEqualTo("v2.1.0");
             assertThat(update.sourceUrl()).contains("github.com/spring-projects/spring-ai/releases/tag/");
             assertThat(update.read()).isFalse();
         });
-        UUID eventId = updates.items().getFirst().eventId();
+        UUID eventId = updates.items().stream().filter(update -> update.versionTag().equals("v2.1.0"))
+                .findFirst().orElseThrow().eventId();
         assertThat(projectUpdateStore.markRead(ACTOR, eventId, now.plusSeconds(1))).isTrue();
-        assertThat(projectUpdateStore.unreadCount(ACTOR)).isZero();
-        assertThat(projectUpdateStore.unreadCount(secondActor)).isEqualTo(1);
+        assertThat(projectUpdateStore.unreadCount(ACTOR)).isEqualTo(actorUnreadBefore);
+        assertThat(projectUpdateStore.unreadCount(secondActor)).isEqualTo(secondUnreadBefore + 1);
 
         assertThat(projectUpdateStore.requestSync(ACTOR.workspaceId(), spring.id(), now.plusSeconds(2))).isTrue();
         ProjectUpdateStore.TrackedProject secondClaim = projectUpdateStore.claimDueProjects(
@@ -162,11 +170,64 @@ class P0ChainDatabaseGateTest {
         ProjectUpdateStore.SyncResult second = projectUpdateStore.completeSuccessfulSync(
                 secondClaim, List.of(release), now.plusSeconds(3), now.plus(Duration.ofHours(6)));
         assertThat(second.newEventCount()).isZero();
-        assertThat(projectUpdateStore.listUpdates(ACTOR, 0, 20, null, false).total()).isEqualTo(1);
+        assertThat(projectUpdateStore.listUpdates(ACTOR, 0, 100, null, false).items())
+                .filteredOn(update -> update.versionTag().equals("v2.1.0")).hasSize(1);
         assertThat(projectUpdateStore.collectionStatus(ACTOR.workspaceId()))
                 .filteredOn(status -> status.projectId().equals(spring.id()))
                 .singleElement().extracting(ProjectUpdateStore.CollectionStatus::status)
                 .isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    void shouldQueueAnalyzeNotifyAndDigestNewReleaseWithoutCrossUserLeakage() {
+        Instant now = Instant.parse("2026-08-17T09:00:00Z");
+        UUID springId = UUID.fromString("00000000-0000-0000-0000-000000000101");
+        projectUpdateStore.requestSync(ACTOR.workspaceId(), springId, now);
+        ProjectUpdateStore.TrackedProject spring = projectUpdateStore.claimDueProjects(
+                now, Duration.ofMinutes(5), 3).stream()
+                .filter(project -> project.id().equals(springId)).findFirst().orElseThrow();
+        GitHubRelease release = new GitHubRelease(
+                "spring-ai", "Spring AI", "v2.2.0", "Spring AI 2.2.0",
+                now.minus(Duration.ofHours(1)),
+                "https://github.com/spring-projects/spring-ai/releases/tag/v2.2.0",
+                false, "New observability API and a breaking chat memory migration.");
+        projectUpdateStore.completeSuccessfulSync(spring, List.of(release), now, now.plus(Duration.ofHours(6)));
+        UUID eventId = projectUpdateStore.listUpdates(ACTOR, 0, 100, springId, false).items().stream()
+                .filter(update -> update.versionTag().equals("v2.2.0")).findFirst().orElseThrow().eventId();
+
+        List<IntelligenceStore.AnalysisTask> tasks = intelligenceStore.claimDueAnalyses(
+                now.plusSeconds(1), Duration.ofMinutes(5), 20, 5);
+        IntelligenceStore.AnalysisTask task = tasks.stream()
+                .filter(candidate -> candidate.eventId().equals(eventId)).findFirst().orElseThrow();
+        assertThat(task.automatic()).isTrue();
+        var result = new IntelligenceStore.AnalysisResult(
+                "HIGH", "TRY", "SUFFICIENT", "可观测性增强，但聊天记忆迁移需要兼容性验证。",
+                List.of("新增可观测性 API"), "Java 服务需要验证现有监控集成。", "便于定位 Agent 执行问题。",
+                List.of("聊天记忆存在破坏性变更"), List.of("先在测试环境升级"), List.of(release.url()));
+        intelligenceStore.completeAnalysis(task, result, new IntelligenceStore.ModelAudit(
+                "deepseek", "deepseek-v4-flash", new ModelUsage(500, 200, 700, 0L, 0L),
+                new BigDecimal("0.000900"), LocalDate.parse("2026-08-16")), now.plusSeconds(2));
+
+        IntelligenceStore.AnalysisPage page = intelligenceStore.listAnalyses(ACTOR, 0, 20, springId, "HIGH");
+        assertThat(page.items()).filteredOn(item -> item.eventId().equals(eventId)).singleElement()
+                .satisfies(item -> assertThat(item.oneLineSummary()).contains("兼容性验证"));
+        assertThat(intelligenceStore.findAnalysis(ACTOR, task.analysisId())).isPresent();
+        assertThat(intelligenceStore.unreadNotifications(ACTOR)).isGreaterThanOrEqualTo(2);
+
+        UUID secondUser = UUID.randomUUID();
+        createTestUser(secondUser, "intelligence-isolated", "Intelligence Isolated");
+        ActorContext secondActor = new ActorContext(secondUser, ACTOR.workspaceId());
+        assertThat(intelligenceStore.findAnalysis(secondActor, task.analysisId())).isEmpty();
+        projectWatchStore.setEnabled(secondActor, springId, true, now.plusSeconds(3));
+        assertThat(intelligenceStore.findAnalysis(secondActor, task.analysisId())).isPresent();
+        assertThat(intelligenceStore.unreadNotifications(secondActor)).isZero();
+
+        IntelligenceStore.DigestPreference preference = intelligenceStore.savePreference(
+                ACTOR, "DAILY", "Asia/Shanghai", 9, List.of(springId), now.plusSeconds(4));
+        assertThat(preference.cadence()).isEqualTo("DAILY");
+        assertThat(intelligenceStore.refreshDueDigests(Instant.parse("2026-08-18T02:00:00Z"))).isEqualTo(1);
+        assertThat(intelligenceStore.listDigests(ACTOR, 0, 20).items()).singleElement()
+                .satisfies(digest -> assertThat(digest.highRiskCount()).isEqualTo(1));
     }
 
     @Test

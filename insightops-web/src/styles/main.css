@@ -165,6 +165,56 @@ a { color: inherit; text-decoration: none; }
 .update-card time { color: var(--muted); font-size: 10px; }
 .update-card footer a { color: var(--accent); font-size: 11px; }
 .update-card .send-button { padding: 8px 11px; border: 0; border-radius: 8px; cursor: pointer; }
+.intelligence-preview { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; margin: 13px 0; padding: 11px 13px; border: 1px solid rgba(103, 212, 180, .18); border-radius: 10px; background: rgba(103, 212, 180, .05); }
+.intelligence-preview span { padding: 5px 7px; border-radius: 7px; font-size: 9px; font-weight: 700; }
+.intelligence-preview p { margin: 0; color: #c7d2d2; font-size: 11px; }
+.risk-low { color: #7cdbb2; background: rgba(53, 142, 103, .12); }
+.risk-medium { color: #e8bc78; background: rgba(150, 104, 38, .12); }
+.risk-high { color: #ff9090; background: rgba(168, 54, 54, .12); }
+.intelligence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.intelligence-card { color: inherit; text-align: left; cursor: pointer; transition: transform .2s, border-color .2s; }
+.intelligence-card:hover { transform: translateY(-2px); border-color: rgba(103, 212, 180, .4); }
+.intelligence-card header, .intelligence-card footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.intelligence-card header span { color: var(--muted); font-size: 10px; }
+.intelligence-card h3 { margin: 16px 0 8px; font-size: 19px; }
+.intelligence-card p { min-height: 52px; color: #aebbbc; line-height: 1.65; }
+.intelligence-card footer { padding-top: 13px; border-top: 1px solid var(--line); }
+.intelligence-card footer b { color: var(--accent); font-size: 10px; }
+.intelligence-card time { color: var(--muted); font-size: 9px; }
+.intelligence-detail ul, .intelligence-detail ol { color: #cad4d6; line-height: 1.8; }
+.risk-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px; border: 1px solid currentColor; border-radius: 12px; }
+.risk-banner span { color: #cad4d6; font-size: 11px; }
+.intelligence-research { width: 100%; margin-top: 16px; padding: 12px; border: 0; border-radius: 10px; cursor: pointer; }
+.digest-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(290px, .7fr); gap: 18px; align-items: start; }
+.subsection-title { margin: 0 0 12px; color: #dfe8e8; font-size: 15px; }
+.digest-list { display: grid; gap: 13px; }
+.digest-card.unread { box-shadow: inset 3px 0 var(--accent); }
+.digest-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.digest-card header h3 { margin: 7px 0 0; }
+.digest-card header i { padding: 4px 7px; color: #07110e; border-radius: 99px; background: var(--accent); font-size: 9px; font-style: normal; }
+.digest-card > p { color: var(--muted); font-size: 10px; }
+.digest-item { width: 100%; display: grid; gap: 5px; margin-top: 8px; padding: 11px; color: inherit; text-align: left; border: 1px solid var(--line); border-radius: 9px; background: #0e1517; cursor: pointer; }
+.digest-item b { color: #bfe5d9; font-size: 11px; }
+.digest-item span { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.notification-list { padding: 4px 16px; }
+.notification-list button { width: 100%; display: grid; grid-template-columns: 8px 1fr; gap: 10px; padding: 14px 0; color: inherit; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: transparent; cursor: pointer; }
+.notification-list button > i { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: #49575a; }
+.notification-list button.unread > i { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+.notification-list button.critical > i { background: #ff7777; }
+.notification-list strong, .notification-list p, .notification-list time { display: block; }
+.notification-list p { margin: 6px 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.notification-list time { color: #677579; font-size: 9px; }
+.settings-subheading { margin-top: 34px; }
+.digest-preference-form { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+.digest-preference-form fieldset { grid-column: 1 / -1; display: flex; gap: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.digest-preference-form legend { padding: 0 6px; color: var(--muted); font-size: 10px; }
+.digest-preference-form .success-notice { grid-column: 1 / -1; }
+.digest-preference-form .send-button { width: fit-content; padding: 10px 15px; border: 0; border-radius: 9px; cursor: pointer; }
+.intelligence-metrics { margin-bottom: 14px; }
+.analysis-admin-list { padding: 0 18px; }
+.analysis-admin-list article { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.analysis-admin-list small { display: block; margin-top: 5px; color: var(--muted); font-size: 9px; }
+.analysis-admin-list p { grid-column: 1 / -1; margin: 0; color: #ffaaaa; font-size: 10px; }
 .memory-form { display: grid; grid-template-columns: 1fr 180px auto; gap: 10px; }
 .memory-form textarea { grid-column: 1 / -1; min-height: 90px; resize: vertical; }
 .memory-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 18px; }
@@ -333,14 +383,14 @@ a { color: inherit; text-decoration: none; }
   .brand div, .navigation span, .scope-note { display: none; }
   .brand { padding-left: 5px; }
   .navigation a { justify-content: center; }
-  .page-grid, .research-layout { grid-template-columns: 1fr; }
+  .page-grid, .research-layout, .digest-layout { grid-template-columns: 1fr; }
   .admin-create-form { grid-template-columns: 1fr 1fr; }
   .admin-table-head { display: none; }
   .admin-user-row { grid-template-columns: 1fr 1fr; }
   .account-actions { grid-column: 1 / -1; }
   .conversation-sidebar { order: -1; }
   .conversation-list { max-height: 240px; }
-  .project-grid, .flow-list, .collection-grid { grid-template-columns: 1fr 1fr; }
+  .project-grid, .flow-list, .collection-grid, .intelligence-grid { grid-template-columns: 1fr 1fr; }
 }
 
 @media (max-width: 640px) {
@@ -355,6 +405,8 @@ a { color: inherit; text-decoration: none; }
   .memory-form, .memory-list { grid-template-columns: 1fr; }
   .admin-create-form, .admin-user-row, .audit-list article { grid-template-columns: 1fr; }
   .collection-grid { grid-template-columns: 1fr; }
+  .intelligence-grid, .digest-preference-form { grid-template-columns: 1fr; }
+  .digest-preference-form fieldset { grid-column: auto; flex-direction: column; }
   .update-controls, .update-card header, .update-card footer { align-items: stretch; flex-direction: column; }
   .update-controls .check-label { margin: 0; }
   .admin-form-heading { display: grid; gap: 7px; }

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
+import { getDigestPreference, saveDigestPreference, type DigestPreference } from '@/api/intelligence'
+import { listProjects, type ProjectWatch } from '@/api/projects'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -12,6 +14,9 @@ const form = reactive({ currentPassword: '', newPassword: '', confirmPassword: '
 const saving = ref(false)
 const error = ref('')
 const forced = computed(() => route.query.required === '1' || auth.account?.mustChangePassword)
+const projects = ref<ProjectWatch[]>([])
+const digest = reactive<DigestPreference>({ cadence: 'OFF', timeZone: 'Asia/Shanghai', deliveryHour: 9, projectIds: [] })
+const digestNotice = ref('')
 
 async function submit() {
   error.value = ''
@@ -33,6 +38,19 @@ async function submit() {
     saving.value = false
   }
 }
+
+async function saveDigest() {
+  error.value = ''; digestNotice.value = ''
+  try { Object.assign(digest, await saveDigestPreference({ ...digest })); digestNotice.value = '情报摘要偏好已保存。' }
+  catch { error.value = '摘要偏好保存失败，请检查时区和时间设置。' }
+}
+
+onMounted(async () => {
+  try {
+    const [preference, projectList] = await Promise.all([getDigestPreference(), listProjects()])
+    Object.assign(digest, preference); projects.value = projectList.filter((project) => project.enabled)
+  } catch { error.value = '账号设置加载失败，请稍后刷新。' }
+})
 </script>
 
 <template>
@@ -52,6 +70,14 @@ async function submit() {
       <p class="subtle">密码需为 10–72 位，并同时包含大写字母、小写字母和数字。</p>
       <p v-if="error" class="stream-error">{{ error }}</p>
       <button class="send-button" :disabled="saving">{{ saving ? '正在保存…' : '修改密码并重新登录' }}</button>
+    </form>
+    <div class="section-heading settings-subheading"><div><span class="eyebrow">技术情报投递</span><h2>摘要偏好</h2></div><span class="subtle">只在站内生成，不发送邮件或微信</span></div>
+    <form class="panel digest-preference-form" @submit.prevent="saveDigest">
+      <label>摘要频率<select v-model="digest.cadence"><option value="OFF">关闭</option><option value="DAILY">每日</option><option value="WEEKLY">每周一</option></select></label>
+      <label>时区<input v-model="digest.timeZone" maxlength="64" required /></label>
+      <label>生成时间<select v-model.number="digest.deliveryHour"><option v-for="hour in 24" :key="hour-1" :value="hour-1">{{ String(hour-1).padStart(2,'0') }}:00</option></select></label>
+      <fieldset><legend>摘要项目（不选表示全部关注项目）</legend><label v-for="project in projects" :key="project.id" class="check-label"><input v-model="digest.projectIds" type="checkbox" :value="project.id" /> {{ project.name }}</label></fieldset>
+      <p v-if="digestNotice" class="success-notice">{{ digestNotice }}</p><button class="send-button">保存摘要偏好</button>
     </form>
   </section>
 </template>

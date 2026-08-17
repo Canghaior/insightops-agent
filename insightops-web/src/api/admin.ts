@@ -46,6 +46,16 @@ export interface CollectionStatus {
   lastError: string | null
 }
 
+export interface AnalysisAdminStatus {
+  analysisId: string; eventId: string; projectName: string; versionTag: string
+  status: string; riskLevel: string | null; attempts: number; maxAttempts: number
+  automatic: boolean; nextAttemptAt: string; completedAt: string | null; lastError: string | null
+}
+export interface IntelligenceAdminOverview {
+  metrics: { todayCalls: number; todayCostCny: number; queued: number; failed: number }
+  items: AnalysisAdminStatus[]
+}
+
 export async function listUsers(): Promise<ManagedUser[]> {
   const response = await apiClient.get<{ data: ManagedUser[] }>('/admin/users')
   return response.data.data
@@ -82,4 +92,13 @@ export async function listCollectionStatus(): Promise<CollectionStatus[]> {
 
 export async function requestCollectionSync(projectId: string): Promise<void> {
   await apiClient.post(`/admin/collection/${projectId}/sync`)
+}
+
+export async function getIntelligenceAdminOverview(): Promise<IntelligenceAdminOverview> {
+  const response = await apiClient.get<{ data: IntelligenceAdminOverview }>('/admin/intelligence')
+  return response.data.data
+}
+
+export async function requestIntelligenceAnalysis(eventId: string): Promise<void> {
+  await apiClient.post(`/admin/intelligence/events/${eventId}/analyze`)
 }

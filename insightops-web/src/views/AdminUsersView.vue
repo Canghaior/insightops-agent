@@ -4,11 +4,13 @@ import axios from 'axios'
 
 import {
   createUser,
+  getIntelligenceAdminOverview,
   listCollectionStatus,
   listAudit,
   listUsers,
   resetPassword,
   requestCollectionSync,
+  type IntelligenceAdminOverview,
   updateRole,
   updateStatus,
   type AccountAudit,
@@ -23,6 +25,7 @@ const auth = useAuthStore()
 const users = ref<ManagedUser[]>([])
 const audit = ref<AccountAudit[]>([])
 const collection = ref<CollectionStatus[]>([])
+const intelligence = ref<IntelligenceAdminOverview | null>(null)
 const loading = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -37,7 +40,8 @@ async function load() {
   loading.value = true; error.value = ''
   try {
     [users.value, audit.value] = await Promise.all([listUsers(), listAudit()])
-    collection.value = isSystemAdmin.value ? await listCollectionStatus() : []
+    if (isSystemAdmin.value) [collection.value, intelligence.value] = await Promise.all([listCollectionStatus(), getIntelligenceAdminOverview()])
+    else { collection.value = []; intelligence.value = null }
   }
   catch (caught: unknown) { error.value = message(caught) } finally { loading.value = false }
 }
@@ -155,6 +159,12 @@ onMounted(load)
           <footer><span>连续失败 {{ project.consecutiveFailures }} 次</span><button class="secondary-button" @click="syncNow(project)">立即同步</button></footer>
         </article>
       </div>
+    </template>
+
+    <template v-if="isSystemAdmin && intelligence">
+      <div class="section-heading audit-heading"><div><span class="eyebrow">DeepSeek 成本与任务</span><h2>情报分析状态</h2></div><span class="subtle">每日自动上限 5 条</span></div>
+      <div class="metric-grid intelligence-metrics"><article><span>今日调用</span><strong>{{ intelligence.metrics.todayCalls }}</strong></article><article><span>今日估算费用</span><strong>¥{{ intelligence.metrics.todayCostCny }}</strong></article><article><span>队列中</span><strong>{{ intelligence.metrics.queued }}</strong></article><article><span>失败</span><strong>{{ intelligence.metrics.failed }}</strong></article></div>
+      <div class="panel analysis-admin-list"><article v-for="item in intelligence.items" :key="item.analysisId"><div><strong>{{ item.projectName }} {{ item.versionTag }}</strong><small>{{ item.automatic?'自动':'手动' }} · 尝试 {{ item.attempts }}/{{ item.maxAttempts }}</small></div><i class="status-pill" :class="item.status==='SUCCEEDED'?'status-succeeded':item.status==='FAILED'?'status-failed':'status-running'">{{ item.status }}</i><p v-if="item.lastError">{{ item.lastError }}</p></article><p v-if="!intelligence.items.length" class="subtle">尚未创建情报分析任务。可在“项目更新”中选择历史 Release 手动分析。</p></div>
     </template>
 
     <div class="section-heading audit-heading"><div><span class="eyebrow">操作留痕</span><h2>账号审计日志</h2></div></div>

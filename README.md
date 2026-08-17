@@ -124,6 +124,17 @@ POST /api/v1/updates/{eventId}/read
 POST /api/v1/updates/read-all
 GET  /api/v1/admin/collection
 POST /api/v1/admin/collection/{projectId}/sync
+GET  /api/v1/intelligence?page=0&size=20&projectId=&riskLevel=
+GET  /api/v1/intelligence/{analysisId}
+GET  /api/v1/digests?page=0&size=20
+POST /api/v1/digests/{digestId}/read
+GET  /api/v1/digests/preference
+PUT  /api/v1/digests/preference
+GET  /api/v1/notifications?page=0&size=20&unreadOnly=false
+GET  /api/v1/notifications/unread-count
+POST /api/v1/notifications/{notificationId}/read
+GET  /api/v1/admin/intelligence
+POST /api/v1/admin/intelligence/events/{eventId}/analyze
 GET  /api/v1/runs?page=0&size=20&status=SUCCEEDED
 GET  /api/v1/runs/{runId}
 ```
@@ -135,6 +146,10 @@ GET  /api/v1/runs/{runId}
 项目更新中心只展示当前工作区已关注项目的 Release。采集证据全局去重保存，已读状态按用户隔离；点击“基于本次更新研究”会把带项目和版本的研究问题预填到问答页。`SYSTEM_ADMIN` 可在用户管理页查看每个项目的采集状态、错误和下次执行时间，并请求立即同步。设计细节见 [P1 项目更新中心](docs/architecture/p1-project-update-center.md)。
 
 P0 聊天入口已启用最小 Guardrail：统一限制输入长度和控制字符，把用户、历史与工具内容标记为不可信数据，禁止泄露系统提示词或密钥，并在模型调用前校验引用必须为 GitHub 官方 Release tag URL。前端同时使用安全 Markdown 子集渲染回答。完整边界见 [P0 聊天 Guardrail](docs/architecture/p0-chat-guardrail.md)。
+
+## P1.3 技术情报分析
+
+新采集的官方 GitHub Release 会进入受每日额度限制的 DeepSeek 结构化分析队列；V11 上线前已有 Release 默认不自动分析，只有系统管理员显式请求时才会产生模型调用。结果包括风险等级、建议、Java 影响、升级价值、行动项、官方证据 URL、Token 和估算成本，并通过站内通知和可配置的日/周摘要展示。摘要本身不再调用模型。设计边界见 [P1.3 技术情报分析](docs/architecture/p1-intelligence-analysis.md)。
 
 ## DeepSeek API Key
 

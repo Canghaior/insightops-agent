@@ -36,6 +36,17 @@ insightops:
     lock-minutes: ${RELEASE_COLLECTION_LOCK_MINUTES:5}
     initial-delay-ms: ${RELEASE_COLLECTION_INITIAL_DELAY_MS:3000}
     poll-delay-ms: ${RELEASE_COLLECTION_POLL_DELAY_MS:30000}
+  intelligence:
+    enabled: ${INTELLIGENCE_ANALYSIS_ENABLED:true}
+    daily-limit: ${INTELLIGENCE_ANALYSIS_DAILY_LIMIT:5}
+    batch-size: ${INTELLIGENCE_ANALYSIS_BATCH_SIZE:2}
+    lock-minutes: ${INTELLIGENCE_ANALYSIS_LOCK_MINUTES:5}
+    max-retries: ${INTELLIGENCE_ANALYSIS_MAX_RETRIES:2}
+    max-output-tokens: ${INTELLIGENCE_ANALYSIS_MAX_OUTPUT_TOKENS:1600}
+    initial-delay-ms: ${INTELLIGENCE_ANALYSIS_INITIAL_DELAY_MS:10000}
+    poll-delay-ms: ${INTELLIGENCE_ANALYSIS_POLL_DELAY_MS:30000}
+    digest-initial-delay-ms: ${INTELLIGENCE_DIGEST_INITIAL_DELAY_MS:15000}
+    digest-poll-delay-ms: ${INTELLIGENCE_DIGEST_POLL_DELAY_MS:300000}
   tool:
     github:
       base-url: ${GITHUB_API_BASE_URL:https://api.github.com}

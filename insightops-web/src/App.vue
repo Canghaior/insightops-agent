@@ -5,16 +5,20 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
 import { getUnreadCount } from '@/api/updates'
+import { getNotificationUnreadCount } from '@/api/intelligence'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const canManageAccounts = computed(() => auth.account?.systemRole === 'SYSTEM_ADMIN' || auth.account?.role === 'OWNER')
 const unreadUpdates = ref(0)
+const unreadNotifications = ref(0)
 const navigation = [
   { path: '/', label: '概览', icon: DataAnalysis },
   { path: '/projects', label: '跟踪项目', icon: FolderOpened },
   { path: '/updates', label: '项目更新', icon: Bell, badge: true },
+  { path: '/intelligence', label: '情报分析', icon: DataAnalysis },
+  { path: '/digests', label: '情报摘要', icon: Operation, noticeBadge: true },
   { path: '/chat', label: '研究问答', icon: ChatDotRound },
   { path: '/memory', label: '长期记忆', icon: User },
   { path: '/runs', label: '执行记录', icon: Operation },
@@ -26,12 +30,23 @@ async function loadUnread() {
   try { unreadUpdates.value = await getUnreadCount() } catch { unreadUpdates.value = 0 }
 }
 
+async function loadNotificationUnread() {
+  if (!auth.account) return
+  try { unreadNotifications.value = await getNotificationUnreadCount() } catch { unreadNotifications.value = 0 }
+}
+
+async function loadBadges() { await Promise.all([loadUnread(), loadNotificationUnread()]) }
+
 onMounted(() => {
-  void loadUnread()
-  globalThis.addEventListener('insightops:updates-changed', loadUnread)
+  void loadBadges()
+  globalThis.addEventListener('insightops:updates-changed', loadBadges)
+  globalThis.addEventListener('insightops:notifications-changed', loadBadges)
 })
-onBeforeUnmount(() => globalThis.removeEventListener('insightops:updates-changed', loadUnread))
-watch(() => route.fullPath, loadUnread)
+onBeforeUnmount(() => {
+  globalThis.removeEventListener('insightops:updates-changed', loadBadges)
+  globalThis.removeEventListener('insightops:notifications-changed', loadBadges)
+})
+watch(() => route.fullPath, loadBadges)
 
 async function signOut() {
   await auth.signOut()
@@ -46,7 +61,7 @@ async function signOut() {
       <div class="brand"><span class="brand-mark">IO</span><div><strong>InsightOps</strong><small>Agent · P1</small></div></div>
       <nav class="navigation" aria-label="主导航">
         <RouterLink v-for="item in navigation" :key="item.path" :to="item.path">
-          <el-icon><component :is="item.icon" /></el-icon><span>{{ item.label }}</span><b v-if="item.badge && unreadUpdates" class="nav-badge">{{ unreadUpdates > 99 ? '99+' : unreadUpdates }}</b>
+          <el-icon><component :is="item.icon" /></el-icon><span>{{ item.label }}</span><b v-if="item.badge && unreadUpdates" class="nav-badge">{{ unreadUpdates > 99 ? '99+' : unreadUpdates }}</b><b v-if="item.noticeBadge && unreadNotifications" class="nav-badge">{{ unreadNotifications > 99 ? '99+' : unreadNotifications }}</b>
         </RouterLink>
       </nav>
       <nav v-if="canManageAccounts" class="navigation admin-navigation" aria-label="管理导航">

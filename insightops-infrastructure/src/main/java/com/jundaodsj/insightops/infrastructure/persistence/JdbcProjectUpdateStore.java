@@ -118,9 +118,9 @@ public class JdbcProjectUpdateStore implements ProjectUpdateStore {
                 jdbcClient.sql("""
                         insert into intelligence_event
                             (id, project_id, snapshot_id, event_type, title, summary,
-                             importance, occurred_at, payload, created_at)
+                             importance, occurred_at, payload, analysis_eligible, created_at)
                         values (:id, :projectId, :snapshotId, 'GITHUB_RELEASE', :title, :summary,
-                                :importance, :occurredAt, cast(:payload as jsonb), :createdAt)
+                                :importance, :occurredAt, cast(:payload as jsonb), true, :createdAt)
                         """)
                         .param("id", eventId)
                         .param("projectId", project.id())
@@ -255,7 +255,10 @@ public class JdbcProjectUpdateStore implements ProjectUpdateStore {
                        snapshot.version_tag, event.title, event.summary, snapshot.source_url,
                        coalesce((event.payload ->> 'prerelease')::boolean, false) as prerelease,
                        event.occurred_at, snapshot.collected_at,
-                       event_read.read_at is not null as is_read
+                       event_read.read_at is not null as is_read,
+                       analysis.id as analysis_id, analysis.status as analysis_status,
+                       analysis.risk_level, analysis.recommendation,
+                       analysis.one_line_summary as intelligence_summary
                 from intelligence_event event
                 join source_snapshot snapshot on snapshot.id = event.snapshot_id
                 join tracked_project project on project.id = event.project_id
@@ -264,6 +267,7 @@ public class JdbcProjectUpdateStore implements ProjectUpdateStore {
                  and watch.workspace_id = :workspaceId and watch.enabled = true
                 left join user_event_read event_read
                   on event_read.event_id = event.id and event_read.user_id = :userId
+                left join intelligence_analysis analysis on analysis.event_id = event.id
                 where project.workspace_id = :workspaceId
                 """ + filters + """
                 order by event.occurred_at desc nulls last, event.created_at desc
@@ -286,7 +290,12 @@ public class JdbcProjectUpdateStore implements ProjectUpdateStore {
                 resultSet.getBoolean("prerelease"),
                 instant(resultSet, "occurred_at"),
                 instant(resultSet, "collected_at"),
-                resultSet.getBoolean("is_read")))
+                resultSet.getBoolean("is_read"),
+                resultSet.getObject("analysis_id", UUID.class),
+                resultSet.getString("analysis_status"),
+                resultSet.getString("risk_level"),
+                resultSet.getString("recommendation"),
+                resultSet.getString("intelligence_summary")))
                 .list();
         return new UpdatePage(items, safePage, safeSize, total, unreadCount(actor));
     }

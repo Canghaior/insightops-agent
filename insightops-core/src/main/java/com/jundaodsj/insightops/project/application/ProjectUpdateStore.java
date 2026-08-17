@@ -66,7 +66,12 @@ public interface ProjectUpdateStore {
             boolean prerelease,
             Instant occurredAt,
             Instant collectedAt,
-            boolean read) {
+            boolean read,
+            UUID analysisId,
+            String analysisStatus,
+            String riskLevel,
+            String recommendation,
+            String intelligenceSummary) {
     }
 
     record UpdatePage(List<ProjectUpdate> items, int page, int size, long total, long unreadCount) {

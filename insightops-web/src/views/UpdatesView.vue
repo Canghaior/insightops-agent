@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { listProjects, type ProjectWatch } from '@/api/projects'
+import { requestIntelligenceAnalysis } from '@/api/admin'
+import { useAuthStore } from '@/stores/auth'
 import {
   listUpdates,
   markAllUpdatesRead,
@@ -12,6 +14,7 @@ import {
 } from '@/api/updates'
 
 const router = useRouter()
+const auth = useAuthStore()
 const projects = ref<ProjectWatch[]>([])
 const page = ref<UpdatePage>({ items: [], page: 0, size: 20, total: 0, unreadCount: 0 })
 const projectId = ref('')
@@ -47,6 +50,11 @@ async function research(update: ProjectUpdate) {
   await read(update)
   const question = `请分析 ${update.projectName} ${update.versionTag} 的主要变化、升级价值、风险和 Java 项目的下一步行动，并引用官方 Release 证据。`
   await router.push({ name: 'chat', query: { question } })
+}
+
+async function requestAnalysis(update: ProjectUpdate) {
+  try { await requestIntelligenceAnalysis(update.eventId); await load(page.value.page) }
+  catch { error.value = '情报分析任务创建失败，可能该版本已经在分析中。' }
 }
 
 function formatDate(value: string) {
@@ -87,11 +95,17 @@ onMounted(async () => {
           <div><span class="eyebrow">{{ update.repositoryOwner }}/{{ update.projectName }}</span><h3>{{ update.title }}</h3></div>
           <div class="update-badges"><i v-if="!update.read">未读</i><code>{{ update.versionTag }}</code></div>
         </header>
+        <div v-if="update.analysisStatus" class="intelligence-preview">
+          <span :class="`risk-${update.riskLevel?.toLowerCase()}`">{{ update.analysisStatus === 'SUCCEEDED' ? `${update.riskLevel} · ${update.recommendation}` : update.analysisStatus }}</span>
+          <p>{{ update.intelligenceSummary ?? '情报分析任务正在处理中…' }}</p>
+        </div>
         <p>{{ update.summary }}</p>
         <footer>
           <time>{{ formatDate(update.occurredAt) }}</time>
           <div>
             <a :href="update.sourceUrl" target="_blank" rel="noreferrer" @click.stop="read(update)">官方 Release</a>
+            <button v-if="update.analysisId && update.analysisStatus === 'SUCCEEDED'" class="secondary-button" @click.stop="router.push({ name: 'intelligence-detail', params: { analysisId: update.analysisId } })">查看完整情报</button>
+            <button v-else-if="!update.analysisId && auth.account?.systemRole === 'SYSTEM_ADMIN'" class="secondary-button" @click.stop="requestAnalysis(update)">生成情报分析</button>
             <button class="send-button" @click.stop="research(update)">基于本次更新研究</button>
           </div>
         </footer>

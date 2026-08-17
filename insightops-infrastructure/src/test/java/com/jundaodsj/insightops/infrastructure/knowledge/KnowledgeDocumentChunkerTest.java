@@ -30,5 +30,6 @@ class KnowledgeDocumentChunkerTest {
     @Test
     void stripsNulCharactersAndIgnoresTinyFragments() {
         assertThat(chunker.chunk("tiny\u0000", 600, 80)).isEmpty();
+        assertThat(chunker.chunk("# A Heading With No Substantive Body Content", 600, 80)).isEmpty();
     }
 }

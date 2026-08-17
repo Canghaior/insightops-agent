@@ -49,6 +49,24 @@ class OfficialDocumentHttpGatewayTest {
         assertThat(rules.allowed("/private/public/index.html")).isTrue();
     }
 
+    @Test
+    void removesDocumentationIndexBoilerplateFromMarkdown() {
+        String cleaned = OfficialDocumentHttpGateway.cleanMarkdown("""
+                # Useful page
+
+                > ## Documentation Index
+                > Fetch the complete documentation index at: https://docs.dify.ai/llms.txt
+                > Use this file to discover all available pages before exploring further.
+
+                The actual official documentation remains available.
+                """);
+
+        assertThat(cleaned).contains("# Useful page", "actual official documentation");
+        assertThat(cleaned).doesNotContain("Documentation Index", "llms.txt");
+        assertThat(OfficialDocumentHttpGateway.isBoilerplate(
+                "For the latest stable version, please use Spring AI 2.0.0!")).isTrue();
+    }
+
     private static KnowledgeStore.SourceTask source(String discoveryUrl) {
         return new KnowledgeStore.SourceTask(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 UUID.randomUUID(), "Spring AI", "spring-ai-documentation", "Spring AI Reference",

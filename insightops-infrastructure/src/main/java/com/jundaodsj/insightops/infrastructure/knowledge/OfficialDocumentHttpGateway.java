@@ -33,6 +33,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Component
 public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
@@ -117,6 +118,9 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
             Element main = first(document, "main", "article", ".theme-doc-markdown", ".doc", "#content", "body");
             Element clean = main == null ? document.body() : main.clone();
             clean.select("script,style,noscript,svg,canvas,form,button,nav,footer,header,aside,.pagination-nav,.table-of-contents").remove();
+            clean.select("p,blockquote").stream()
+                    .filter(element -> isBoilerplate(element.text()))
+                    .forEach(Element::remove);
             StringBuilder text = new StringBuilder();
             for (Element element : clean.select("h1,h2,h3,h4,h5,h6,p,li,pre,table")) {
                 if (element.tagName().equals("p") && element.parent() != null
@@ -144,10 +148,11 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
         }
         if (contentType.contains("text/plain") || contentType.contains("text/markdown")
                 || fetched.uri().getPath().endsWith(".md")) {
-            String title = fetched.body().lines().map(String::trim)
+            String content = cleanMarkdown(fetched.body());
+            String title = content.lines().map(String::trim)
                     .filter(line -> line.startsWith("# ")).map(line -> line.substring(2).trim())
                     .findFirst().orElseGet(() -> fileName(fetched.uri()));
-            return new ParsedPage(title, "en", fetched.body().trim(), markdownLinks(fetched.body()));
+            return new ParsedPage(title, "en", content, markdownLinks(content));
         }
         throw new DocumentCollectionException(DocumentCollectionException.Code.UNSUPPORTED_CONTENT,
                 "Unsupported official document content type: " + fetched.contentType());
@@ -314,6 +319,22 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
         Matcher matcher = MARKDOWN_LINK.matcher(body == null ? "" : body);
         while (matcher.find()) links.add(matcher.group(1).trim());
         return List.copyOf(links);
+    }
+
+    static String cleanMarkdown(String body) {
+        return java.util.Arrays.stream((body == null ? "" : body)
+                        .replace("\r\n", "\n").replace('\r', '\n')
+                        .split("\n\\s*\n"))
+                .map(String::trim)
+                .filter(block -> !isBoilerplate(block))
+                .collect(Collectors.joining("\n\n"))
+                .trim();
+    }
+
+    static boolean isBoilerplate(String text) {
+        String normalized = text == null ? "" : text.trim().toLowerCase(Locale.ROOT);
+        return (normalized.contains("documentation index") && normalized.contains("llms.txt"))
+                || normalized.startsWith("for the latest stable version, please use spring ai");
     }
 
     private static String version(URI uri) {

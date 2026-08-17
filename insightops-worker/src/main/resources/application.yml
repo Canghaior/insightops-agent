@@ -55,7 +55,7 @@ insightops:
       lock-minutes: ${DOCUMENT_COLLECTION_LOCK_MINUTES:10}
       max-pages-per-source: ${DOCUMENT_CRAWL_MAX_PAGES_PER_SOURCE:200}
       max-depth: ${DOCUMENT_CRAWL_MAX_DEPTH:4}
-      max-bytes-per-page: ${DOCUMENT_CRAWL_MAX_BYTES_PER_PAGE:2097152}
+      max-bytes-per-page: ${DOCUMENT_CRAWL_MAX_BYTES_PER_PAGE:8388608}
       request-timeout-seconds: ${DOCUMENT_CRAWL_REQUEST_TIMEOUT_SECONDS:20}
       request-delay-ms: ${DOCUMENT_CRAWL_REQUEST_DELAY_MS:500}
       chunk-max-tokens: ${DOCUMENT_CHUNK_MAX_TOKENS:600}

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from 'axios'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import {
   listKnowledgeSources,
@@ -13,6 +13,7 @@ const loading = ref(false)
 const syncing = ref<string | null>(null)
 const error = ref('')
 const notice = ref('')
+let refreshTimer: ReturnType<typeof globalThis.setInterval> | undefined
 
 const totals = computed(() => sources.value.reduce((value, source) => ({
   documents: value.documents + source.documentCount,
@@ -20,12 +21,12 @@ const totals = computed(() => sources.value.reduce((value, source) => ({
   chunks: value.chunks + source.chunkCount,
 }), { documents: 0, revisions: 0, chunks: 0 }))
 
-async function load() {
-  loading.value = true
-  error.value = ''
+async function load(silent = false) {
+  if (!silent) loading.value = true
+  if (!silent) error.value = ''
   try { sources.value = await listKnowledgeSources() }
   catch (caught: unknown) { error.value = message(caught) }
-  finally { loading.value = false }
+  finally { if (!silent) loading.value = false }
 }
 
 async function sync(source: KnowledgeSourceStatus) {
@@ -54,14 +55,41 @@ function time(value: string | null): string {
   return date.toLocaleString()
 }
 
-onMounted(load)
+function statusLabel(source: KnowledgeSourceStatus): string {
+  if (source.status === 'RUNNING') return '采集中'
+  if (source.status === 'SUCCEEDED') return '已完成'
+  if (source.status === 'FAILED') return '失败'
+  if (source.status === 'RETRY_WAIT') return source.consecutiveFailures > 0 ? '等待重试' : '等待执行'
+  return '尚未采集'
+}
+
+function jobStatusLabel(status: string): string {
+  return ({ RUNNING: '采集中', SUCCEEDED: '已完成', FAILED: '失败' } as Record<string, string>)[status] ?? status
+}
+
+function statusClass(source: KnowledgeSourceStatus): string {
+  if (source.status === 'SUCCEEDED') return 'status-succeeded'
+  if (source.status === 'RUNNING' || source.status === 'RETRY_WAIT') return 'status-running'
+  if (source.status === 'FAILED') return 'status-failed'
+  return ''
+}
+
+onMounted(() => {
+  void load()
+  refreshTimer = globalThis.setInterval(() => {
+    const active = sources.value.some(source => source.status === 'RUNNING'
+      || (source.status === 'RETRY_WAIT' && source.consecutiveFailures === 0))
+    if (active) void load(true)
+  }, 5000)
+})
+onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer) })
 </script>
 
 <template>
   <section>
     <div class="section-heading">
       <div><span class="eyebrow">P1.4-A · 官方文档</span><h2>知识库采集管理</h2></div>
-      <button class="secondary-button" :disabled="loading" @click="load">刷新状态</button>
+      <button class="secondary-button" :disabled="loading" @click="load()">刷新状态</button>
     </div>
 
     <div class="knowledge-summary">
@@ -83,7 +111,7 @@ onMounted(load)
       <article v-for="source in sources" :key="source.sourceId" class="panel knowledge-source-card">
         <header>
           <div><span class="eyebrow">{{ source.projectName }}</span><h3>{{ source.name }}</h3></div>
-          <i class="status-pill" :class="source.status === 'SUCCEEDED' ? 'status-succeeded' : source.status === 'RUNNING' ? 'status-running' : source.status === 'FAILED' ? 'status-failed' : ''">{{ source.status }}</i>
+          <i class="status-pill" :class="statusClass(source)">{{ statusLabel(source) }}</i>
         </header>
         <a :href="source.rootUrl" target="_blank" rel="noopener noreferrer">{{ source.rootUrl }}</a>
         <dl>
@@ -93,7 +121,7 @@ onMounted(load)
           <div><dt>连续失败</dt><dd>{{ source.consecutiveFailures }}</dd></div>
         </dl>
         <div v-if="source.lastJob" class="knowledge-job">
-          <b>最近任务：{{ source.lastJob.status }}</b>
+          <b>最近任务：{{ jobStatusLabel(source.lastJob.status) }}</b>
           <span>{{ source.lastJob.pageCount }} 页 · {{ source.lastJob.chunkCount }} 个新切片</span>
         </div>
         <p v-if="source.lastError" class="stream-error">{{ source.lastError }}</p>

@@ -468,6 +468,31 @@ class P0ChainDatabaseGateTest {
                 .filter(source -> source.sourceId().equals(sourceId)).findFirst().orElseThrow();
         assertThat(secondStatus.revisionCount()).isEqualTo(1);
         assertThat(secondStatus.chunkCount()).isEqualTo(chunks.size());
+
+        jdbcClient.sql("""
+                update knowledge_chunk
+                set metadata = metadata - 'chunkPipelineVersion'
+                where revision_id = (
+                    select current_revision_id from knowledge_document
+                    where source_id=:sourceId and canonical_url=:url
+                )
+                """)
+                .param("sourceId", sourceId)
+                .param("url", page.canonicalUrl())
+                .update();
+        Instant thirdRun = firstRun.plusSeconds(20);
+        assertThat(knowledgeStore.requestSync(ACTOR.workspaceId(), sourceId, thirdRun)).isTrue();
+        KnowledgeStore.SourceTask thirdTask = knowledgeStore.claimDueSources(
+                thirdRun.plusSeconds(1), Duration.ofMinutes(5), 1).getFirst();
+        var thirdResult = knowledgeStore.completeSuccessfulSync(thirdTask, List.of(page),
+                thirdRun.plusSeconds(2), thirdRun.plus(Duration.ofHours(24)));
+
+        assertThat(thirdResult.unchangedDocuments()).isEqualTo(1);
+        assertThat(thirdResult.chunkCount()).isEqualTo(chunks.size());
+        var thirdStatus = knowledgeStore.sourceStatus(ACTOR.workspaceId()).stream()
+                .filter(source -> source.sourceId().equals(sourceId)).findFirst().orElseThrow();
+        assertThat(thirdStatus.revisionCount()).isEqualTo(1);
+        assertThat(thirdStatus.chunkCount()).isEqualTo(chunks.size());
     }
 
     private static ActorContext actor(String userId) {

@@ -78,6 +78,9 @@ public class KnowledgeDocumentChunker {
     private static void add(List<KnowledgeStore.DocumentChunk> result, String heading, String raw) {
         String value = raw.trim();
         if (value.length() < 40) return;
+        String substantive = value.replaceAll("(?m)^#{1,6}\\s+.*$", "")
+                .replaceAll("[`#>*_\\-\\s]", "");
+        if (substantive.length() < 20) return;
         result.add(new KnowledgeStore.DocumentChunk(result.size(), blankToNull(heading), value,
                 sha256(value), value.length(), Math.max(1, (value.length() + 3) / 4)));
     }

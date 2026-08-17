@@ -12,7 +12,7 @@ public class KnowledgeCollectionProperties {
     private int lockMinutes = 10;
     private int maxPagesPerSource = 200;
     private int maxDepth = 4;
-    private int maxBytesPerPage = 2_097_152;
+    private int maxBytesPerPage = 8_388_608;
     private int requestTimeoutSeconds = 20;
     private int requestDelayMs = 500;
     private int chunkMaxTokens = 600;

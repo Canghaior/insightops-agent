@@ -21,6 +21,7 @@ import java.util.UUID;
 
 @Repository
 public class JdbcKnowledgeStore implements KnowledgeStore {
+    private static final String CHUNK_PIPELINE_VERSION = "2";
     private final JdbcClient jdbc;
     private final ObjectMapper json;
 
@@ -136,6 +137,10 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                         .param("now", timestamp(completedAt))
                         .update();
                 if (page.contentSha256().equals(existing.orElseThrow().contentSha256())) {
+                    UUID revisionId = existing.orElseThrow().currentRevisionId();
+                    if (!chunksAreCurrent(revisionId, page.chunks())) {
+                        chunkCount += replaceChunks(revisionId, source, page);
+                    }
                     unchangedDocuments++;
                     continue;
                 }
@@ -156,27 +161,9 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                     .param("characters", page.contentText().length())
                     .param("collectedAt", timestamp(completedAt))
                     .update();
-                for (DocumentChunk chunk : page.chunks()) {
-                    jdbc.sql("""
-                        insert into knowledge_chunk
-                            (id, revision_id, chunk_index, heading_path, content,
-                             content_sha256, character_count, estimated_tokens, metadata)
-                        values
-                            (:id, :revisionId, :chunkIndex, :headingPath, :content,
-                             :hash, :characters, :tokens, cast(:metadata as jsonb))
-                        """)
-                        .param("id", UUID.randomUUID())
-                        .param("revisionId", revisionId)
-                        .param("chunkIndex", chunk.index())
-                        .param("headingPath", chunk.headingPath())
-                        .param("content", chunk.content())
-                        .param("hash", chunk.contentSha256())
-                        .param("characters", chunk.characterCount())
-                        .param("tokens", chunk.estimatedTokens())
-                        .param("metadata", metadata(source, page, chunk))
-                        .update();
-                    chunkCount++;
-                }
+                chunkCount += insertChunks(revisionId, source, page);
+            } else if (!chunksAreCurrent(revisionId, page.chunks())) {
+                chunkCount += replaceChunks(revisionId, source, page);
             }
             jdbc.sql("update knowledge_document set current_revision_id=:revisionId where id=:id")
                     .param("revisionId", revisionId)
@@ -297,7 +284,7 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
 
     private Optional<DocumentState> findDocument(UUID sourceId, String canonicalUrl) {
         return jdbc.sql("""
-                select document.id, revision.content_sha256
+                select document.id, document.current_revision_id, revision.content_sha256
                 from knowledge_document document
                 left join knowledge_revision revision on revision.id=document.current_revision_id
                 where document.source_id=:sourceId and document.canonical_url=:url
@@ -305,8 +292,67 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                 .param("sourceId", sourceId)
                 .param("url", canonicalUrl)
                 .query((rs, rowNum) -> new DocumentState(
-                        rs.getObject("id", UUID.class), rs.getString("content_sha256")))
+                        rs.getObject("id", UUID.class),
+                        rs.getObject("current_revision_id", UUID.class),
+                        rs.getString("content_sha256")))
                 .optional();
+    }
+
+    private boolean chunksAreCurrent(UUID revisionId, List<DocumentChunk> chunks) {
+        if (revisionId == null) {
+            return false;
+        }
+        List<ChunkState> stored = jdbc.sql("""
+                select content_sha256, metadata ->> 'chunkPipelineVersion' as pipeline_version
+                from knowledge_chunk
+                where revision_id=:revisionId
+                order by chunk_index
+                """)
+                .param("revisionId", revisionId)
+                .query((rs, rowNum) -> new ChunkState(
+                        rs.getString("content_sha256"), rs.getString("pipeline_version")))
+                .list();
+        if (stored.size() != chunks.size()) {
+            return false;
+        }
+        for (int index = 0; index < chunks.size(); index++) {
+            if (!chunks.get(index).contentSha256().equals(stored.get(index).contentSha256())
+                    || !CHUNK_PIPELINE_VERSION.equals(stored.get(index).pipelineVersion())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private int replaceChunks(UUID revisionId, SourceTask source, DocumentPage page) {
+        jdbc.sql("delete from knowledge_chunk where revision_id=:revisionId")
+                .param("revisionId", revisionId)
+                .update();
+        return insertChunks(revisionId, source, page);
+    }
+
+    private int insertChunks(UUID revisionId, SourceTask source, DocumentPage page) {
+        for (DocumentChunk chunk : page.chunks()) {
+            jdbc.sql("""
+                    insert into knowledge_chunk
+                        (id, revision_id, chunk_index, heading_path, content,
+                         content_sha256, character_count, estimated_tokens, metadata)
+                    values
+                        (:id, :revisionId, :chunkIndex, :headingPath, :content,
+                         :hash, :characters, :tokens, cast(:metadata as jsonb))
+                    """)
+                    .param("id", UUID.randomUUID())
+                    .param("revisionId", revisionId)
+                    .param("chunkIndex", chunk.index())
+                    .param("headingPath", chunk.headingPath())
+                    .param("content", chunk.content())
+                    .param("hash", chunk.contentSha256())
+                    .param("characters", chunk.characterCount())
+                    .param("tokens", chunk.estimatedTokens())
+                    .param("metadata", metadata(source, page, chunk))
+                    .update();
+        }
+        return page.chunks().size();
     }
 
     private Optional<UUID> findRevision(UUID documentId, String contentSha256) {
@@ -358,7 +404,8 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                     Map.entry("headingPath", chunk.headingPath() == null ? "" : chunk.headingPath()),
                     Map.entry("language", page.language()),
                     Map.entry("version", page.versionLabel() == null ? "" : page.versionLabel()),
-                    Map.entry("trustTier", source.trustTier())));
+                    Map.entry("trustTier", source.trustTier()),
+                    Map.entry("chunkPipelineVersion", CHUNK_PIPELINE_VERSION)));
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Unable to serialize knowledge chunk metadata", exception);
         }
@@ -378,5 +425,6 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
         return text.length() <= max ? text : text.substring(0, max);
     }
 
-    private record DocumentState(UUID id, String contentSha256) { }
+    private record DocumentState(UUID id, UUID currentRevisionId, String contentSha256) { }
+    private record ChunkState(String contentSha256, String pipelineVersion) { }
 }

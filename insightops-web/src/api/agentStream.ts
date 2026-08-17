@@ -25,6 +25,8 @@ export interface ChatStreamEvent {
   toolName: string | null
   toolCallId: string | null
   releaseCount: number | null
+  retrievalCount: number | null
+  retrievalModel: string | null
   sources: string[]
 }
 

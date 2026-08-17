@@ -65,4 +65,23 @@ class P0ChatGuardrailTest {
                     .isEqualTo("OUTPUT_SOURCE_NOT_ALLOWED");
         }
     }
+
+    @Test
+    void shouldAcceptOnlyRegisteredOfficialDocumentationDomains() {
+        guardrail.verifyTrustedSources(List.of(
+                "https://docs.spring.io/spring-ai/reference/api/embeddings.html",
+                "https://docs.langchain4j.dev/tutorials/rag/",
+                "https://docs.dify.ai/en/guides/knowledge-base"));
+
+        for (String source : List.of(
+                "http://docs.spring.io/spring-ai/reference/api/embeddings.html",
+                "https://docs.spring.io/spring-framework/reference/",
+                "https://docs.langchain4j.dev.evil.example/rag",
+                "https://example.com/dify")) {
+            assertThatThrownBy(() -> guardrail.verifyTrustedSources(List.of(source)))
+                    .isInstanceOf(P0ChatGuardrail.GuardrailViolation.class)
+                    .extracting("code")
+                    .isEqualTo("OUTPUT_SOURCE_NOT_ALLOWED");
+        }
+    }
 }

@@ -11,6 +11,7 @@ import com.jundaodsj.insightops.model.application.ModelCallErrorCode;
 import com.jundaodsj.insightops.model.application.ModelCallException;
 import com.jundaodsj.insightops.model.application.ModelUsage;
 import com.jundaodsj.insightops.server.chat.ChatStreamSessionRegistry;
+import com.jundaodsj.insightops.server.chat.KnowledgeRagService;
 import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
 import com.jundaodsj.insightops.server.chat.ReleaseToolService;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
@@ -29,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -207,6 +209,34 @@ class ChatStreamControllerTest {
         assertThat(store.status).isEqualTo("SUCCEEDED");
     }
 
+    @Test
+    void shouldAddRagEvidenceAndPersistOfficialDocumentationSources() {
+        RecordingChatRunStore store = new RecordingChatRunStore();
+        KnowledgeRagService rag = mock(KnowledgeRagService.class);
+        String url = "https://docs.spring.io/spring-ai/reference/api/embeddings.html";
+        when(rag.retrieve(any(), eq(ACTOR.workspaceId()), anyString(), any()))
+                .thenReturn(Optional.of(new KnowledgeRagService.RagEvidence(
+                        "\n[S1] Spring AI Embedding Model API\n",
+                        List.of(url), UUID.randomUUID(), "ollama", "bge-m3", 12, List.of())));
+        ChatStreamController controller = new ChatStreamController(
+                (request, listener) -> {
+                    assertThat(request.systemPrompt()).contains("[S1]", "官方文档知识库");
+                    listener.onEvent(ChatStreamEvent.delta("基于官方证据 [S1]"));
+                    listener.onEvent(ChatStreamEvent.completed(
+                            "deepseek", "deepseek-v4-flash", ModelUsage.unknown(),
+                            Duration.ofMillis(100), Duration.ofMillis(20)));
+                    return session(new AtomicBoolean());
+                },
+                new ChatStreamSessionRegistry(), properties(), store, noTool(), rag,
+                new P0ChatGuardrail(), noMemory());
+
+        controller.stream(new ChatStreamController.ChatStreamRequest("Spring AI 如何生成向量？"),
+                request("trace-rag"));
+
+        assertThat(store.status).isEqualTo("SUCCEEDED");
+        assertThat(store.citations).containsExactly(url);
+    }
+
     private static DeepSeekModelProperties properties() {
         return new DeepSeekModelProperties(
                 true, "https://api.deepseek.com", "deepseek-v4-flash", false,
@@ -255,6 +285,7 @@ class ChatStreamControllerTest {
         private String status;
         private String answer;
         private String failureCode;
+        private List<String> citations = List.of();
         private List<StoredMessage> history = List.of();
 
         @Override
@@ -294,6 +325,7 @@ class ChatStreamControllerTest {
                 Instant finishedAt) {
             this.status = "SUCCEEDED";
             this.answer = answer;
+            this.citations = citations;
         }
 
         @Override

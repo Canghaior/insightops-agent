@@ -32,6 +32,9 @@ interface ConversationMessage {
   toolName?: string
   toolRunning?: boolean
   releaseCount?: number | null
+  ragRunning?: boolean
+  retrievalCount?: number | null
+  retrievalModel?: string | null
   sources?: string[]
 }
 
@@ -73,6 +76,7 @@ const errorLabels: Record<string, string> = {
 }
 
 function statusLabel(message: ConversationMessage) {
+  if (message.ragRunning) return '正在检索官方知识库'
   if (message.toolRunning) return '正在查询 GitHub Releases'
   return ({
     idle: '历史回答',
@@ -115,11 +119,21 @@ function handleEvent(event: ChatStreamEvent) {
     return
   }
   if (event.type === 'tool_started') {
+    if (event.toolName === 'knowledge_vector_search') {
+      assistant.ragRunning = true
+      return
+    }
     assistant.toolName = event.toolName ?? 'github_release_list'
     assistant.toolRunning = true
     return
   }
   if (event.type === 'tool_completed') {
+    if (event.toolName === 'knowledge_vector_search') {
+      assistant.ragRunning = false
+      assistant.retrievalCount = event.retrievalCount
+      assistant.retrievalModel = event.retrievalModel
+      return
+    }
     assistant.toolName = event.toolName ?? 'github_release_list'
     assistant.toolRunning = false
     assistant.releaseCount = event.releaseCount
@@ -139,6 +153,8 @@ function handleEvent(event: ChatStreamEvent) {
     assistant.durationMs = event.durationMs
     assistant.timeToFirstTokenMs = event.timeToFirstTokenMs
     assistant.sources = event.sources ?? []
+    assistant.toolRunning = false
+    assistant.ragRunning = false
     void scrollConversationToBottom()
     void loadConversations()
     return
@@ -147,11 +163,13 @@ function handleEvent(event: ChatStreamEvent) {
     status.value = 'cancelled'
     assistant.status = 'cancelled'
     assistant.toolRunning = false
+    assistant.ragRunning = false
     return
   }
   status.value = 'error'
   assistant.status = 'error'
   assistant.toolRunning = false
+  assistant.ragRunning = false
   assistant.errorMessage = errorLabels[event.errorCode ?? ''] ?? '流式生成失败，请稍后重试。'
 }
 
@@ -215,6 +233,7 @@ async function loadHistory() {
       role: message.role,
       content: message.content,
       createdAt: message.createdAt,
+      sources: message.citations ?? [],
     }))
     hasEarlierMessages.value = history.hasEarlierMessages
     await scrollConversationToBottom()
@@ -330,6 +349,14 @@ function formatMessageTime(value: string) {
   }).format(new Date(value))
 }
 
+function sourceHeading(message: ConversationMessage) {
+  const sources = message.sources ?? []
+  const hasRelease = sources.some((source) => source.includes('github.com/') && source.includes('/releases/tag/'))
+  const hasDocs = sources.some((source) => !source.includes('github.com/'))
+  if (hasRelease && hasDocs) return '官方 Release 与知识库来源'
+  return hasRelease ? 'GitHub 官方来源' : '官方知识库来源'
+}
+
 onMounted(() => {
   if (typeof route.query.question === 'string') question.value = route.query.question.slice(0, 4000)
   void loadConversations(true)
@@ -418,6 +445,14 @@ onBeforeUnmount(() => {
               <span>工具 · {{ message.toolName }}</span>
               <strong>{{ message.toolRunning ? '执行中' : `已获取 ${message.releaseCount ?? 0} 条 Release` }}</strong>
             </div>
+            <div v-if="message.ragRunning || message.retrievalCount != null" class="tool-summary" :class="{ 'is-running': message.ragRunning }">
+              <span>RAG · knowledge_vector_search</span>
+              <strong>{{ message.ragRunning
+                ? '正在生成查询向量并检索'
+                : message.retrievalModel === 'unavailable'
+                  ? '本地检索不可用，已安全降级'
+                  : `已选取 ${message.retrievalCount ?? 0} 条证据 · ${message.retrievalModel ?? 'bge-m3'}` }}</strong>
+            </div>
 
             <p v-if="message.errorMessage" class="stream-error">{{ message.errorMessage }}</p>
             <div v-else-if="!message.content && (message.status === 'connecting' || message.status === 'streaming')" class="answer-skeleton">
@@ -435,7 +470,7 @@ onBeforeUnmount(() => {
               <div><dt>Token</dt><dd>{{ message.usage.totalTokens ?? '—' }}</dd></div>
             </dl>
             <div v-if="message.sources?.length" class="source-list">
-              <strong>GitHub 官方来源</strong>
+              <strong>{{ sourceHeading(message) }}</strong>
               <a v-for="source in message.sources" :key="source" :href="source" target="_blank" rel="noreferrer">
                 {{ source }}
               </a>
@@ -473,18 +508,20 @@ onBeforeUnmount(() => {
 
     <aside class="evidence-panel">
       <span class="eyebrow">本步能力</span>
-      <h3>流式、可停、已保存、可回看</h3>
+      <h3>流式 RAG、可追溯、可回看</h3>
       <ul>
         <li>发送后立即清空输入框</li>
         <li>多轮问题与回答连续展示</li>
         <li>刷新后从数据库恢复会话</li>
         <li>复用最近 12 条消息理解追问</li>
+        <li>bge-m3 本地向量检索官方文档</li>
+        <li>DeepSeek 基于证据生成并附官方来源</li>
         <li>记录 Token、耗时与 TraceId</li>
         <li>用户取消立即终止</li>
       </ul>
       <div class="scope-warning">
         <strong>当前限制</strong>
-        <p>单次最多加载最近 100 条消息；更早消息仍保存在数据库。长期记忆由用户在“长期记忆”页面主动维护。</p>
+        <p>知识库当前覆盖 Spring AI、LangChain4j 与 Dify 官方文档；未命中的问题会明确证据不足或降级为普通问答。</p>
       </div>
     </aside>
   </section>

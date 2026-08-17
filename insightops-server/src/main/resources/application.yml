@@ -41,6 +41,12 @@ insightops:
       model: ${EMBEDDING_MODEL:bge-m3}
       dimensions: ${EMBEDDING_DIMENSIONS:1024}
       minimum-score: ${EMBEDDING_MINIMUM_SCORE:0.35}
+    rag:
+      enabled: ${RAG_ENABLED:false}
+      candidate-limit: ${RAG_CANDIDATE_LIMIT:12}
+      max-evidence-chunks: ${RAG_MAX_EVIDENCE_CHUNKS:6}
+      max-chunks-per-document: ${RAG_MAX_CHUNKS_PER_DOCUMENT:2}
+      max-context-characters: ${RAG_MAX_CONTEXT_CHARACTERS:12000}
   auth:
     session-days: ${AUTH_SESSION_DAYS:14}
     secure-cookie: ${AUTH_SECURE_COOKIE:false}

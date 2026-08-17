@@ -67,6 +67,7 @@ class ChatSessionControllerTest {
                 UUID.randomUUID(),
                 role,
                 content,
+                List.of(),
                 sequenceNo,
                 Instant.parse("2026-08-16T00:00:00Z").plusSeconds(sequenceNo));
     }

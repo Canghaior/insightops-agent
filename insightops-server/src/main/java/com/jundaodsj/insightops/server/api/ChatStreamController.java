@@ -12,6 +12,7 @@ import com.jundaodsj.insightops.model.application.ModelCallException;
 import com.jundaodsj.insightops.model.application.ModelUsage;
 import com.jundaodsj.insightops.model.application.StreamingChatModelGateway;
 import com.jundaodsj.insightops.server.chat.ChatStreamSessionRegistry;
+import com.jundaodsj.insightops.server.chat.KnowledgeRagService;
 import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
 import com.jundaodsj.insightops.server.chat.ReleaseToolService;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
@@ -50,9 +51,9 @@ public class ChatStreamController {
 
     private static final String SYSTEM_PROMPT = """
             你是 InsightOps Agent，面向 Java 开发者、架构师和技术负责人回答 AI 开源项目问题。
-            当前 P0 只启用 GitHub Release 数据源，不得声称查询了 Issue、PR、Roadmap、文档或其他来源。
-            如果系统提示中附有工具证据，只能基于该证据回答实时版本事实，并为关键事实保留官方 Release URL。
-            如果没有工具证据，不要编造实时版本、发布日期或来源链接；其他问题使用中文清晰、简洁地回答。
+            当前已启用 GitHub Release 与本地官方文档知识库。不得声称查询了 Issue、PR、Roadmap 或系统未提供的来源。
+            如果系统提示中附有工具或知识库证据，只能基于该证据回答可验证事实，并为关键事实保留 [S#] 引用或官方 URL。
+            如果没有证据，不要编造实时版本、发布日期、接口能力或来源链接；其他问题使用中文清晰、简洁地回答。
             """;
 
     private final StreamingChatModelGateway streamingGateway;
@@ -60,8 +61,29 @@ public class ChatStreamController {
     private final DeepSeekModelProperties modelProperties;
     private final ChatRunStore chatRunStore;
     private final ReleaseToolService releaseToolService;
+    private final KnowledgeRagService knowledgeRagService;
     private final P0ChatGuardrail guardrail;
     private final UserMemoryStore userMemoryStore;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ChatStreamController(
+            StreamingChatModelGateway streamingGateway,
+            ChatStreamSessionRegistry sessionRegistry,
+            DeepSeekModelProperties modelProperties,
+            ChatRunStore chatRunStore,
+            ReleaseToolService releaseToolService,
+            KnowledgeRagService knowledgeRagService,
+            P0ChatGuardrail guardrail,
+            UserMemoryStore userMemoryStore) {
+        this.streamingGateway = streamingGateway;
+        this.sessionRegistry = sessionRegistry;
+        this.modelProperties = modelProperties;
+        this.chatRunStore = chatRunStore;
+        this.releaseToolService = releaseToolService;
+        this.knowledgeRagService = knowledgeRagService;
+        this.guardrail = guardrail;
+        this.userMemoryStore = userMemoryStore;
+    }
 
     public ChatStreamController(
             StreamingChatModelGateway streamingGateway,
@@ -71,13 +93,8 @@ public class ChatStreamController {
             ReleaseToolService releaseToolService,
             P0ChatGuardrail guardrail,
             UserMemoryStore userMemoryStore) {
-        this.streamingGateway = streamingGateway;
-        this.sessionRegistry = sessionRegistry;
-        this.modelProperties = modelProperties;
-        this.chatRunStore = chatRunStore;
-        this.releaseToolService = releaseToolService;
-        this.guardrail = guardrail;
-        this.userMemoryStore = userMemoryStore;
+        this(streamingGateway, sessionRegistry, modelProperties, chatRunStore,
+                releaseToolService, null, guardrail, userMemoryStore);
     }
 
     @PostMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -201,15 +218,49 @@ public class ChatStreamController {
             return emitter;
         }
 
+        Optional<KnowledgeRagService.RagEvidence> ragEvidence = knowledgeRagService == null
+                ? Optional.empty()
+                : knowledgeRagService.retrieve(
+                runUuid,
+                actor.workspaceId(),
+                retrievalQuery(history, userMessage),
+                new KnowledgeRagService.ToolProgressListener() {
+                    @Override
+                    public void onStarted(UUID toolCallId, String toolName) {
+                        if (!send(emitter, ChatSseEvent.toolStarted(
+                                runId, sessionId, sequence.incrementAndGet(), traceId,
+                                toolCallId, toolName))) {
+                            cancelDisconnectedRun(runUuid, runId, answer);
+                        }
+                    }
+
+                    @Override
+                    public void onCompleted(UUID toolCallId, String toolName,
+                                            int resultCount, String model) {
+                        if (!send(emitter, ChatSseEvent.retrievalCompleted(
+                                runId, sessionId, sequence.incrementAndGet(), traceId,
+                                toolCallId, toolName, resultCount, model))) {
+                            cancelDisconnectedRun(runUuid, runId, answer);
+                        }
+                    }
+                });
+        if (!sessionRegistry.isActive(runId)) {
+            return emitter;
+        }
+
         String systemPrompt = SYSTEM_PROMPT + guardrail.systemPolicy()
                 + userMemoryStore.prompt(actor, 20) + toolEvidence
                 .map(ReleaseToolService.ToolEvidence::systemPromptAppendix)
+                .orElse("") + ragEvidence
+                .map(KnowledgeRagService.RagEvidence::systemPromptAppendix)
                 .orElse("");
-        List<String> citations = toolEvidence
-                .map(ReleaseToolService.ToolEvidence::sourceUrls)
-                .orElseGet(List::of);
+        List<String> citations = java.util.stream.Stream.concat(
+                        toolEvidence.stream().flatMap(item -> item.sourceUrls().stream()),
+                        ragEvidence.stream().flatMap(item -> item.sourceUrls().stream()))
+                .distinct()
+                .toList();
         try {
-            guardrail.verifyTrustedReleaseSources(citations);
+            guardrail.verifyTrustedSources(citations);
         }
         catch (P0ChatGuardrail.GuardrailViolation exception) {
             failRunSafely(runUuid, answer, exception.code());
@@ -317,6 +368,26 @@ public class ChatStreamController {
                 .orElse("");
     }
 
+    private static String retrievalQuery(List<ChatRunStore.StoredMessage> history,
+                                         String currentQuestion) {
+        String previous = previousUserQuestions(history);
+        if (previous.isBlank() || !looksLikeFollowUp(currentQuestion)) {
+            return currentQuestion;
+        }
+        String query = previous + "\n当前追问：" + currentQuestion;
+        return query.length() <= 4_000 ? query : query.substring(query.length() - 4_000);
+    }
+
+    private static boolean looksLikeFollowUp(String question) {
+        String normalized = question.toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("这个") || normalized.contains("这些")
+                || normalized.contains("它") || normalized.contains("上述")
+                || normalized.contains("上一个") || normalized.contains("相比")
+                || normalized.contains("继续") || normalized.contains("那它")
+                || normalized.contains("this") || normalized.contains("that")
+                || normalized.contains("it ");
+    }
+
     private String toolErrorCode(GitHubToolErrorCode code) {
         return switch (code) {
             case RATE_LIMITED -> "TOOL_RATE_LIMITED";
@@ -415,13 +486,15 @@ public class ChatStreamController {
             String toolName,
             UUID toolCallId,
             Integer releaseCount,
+            Integer retrievalCount,
+            String retrievalModel,
             List<String> sources) {
 
         static ChatSseEvent started(String runId, UUID sessionId, long sequence, String traceId) {
             return new ChatSseEvent(
                     "started", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    null, null, null, List.of());
+                    null, null, null, null, null, List.of());
         }
 
         static ChatSseEvent delta(
@@ -429,7 +502,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "delta", runId, sessionId, sequence, Instant.now(), traceId,
                     content, null, null, null, null, null, null,
-                    null, null, null, List.of());
+                    null, null, null, null, null, List.of());
         }
 
         static ChatSseEvent completed(
@@ -444,7 +517,7 @@ public class ChatStreamController {
                     null, event.provider(), event.model(), event.usage(),
                     event.duration().toMillis(),
                     event.timeToFirstToken() == null ? null : event.timeToFirstToken().toMillis(),
-                    null, null, null, null, sources);
+                    null, null, null, null, null, null, sources);
         }
 
         static ChatSseEvent cancelled(
@@ -452,7 +525,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "cancelled", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    null, null, null, List.of());
+                    null, null, null, null, null, List.of());
         }
 
         static ChatSseEvent error(
@@ -460,7 +533,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "error", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, errorCode,
-                    null, null, null, List.of());
+                    null, null, null, null, null, List.of());
         }
 
         static ChatSseEvent toolStarted(
@@ -473,7 +546,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "tool_started", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    toolName, toolCallId, null, List.of());
+                    toolName, toolCallId, null, null, null, List.of());
         }
 
         static ChatSseEvent toolCompleted(
@@ -487,7 +560,22 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "tool_completed", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    toolName, toolCallId, releaseCount, List.of());
+                    toolName, toolCallId, releaseCount, null, null, List.of());
+        }
+
+        static ChatSseEvent retrievalCompleted(
+                String runId,
+                UUID sessionId,
+                long sequence,
+                String traceId,
+                UUID toolCallId,
+                String toolName,
+                int resultCount,
+                String model) {
+            return new ChatSseEvent(
+                    "tool_completed", runId, sessionId, sequence, Instant.now(), traceId,
+                    null, null, null, null, null, null, null,
+                    toolName, toolCallId, null, resultCount, model, List.of());
         }
     }
 }

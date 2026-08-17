@@ -32,6 +32,10 @@ public class KnowledgeSearchService {
     }
 
     public SearchResponse search(UUID workspaceId, String query, int limit) {
+        return search(null, workspaceId, query, limit);
+    }
+
+    public SearchResponse search(UUID runId, UUID workspaceId, String query, int limit) {
         if (!properties.isEnabled()) {
             throw new EmbeddingUnavailableException("Semantic retrieval is not enabled");
         }
@@ -49,7 +53,7 @@ public class KnowledgeSearchService {
         var results = store.search(workspaceId, properties.getModel(), vectors.getFirst(),
                 Math.max(1, Math.min(20, limit)), properties.getMinimumScore());
         long durationMs = Math.max(0, java.time.Duration.between(startedAt, clock.instant()).toMillis());
-        store.recordRetrieval(workspaceId, query, "VECTOR", results.size(), durationMs,
+        store.recordRetrieval(runId, workspaceId, query, "VECTOR", results.size(), durationMs,
                 results, clock.instant());
         return new SearchResponse(query, properties.getProvider(), properties.getModel(),
                 durationMs, results);

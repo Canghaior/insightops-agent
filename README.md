@@ -4,7 +4,7 @@
 
 面向需要持续跟踪 AI 开源项目的 Java 开发者、架构师和技术负责人的开源情报 Agent。
 
-当前处于 Alpha/P1：在 P0 GitHub Releases 真实数据链路之上，已加入登录、个人工作区隔离、账号级会话管理、长期记忆、个人项目关注、邀请制用户与权限管理，以及自动采集和个人已读状态隔离的项目更新中心。
+当前处于 Alpha/P1：在 P0 GitHub Releases 真实数据链路之上，已加入登录、个人工作区隔离、账号级会话管理、长期记忆、个人项目关注、邀请制用户与权限管理、项目更新与情报分析，以及基于三个项目官方文档的本地向量 RAG 问答。
 
 ## 工程结构
 
@@ -137,17 +137,20 @@ GET  /api/v1/admin/intelligence
 POST /api/v1/admin/intelligence/events/{eventId}/analyze
 GET  /api/v1/admin/knowledge/sources
 POST /api/v1/admin/knowledge/sources/{sourceId}/sync
+GET  /api/v1/admin/knowledge/embeddings
+POST /api/v1/admin/knowledge/embeddings/retry
+POST /api/v1/knowledge/search
 GET  /api/v1/runs?page=0&size=20&status=SUCCEEDED
 GET  /api/v1/runs/{runId}
 ```
 
 首次请求不传 `sessionId`，服务端创建当前登录用户的会话并在 `started` 事件返回该 ID；后续请求传回该 `sessionId` 即可继续同一会话。会话列表来自 PostgreSQL，可跨标签页和设备恢复，并支持改名、归档、恢复和删除。删除会话时保留 Agent Run 审计记录。长期记忆由用户显式新增、启停、修改和删除，只用于个性化表达，不作为版本事实证据。
 
-当问题明确涉及三个白名单项目的 Release、版本、发布、升级或近期变化时，Agent 会执行只读工具 `github_release_list`：从 GitHub 官方 REST API 获取证据，保存 Agent Step 与 Tool Call，再由 DeepSeek 基于证据生成带官方链接的回答。P0 不允许模型指定任意仓库，也不查询 Issue、PR、Roadmap 或官方文档。
+当问题明确涉及三个白名单项目的 Release、版本、发布、升级或近期变化时，Agent 会执行只读工具 `github_release_list`；研究问答同时可执行本地 `knowledge_vector_search`，从已采集的官方文档切片中选取证据。两种工具都保存 Agent Step、Tool Call 和来源，再由 DeepSeek 基于证据生成回答。系统仍不允许模型指定任意仓库，也不查询 Issue、PR 或 Roadmap。
 
 项目更新中心只展示当前工作区已关注项目的 Release。采集证据全局去重保存，已读状态按用户隔离；点击“基于本次更新研究”会把带项目和版本的研究问题预填到问答页。`SYSTEM_ADMIN` 可在用户管理页查看每个项目的采集状态、错误和下次执行时间，并请求立即同步。设计细节见 [P1 项目更新中心](docs/architecture/p1-project-update-center.md)。
 
-P0 聊天入口已启用最小 Guardrail：统一限制输入长度和控制字符，把用户、历史与工具内容标记为不可信数据，禁止泄露系统提示词或密钥，并在模型调用前校验引用必须为 GitHub 官方 Release tag URL。前端同时使用安全 Markdown 子集渲染回答。完整边界见 [P0 聊天 Guardrail](docs/architecture/p0-chat-guardrail.md)。
+聊天入口已启用最小 Guardrail：统一限制输入长度和控制字符，把用户、历史、Release 与官方文档内容标记为不可信数据，禁止泄露系统提示词或密钥，并在模型调用前校验引用必须来自登记的官方 HTTPS 来源。前端同时使用安全 Markdown 子集渲染回答。完整边界见 [P0 聊天 Guardrail](docs/architecture/p0-chat-guardrail.md)。
 
 ## P1.3 技术情报分析
 
@@ -160,6 +163,10 @@ P0 聊天入口已启用最小 Guardrail：统一限制输入长度和控制字�
 ## P1.4-B 本地向量检索
 
 系统通过 Spring AI 调用本机 Ollama `bge-m3`，将当前官方文档切片批量写入 PostgreSQL pgvector。Worker 支持租约、防重复、失败重试和模型版本隔离；系统管理员可以查看总体/分来源进度并重试失败任务。所有登录用户可调用工作区隔离的语义检索 API，每次检索都会写入 `retrieval_trace`。当前 6,135 个切片已全部向量化，三个项目的质量查询均命中对应官方文档。设计和验收结果见 [P1.4-B 本地 Embedding 与向量检索](docs/architecture/p1-vector-embedding-retrieval.md)。
+
+## P1.4-C 可追溯 RAG 研究问答
+
+研究问答会先用本地 `bge-m3` 召回官方文档候选，再按文档去重、单文档配额和 12,000 字符上下文预算选择最多 6 条证据，最后交给 DeepSeek 流式生成带 `[S#]` 和官方 URL 的回答。检索与生成共享同一个 Run；`retrieval_trace`、Agent Step、Tool Call、引用和助手消息全部保存到 PostgreSQL，刷新页面仍可恢复来源。Ollama 暂时不可用时会记录失败并安全降级，不阻断普通聊天。实现边界见 [P1.4-C 可追溯 RAG 研究问答](docs/architecture/p1-rag-research-chat.md)，真实验收见 [P1.4-C RAG 验收结果](docs/testing/results/p1-rag-e2e-2026-08-17.md)。
 
 ## DeepSeek API Key
 

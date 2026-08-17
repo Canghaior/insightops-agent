@@ -55,6 +55,7 @@ public interface ChatRunStore {
             UUID id,
             String role,
             String content,
+            List<String> citations,
             int sequenceNo,
             Instant createdAt) {
     }

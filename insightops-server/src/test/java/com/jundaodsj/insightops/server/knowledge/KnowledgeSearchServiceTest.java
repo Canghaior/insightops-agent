@@ -39,8 +39,8 @@ class KnowledgeSearchServiceTest {
                 .search(workspaceId, "Spring AI embedding", 8);
 
         assertThat(response.model()).isEqualTo("bge-m3");
-        verify(store).recordRetrieval(eq(workspaceId), eq("Spring AI embedding"), eq("VECTOR"),
-                eq(0), anyLong(), anyList(), any());
+        verify(store).recordRetrieval(eq(null), eq(workspaceId), eq("Spring AI embedding"),
+                eq("VECTOR"), eq(0), anyLong(), anyList(), any());
     }
 
     @Test

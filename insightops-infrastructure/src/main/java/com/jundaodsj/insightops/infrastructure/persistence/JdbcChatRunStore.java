@@ -1,5 +1,7 @@
 package com.jundaodsj.insightops.infrastructure.persistence;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.infrastructure.model.DeepSeekCostEstimator;
@@ -22,10 +24,18 @@ public class JdbcChatRunStore implements ChatRunStore {
 
     private final JdbcClient jdbcClient;
     private final DeepSeekCostEstimator costEstimator;
+    private final ObjectMapper objectMapper;
 
-    public JdbcChatRunStore(JdbcClient jdbcClient, DeepSeekCostEstimator costEstimator) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public JdbcChatRunStore(JdbcClient jdbcClient, DeepSeekCostEstimator costEstimator,
+                            ObjectMapper objectMapper) {
         this.jdbcClient = jdbcClient;
         this.costEstimator = costEstimator;
+        this.objectMapper = objectMapper;
+    }
+
+    public JdbcChatRunStore(JdbcClient jdbcClient, DeepSeekCostEstimator costEstimator) {
+        this(jdbcClient, costEstimator, new ObjectMapper().findAndRegisterModules());
     }
 
     @Override
@@ -88,7 +98,7 @@ public class JdbcChatRunStore implements ChatRunStore {
         }
 
         List<HistoryMessage> latestFirst = jdbcClient.sql("""
-                        select id, role, content, sequence_no, created_at
+                        select id, role, content, citations, sequence_no, created_at
                         from conversation_message
                         where session_id = :sessionId
                         order by sequence_no desc
@@ -100,6 +110,7 @@ public class JdbcChatRunStore implements ChatRunStore {
                         resultSet.getObject("id", UUID.class),
                         resultSet.getString("role"),
                         resultSet.getString("content"),
+                        citations(resultSet.getString("citations")),
                         resultSet.getInt("sequence_no"),
                         resultSet.getObject("created_at", OffsetDateTime.class).toInstant()))
                 .list();
@@ -385,6 +396,16 @@ public class JdbcChatRunStore implements ChatRunStore {
                 .replace("\r", "\\r")
                 .replace("\n", "\\n");
         return "\"" + escaped + "\"";
+    }
+
+    private List<String> citations(String value) {
+        if (value == null || value.isBlank()) return List.of();
+        try {
+            return List.copyOf(objectMapper.readValue(value, new TypeReference<List<String>>() { }));
+        }
+        catch (Exception exception) {
+            throw new IllegalStateException("Unable to read stored citations", exception);
+        }
     }
 
     private record RunState(UUID sessionId, String status) {

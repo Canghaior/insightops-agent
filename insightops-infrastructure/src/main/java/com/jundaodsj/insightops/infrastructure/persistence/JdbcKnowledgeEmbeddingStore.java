@@ -242,16 +242,18 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
     }
 
     @Override
-    public void recordRetrieval(UUID workspaceId, String query, String mode, int resultCount,
-                                long durationMs, List<SearchResult> results, Instant createdAt) {
+    public void recordRetrieval(UUID runId, UUID workspaceId, String query, String mode,
+                                int resultCount, long durationMs, List<SearchResult> results,
+                                Instant createdAt) {
         jdbc.sql("""
                 insert into retrieval_trace
-                    (id, workspace_id, query_text, retrieval_mode, result_summary,
+                    (id, run_id, workspace_id, query_text, retrieval_mode, result_summary,
                      result_count, duration_ms, created_at)
-                values (:id, :workspaceId, :query, :mode, cast(:summary as jsonb),
+                values (:id, :runId, :workspaceId, :query, :mode, cast(:summary as jsonb),
                         :resultCount, :durationMs, :createdAt)
                 """)
                 .param("id", UUID.randomUUID())
+                .param("runId", runId)
                 .param("workspaceId", workspaceId)
                 .param("query", query)
                 .param("mode", mode)

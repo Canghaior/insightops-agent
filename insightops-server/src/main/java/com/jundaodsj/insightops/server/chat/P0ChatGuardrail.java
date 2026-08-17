@@ -81,6 +81,31 @@ public class P0ChatGuardrail {
         }
     }
 
+    public void verifyTrustedSources(List<String> sources) {
+        for (String source : sources) {
+            if (!trustedReleaseSource(source) && !trustedDocumentationSource(source)) {
+                throw new GuardrailViolation("OUTPUT_SOURCE_NOT_ALLOWED");
+            }
+        }
+    }
+
+    private static boolean trustedDocumentationSource(String value) {
+        try {
+            URI uri = URI.create(value);
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
+                return false;
+            }
+            String host = uri.getHost().toLowerCase(java.util.Locale.ROOT);
+            String path = uri.getPath() == null ? "/" : uri.getPath();
+            return ("docs.spring.io".equals(host) && path.startsWith("/spring-ai/reference/"))
+                    || "docs.langchain4j.dev".equals(host)
+                    || "docs.dify.ai".equals(host);
+        }
+        catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
     private static boolean trustedReleaseSource(String value) {
         try {
             URI uri = URI.create(value);

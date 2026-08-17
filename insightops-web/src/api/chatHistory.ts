@@ -4,6 +4,7 @@ export interface ChatHistoryMessage {
   id: string
   role: 'SYSTEM' | 'USER' | 'ASSISTANT' | 'TOOL'
   content: string
+  citations: string[]
   sequenceNo: number
   createdAt: string
 }

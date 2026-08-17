@@ -23,8 +23,14 @@ public interface KnowledgeEmbeddingStore {
     List<SearchResult> search(UUID workspaceId, String model, float[] queryEmbedding,
                               int limit, double minimumScore);
 
-    void recordRetrieval(UUID workspaceId, String query, String mode, int resultCount,
+    void recordRetrieval(UUID runId, UUID workspaceId, String query, String mode, int resultCount,
                          long durationMs, List<SearchResult> results, Instant createdAt);
+
+    default void recordRetrieval(UUID workspaceId, String query, String mode, int resultCount,
+                                 long durationMs, List<SearchResult> results, Instant createdAt) {
+        recordRetrieval(null, workspaceId, query, mode, resultCount,
+                durationMs, results, createdAt);
+    }
 
     record EmbeddingTask(UUID chunkId, String content, int attempts) {
     }

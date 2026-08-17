@@ -24,6 +24,19 @@
 - 数据库 Flyway 版本为 11；79 条历史 Release 中 `analysis_eligible=true` 为 0，分析记录为 0。
 - 登录 API 验证情报、摘要、通知为空，摘要偏好为 `OFF`，管理员今日调用量为 0。
 
-## 尚未执行
+## 真实 DeepSeek 单条验收
 
-真实 DeepSeek 单条分析尚未执行，因此没有消耗在线额度。执行前必须再次取得项目负责人确认；通过后应补记结构化结果、Token、费用、通知及页面展示证据。
+经项目负责人明确确认后，对历史事件 `Spring AI v2.0.0` 执行了一次真实分析：
+
+- 事件 ID：`553625e2-ba1d-4a18-af8b-2c80727f81c5`
+- 分析 ID：`69d80ce8-dac1-4c42-ae84-698455e899f8`
+- 模型：`deepseek-v4-flash`
+- 状态：`SUCCEEDED`，首次尝试成功，无重试、无队列残留、无失败任务
+- 结论：`MEDIUM / UPGRADE / SUFFICIENT`
+- Token：输入 828，输出 306
+- 估算费用：`¥0.001452`，价格快照日期 `2026-08-16`
+- 官方证据：`https://github.com/spring-projects/spring-ai/releases/tag/v2.0.0`
+- 成功生成 1 条未读 `ANALYSIS_READY` 站内通知
+- 浏览器验证列表、详情、中文正文、证据、Token、费用和通知均正常，控制台无错误或警告
+
+验收结束时今日调用量为 1，数据库只有这一条情报分析；其余历史 Release 未被自动分析。

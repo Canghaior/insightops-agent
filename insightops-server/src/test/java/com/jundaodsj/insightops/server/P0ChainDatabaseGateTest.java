@@ -90,10 +90,16 @@ class P0ChainDatabaseGateTest {
     private static JdbcKnowledgeEmbeddingStore knowledgeEmbeddingStore;
 
     @BeforeAll
-    static void prepareIsolatedSchema() {
+    static void prepareIsolatedSchema() throws Exception {
         databaseUrl = environment("DB_URL", "jdbc:postgresql://localhost:55432/insightops");
         username = environment("DB_USERNAME", "insightops");
         password = environment("DB_PASSWORD", "insightops_dev");
+        DriverManagerDataSource extensionDataSource = new DriverManagerDataSource(
+                databaseUrl, username, password);
+        try (Connection connection = extensionDataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("create extension if not exists vector with schema public");
+        }
         String schemaUrl = databaseUrl + (databaseUrl.contains("?") ? "&" : "?") + "currentSchema=" + SCHEMA;
         dataSource = new DriverManagerDataSource(schemaUrl, username, password);
 

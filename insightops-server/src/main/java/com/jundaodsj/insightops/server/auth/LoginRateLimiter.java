@@ -1,5 +1,6 @@
 package com.jundaodsj.insightops.server.auth;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -14,6 +15,7 @@ public class LoginRateLimiter {
     private final Clock clock;
     private final ConcurrentHashMap<String, AttemptState> attempts = new ConcurrentHashMap<>();
 
+    @Autowired
     public LoginRateLimiter(AuthProperties properties) {
         this(properties, Clock.systemUTC());
     }

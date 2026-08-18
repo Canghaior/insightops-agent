@@ -1,15 +1,28 @@
 package com.jundaodsj.insightops.server.auth;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class LoginRateLimiterTest {
+
+    @Test
+    void springUsesTheProductionConstructorWhenTheTestConstructorAlsoExists() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(AuthProperties.class);
+            context.register(LoginRateLimiter.class);
+            context.refresh();
+
+            assertThat(context.getBean(LoginRateLimiter.class)).isNotNull();
+        }
+    }
 
     @Test
     void locksOnlyTheFailingUsernameAndAddressPair() {

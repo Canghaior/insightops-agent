@@ -43,6 +43,10 @@ services:
       start_period: 20s
     networks: [backend]
     logging: *app-logging
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEMORY_LIMIT:-768M}
 
   ollama:
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
@@ -57,6 +61,10 @@ services:
       start_period: 30s
     networks: [backend]
     logging: *app-logging
+    deploy:
+      resources:
+        limits:
+          memory: ${OLLAMA_MEMORY_LIMIT:-2G}
 
   ollama-init:
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
@@ -100,7 +108,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 3G
+          memory: ${SERVER_MEMORY_LIMIT:-2G}
 
   worker:
     image: ghcr.io/canghaior/insightops-agent-worker:${IMAGE_TAG:-latest}
@@ -125,7 +133,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: ${WORKER_MEMORY_LIMIT:-2G}
 
   web:
     image: ghcr.io/canghaior/insightops-agent-web:${IMAGE_TAG:-latest}
@@ -138,7 +146,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: ${WEB_MEMORY_LIMIT:-128M}
 
   caddy:
     image: caddy:2-alpine
@@ -167,8 +175,13 @@ services:
       start_period: 10s
     networks: [backend]
     logging: *app-logging
+    deploy:
+      resources:
+        limits:
+          memory: ${CADDY_MEMORY_LIMIT:-128M}
 
   prometheus:
+    profiles: [observability]
     image: prom/prometheus:v3.7.3
     restart: unless-stopped
     command:
@@ -187,8 +200,13 @@ services:
         condition: service_healthy
     networks: [backend]
     logging: *app-logging
+    deploy:
+      resources:
+        limits:
+          memory: ${PROMETHEUS_MEMORY_LIMIT:-384M}
 
   grafana:
+    profiles: [observability]
     image: grafana/grafana:12.3.1
     restart: unless-stopped
     environment:
@@ -204,6 +222,10 @@ services:
     depends_on: [prometheus]
     networks: [backend]
     logging: *app-logging
+    deploy:
+      resources:
+        limits:
+          memory: ${GRAFANA_MEMORY_LIMIT:-384M}
 
 networks:
   backend:

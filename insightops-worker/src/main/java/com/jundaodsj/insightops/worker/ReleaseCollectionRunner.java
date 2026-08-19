@@ -2,7 +2,7 @@ package com.jundaodsj.insightops.worker;
 
 import com.jundaodsj.insightops.project.application.ProjectUpdateStore;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseGateway;
-import com.jundaodsj.insightops.tool.application.github.GitHubReleaseQuery;
+import com.jundaodsj.insightops.tool.application.github.GitHubRepositoryReleaseQuery;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolErrorCode;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,8 +50,14 @@ public class ReleaseCollectionRunner {
         int newEvents = 0;
         for (var project : projects) {
             try {
-                var result = gateway.listReleases(new GitHubReleaseQuery(
-                        java.util.List.of(project.catalogProjectId()), null, 30, false));
+                var result = gateway.listRepositoryReleases(new GitHubRepositoryReleaseQuery(
+                        project.catalogProjectId(),
+                        project.repository(),
+                        project.owner(),
+                        project.repository(),
+                        null,
+                        30,
+                        false));
                 ProjectUpdateStore.SyncResult stored = store.completeSuccessfulSync(
                         project, result.releases(), result.fetchedAt(),
                         result.fetchedAt().plus(Duration.ofHours(

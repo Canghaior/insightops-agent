@@ -44,9 +44,6 @@ public class JdbcProjectUpdateStore implements ProjectUpdateStore {
                     where project.enabled = true
                       and coalesce(project.next_sync_at, :now) <= :now
                       and (project.sync_locked_until is null or project.sync_locked_until <= :now)
-                      and exists (
-                          select 1 from user_project_watch watch
-                          where watch.project_id = project.id and watch.enabled = true)
                     order by coalesce(project.next_sync_at, project.created_at), project.priority
                     for update skip locked
                     limit :limit

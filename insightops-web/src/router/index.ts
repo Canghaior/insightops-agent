@@ -24,6 +24,12 @@ const router = createRouter({
       meta: { manager: true },
     },
     {
+      path: '/admin/projects',
+      name: 'admin-projects',
+      component: () => import('@/views/AdminProjectsView.vue'),
+      meta: { manager: true },
+    },
+    {
       path: '/admin/knowledge',
       name: 'admin-knowledge',
       component: () => import('@/views/AdminKnowledgeView.vue'),

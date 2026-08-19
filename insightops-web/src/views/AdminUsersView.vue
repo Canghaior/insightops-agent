@@ -102,6 +102,8 @@ function actionLabel(action: string): string {
     USER_CREATED: '创建用户', USER_ENABLED: '启用用户', USER_DISABLED: '停用用户',
     PASSWORD_RESET: '重置密码', WORKSPACE_ROLE_CHANGED: '修改工作区角色',
     LOGIN_SUCCEEDED: '登录成功', LOGOUT: '退出登录', PASSWORD_CHANGED: '修改自己的密码',
+    PROJECT_CREATED: '创建项目', PROJECT_UPDATED: '更新项目', PROJECT_ENABLED: '启用项目',
+    PROJECT_DISABLED: '停用项目', PROJECT_DELETED: '删除项目',
   } as Record<string, string>)[action] ?? action
 }
 

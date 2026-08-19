@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.infrastructure.github;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.infrastructure.config.GitHubToolProperties;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseQuery;
+import com.jundaodsj.insightops.tool.application.github.GitHubRepositoryReleaseQuery;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolErrorCode;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolException;
 import org.junit.jupiter.api.Test;
@@ -69,6 +70,28 @@ class GitHubReleaseHttpGatewayTest {
                 .isInstanceOfSatisfying(GitHubToolException.class,
                         exception -> assertThat(exception.code())
                                 .isEqualTo(GitHubToolErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
+    void shouldFetchARepositoryThatIsNotInTheP0Catalog() throws Exception {
+        HttpClient client = mock(HttpClient.class);
+        @SuppressWarnings("unchecked")
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn("[]");
+        when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(response);
+        GitHubReleaseHttpGateway gateway = new GitHubReleaseHttpGateway(
+                properties(), new ObjectMapper(), client);
+
+        gateway.listRepositoryReleases(new GitHubRepositoryReleaseQuery(
+                "dynamic-project", "Dynamic Project", "openai", "openai-java",
+                null, 5, false));
+
+        ArgumentCaptor<HttpRequest> request = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(client).send(request.capture(), any(HttpResponse.BodyHandler.class));
+        assertThat(request.getValue().uri().toString())
+                .isEqualTo("https://api.github.com/repos/openai/openai-java/releases?per_page=30&page=1");
     }
 
     @Test

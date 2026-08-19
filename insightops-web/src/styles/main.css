@@ -118,6 +118,26 @@ a { color: inherit; text-decoration: none; }
 .admin-form-heading { grid-column: 1 / -1; display: flex; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 .admin-form-heading span { color: var(--muted); font-size: 11px; }
 .admin-create-form .send-button { height: 40px; padding: 0 16px; border: 0; border-radius: 9px; cursor: pointer; }
+.project-admin-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 14px; align-items: end; margin-bottom: 20px; }
+.project-admin-form label { display: grid; gap: 7px; color: #b9c5c7; font-size: 12px; }
+.project-admin-form input, .project-admin-form select { width: 100%; padding: 11px; color: #eef4f4; border: 1px solid var(--line); border-radius: 9px; outline: none; background: #0d1315; }
+.project-admin-form input:disabled { opacity: .58; cursor: not-allowed; }
+.project-form-actions { display: flex; gap: 8px; }
+.project-form-actions .send-button { padding: 10px 15px; border: 0; border-radius: 9px; cursor: pointer; }
+.project-form-note { grid-column: 1 / -1; margin: 0; color: #efc787; font-size: 11px; }
+.project-admin-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.project-admin-grid .empty-state { grid-column: 1 / -1; min-height: 220px; }
+.project-admin-card header, .project-admin-card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.project-admin-card h3 { margin: 5px 0 0; font-size: 20px; }
+.project-statuses, .project-admin-card footer { display: flex; flex-wrap: wrap; gap: 8px; }
+.project-admin-card > a { display: block; margin: 14px 0; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-admin-card dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 20px; margin: 18px 0; }
+.project-admin-card dl div { display: flex; justify-content: space-between; gap: 10px; }
+.project-admin-card dt { color: var(--muted); font-size: 11px; }
+.project-admin-card dd { margin: 0; font-size: 11px; text-align: right; }
+.project-admin-card footer { justify-content: flex-end; padding-top: 15px; border-top: 1px solid var(--line); }
+.danger-button { padding: 9px 12px; color: #ef9a9a; border: 1px solid rgba(239, 125, 125, .3); border-radius: 9px; background: rgba(120, 32, 32, .12); cursor: pointer; }
+.danger-button:disabled { opacity: .4; cursor: not-allowed; }
 .admin-table-panel { margin-top: 20px; padding: 0; overflow: hidden; }
 .admin-table-head, .admin-user-row { display: grid; grid-template-columns: minmax(180px, 1fr) 180px 130px minmax(310px, 1.3fr); gap: 15px; align-items: center; }
 .admin-table-head { padding: 12px 18px; color: var(--muted); border-bottom: 1px solid var(--line); background: rgba(8, 13, 15, .45); font-size: 10px; text-transform: uppercase; }
@@ -437,6 +457,7 @@ a { color: inherit; text-decoration: none; }
   .navigation a { justify-content: center; }
   .page-grid, .research-layout, .digest-layout { grid-template-columns: 1fr; }
   .admin-create-form { grid-template-columns: 1fr 1fr; }
+  .project-admin-form { grid-template-columns: 1fr 1fr; }
   .admin-table-head { display: none; }
   .admin-user-row { grid-template-columns: 1fr 1fr; }
   .account-actions { grid-column: 1 / -1; }
@@ -456,6 +477,7 @@ a { color: inherit; text-decoration: none; }
   .metric-grid, .project-grid, .flow-list { grid-template-columns: 1fr; }
   .memory-form, .memory-list { grid-template-columns: 1fr; }
   .admin-create-form, .admin-user-row, .audit-list article { grid-template-columns: 1fr; }
+  .project-admin-form, .project-admin-grid { grid-template-columns: 1fr; }
   .collection-grid { grid-template-columns: 1fr; }
   .knowledge-summary, .knowledge-source-grid { grid-template-columns: 1fr; }
   .rag-evaluation-panel > header, .evaluation-action { align-items: stretch; flex-direction: column; }

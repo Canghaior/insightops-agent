@@ -67,6 +67,7 @@ async function signOut() {
       </nav>
       <nav v-if="canManageAccounts" class="navigation admin-navigation" aria-label="管理导航">
         <RouterLink to="/admin/users"><el-icon><UserFilled /></el-icon><span>用户管理</span></RouterLink>
+        <RouterLink to="/admin/projects"><el-icon><FolderOpened /></el-icon><span>项目管理</span></RouterLink>
         <RouterLink v-if="isSystemAdmin" to="/admin/knowledge"><el-icon><FolderOpened /></el-icon><span>知识库采集</span></RouterLink>
       </nav>
       <div class="scope-note account-card">

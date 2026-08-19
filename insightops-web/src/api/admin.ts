@@ -35,6 +35,33 @@ export interface CreateUserInput {
   workspaceRole: WorkspaceRole
 }
 
+export interface ManagedProject {
+  projectId: string
+  platform: string
+  repositoryOwner: string
+  repositoryName: string
+  canonicalUrl: string
+  priority: number
+  enabled: boolean
+  lastSyncStatus: 'NEVER' | 'RUNNING' | 'SUCCEEDED' | 'RETRY_WAIT' | 'FAILED'
+  lastSyncAt: string | null
+  nextSyncAt: string | null
+  consecutiveFailures: number
+  lastSyncError: string | null
+  releaseCount: number
+  knowledgeSourceCount: number
+  watcherCount: number
+  jobCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ProjectInput {
+  repositoryOwner: string
+  repositoryName: string
+  priority: number
+}
+
 export interface CollectionStatus {
   projectId: string
   projectName: string
@@ -197,6 +224,30 @@ export interface RagEvaluationReport {
 export async function listUsers(): Promise<ManagedUser[]> {
   const response = await apiClient.get<{ data: ManagedUser[] }>('/admin/users')
   return response.data.data
+}
+
+export async function listManagedProjects(): Promise<ManagedProject[]> {
+  const response = await apiClient.get<{ data: ManagedProject[] }>('/admin/projects')
+  return response.data.data
+}
+
+export async function createManagedProject(input: ProjectInput): Promise<ManagedProject> {
+  const response = await apiClient.post<{ data: ManagedProject }>('/admin/projects', input)
+  return response.data.data
+}
+
+export async function updateManagedProject(projectId: string, input: ProjectInput): Promise<ManagedProject> {
+  const response = await apiClient.put<{ data: ManagedProject }>(`/admin/projects/${projectId}`, input)
+  return response.data.data
+}
+
+export async function setManagedProjectEnabled(projectId: string, enabled: boolean): Promise<ManagedProject> {
+  const response = await apiClient.patch<{ data: ManagedProject }>(`/admin/projects/${projectId}/status`, { enabled })
+  return response.data.data
+}
+
+export async function deleteManagedProject(projectId: string): Promise<void> {
+  await apiClient.delete(`/admin/projects/${projectId}`)
 }
 
 export async function createUser(input: CreateUserInput): Promise<ManagedUser> {

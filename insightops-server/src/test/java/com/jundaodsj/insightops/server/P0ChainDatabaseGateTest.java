@@ -7,6 +7,7 @@ import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.identity.application.AccountWorkspaceStore;
 import com.jundaodsj.insightops.identity.application.AdminAccountStore;
+import com.jundaodsj.insightops.project.application.AdminProjectStore;
 import com.jundaodsj.insightops.intelligence.application.IntelligenceStore;
 import com.jundaodsj.insightops.project.application.ProjectUpdateStore;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
@@ -14,6 +15,7 @@ import com.jundaodsj.insightops.infrastructure.config.DeepSeekPricingProperties;
 import com.jundaodsj.insightops.infrastructure.model.DeepSeekCostEstimator;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentRunQuery;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAdminAccountStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcAdminProjectStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAccountWorkspaceStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentToolExecutionStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcChatRunStore;
@@ -87,6 +89,7 @@ class P0ChainDatabaseGateTest {
     private static JdbcUserProjectWatchStore projectWatchStore;
     private static JdbcClient jdbcClient;
     private static JdbcAdminAccountStore adminAccountStore;
+    private static JdbcAdminProjectStore adminProjectStore;
     private static JdbcProjectUpdateStore projectUpdateStore;
     private static JdbcIntelligenceStore intelligenceStore;
     private static JdbcKnowledgeStore knowledgeStore;
@@ -118,6 +121,7 @@ class P0ChainDatabaseGateTest {
 
         jdbcClient = JdbcClient.create(dataSource);
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
+        adminProjectStore = new JdbcAdminProjectStore(jdbcClient);
         projectUpdateStore = new JdbcProjectUpdateStore(jdbcClient, objectMapper());
         intelligenceStore = new JdbcIntelligenceStore(jdbcClient, objectMapper());
         knowledgeStore = new JdbcKnowledgeStore(jdbcClient, objectMapper());
@@ -587,6 +591,60 @@ class P0ChainDatabaseGateTest {
                 select error_code from knowledge_collection_job where id=:jobId
                 """).param("jobId", staleTask.jobId()).query(String.class).single())
                 .isEqualTo("LOCK_EXPIRED");
+    }
+
+    @Test
+    @Order(8)
+    void shouldManageDynamicProjectsWithDatabaseDependencyGuards() {
+        UUID projectId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-08-19T08:00:00Z");
+        var created = adminProjectStore.create(
+                projectId, ACTOR.workspaceId(), "openai", "openai-java",
+                "https://github.com/openai/openai-java", 2, now);
+
+        assertThat(created.repositoryName()).isEqualTo("openai-java");
+        assertThat(created.enabled()).isTrue();
+        assertThat(created.nextSyncAt()).isEqualTo(now);
+        assertThat(adminProjectStore.list(ACTOR.workspaceId()))
+                .extracting(AdminProjectStore.ManagedProject::projectId)
+                .contains(projectId);
+
+        ProjectUpdateStore.TrackedProject claimed = projectUpdateStore.claimDueProjects(
+                        now.plusSeconds(1), Duration.ofMinutes(5), 20).stream()
+                .filter(project -> project.id().equals(projectId))
+                .findFirst().orElseThrow();
+        assertThat(claimed.owner()).isEqualTo("openai");
+        assertThat(claimed.repository()).isEqualTo("openai-java");
+        projectUpdateStore.completeSuccessfulSync(
+                claimed, List.of(), now.plusSeconds(1), now.plus(Duration.ofHours(6)));
+
+        var updated = adminProjectStore.update(
+                ACTOR.workspaceId(), projectId, "openai", "openai-agents-java",
+                "https://github.com/openai/openai-agents-java", 4, now.plusSeconds(1))
+                .orElseThrow();
+        assertThat(updated.repositoryName()).isEqualTo("openai-agents-java");
+        assertThat(updated.priority()).isEqualTo(4);
+
+        assertThat(adminProjectStore.setEnabled(
+                ACTOR.workspaceId(), projectId, false, now.plusSeconds(2)))
+                .get().extracting(AdminProjectStore.ManagedProject::enabled).isEqualTo(false);
+
+        jdbcClient.sql("""
+                insert into user_project_watch (user_id, workspace_id, project_id, enabled)
+                values (:userId, :workspaceId, :projectId, true)
+                """)
+                .param("userId", ACTOR.userId())
+                .param("workspaceId", ACTOR.workspaceId())
+                .param("projectId", projectId)
+                .update();
+        assertThat(adminProjectStore.deleteEmpty(ACTOR.workspaceId(), projectId))
+                .isEqualTo(AdminProjectStore.DeleteResult.HAS_DEPENDENCIES);
+
+        jdbcClient.sql("delete from user_project_watch where project_id=:projectId")
+                .param("projectId", projectId).update();
+        assertThat(adminProjectStore.deleteEmpty(ACTOR.workspaceId(), projectId))
+                .isEqualTo(AdminProjectStore.DeleteResult.DELETED);
+        assertThat(adminProjectStore.find(ACTOR.workspaceId(), projectId)).isEmpty();
     }
 
     private static ActorContext actor(String userId) {

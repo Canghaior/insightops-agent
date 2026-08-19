@@ -9,6 +9,7 @@ import com.jundaodsj.insightops.tool.application.github.GitHubRelease;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseGateway;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseQuery;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseResult;
+import com.jundaodsj.insightops.tool.application.github.GitHubRepositoryReleaseQuery;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolErrorCode;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -80,6 +81,24 @@ public class GitHubReleaseHttpGateway implements GitHubReleaseGateway {
             truncated = truncated || projectResult.truncated();
         }
         return new GitHubReleaseResult(releases, fetchedAt, truncated);
+    }
+
+    @Override
+    public GitHubReleaseResult listRepositoryReleases(GitHubRepositoryReleaseQuery query) {
+        Instant fetchedAt = Instant.now();
+        Instant cutoff = query.timeWindowDays() == null
+                ? null
+                : fetchedAt.minus(Duration.ofDays(query.timeWindowDays()));
+        ProjectDefinition repository = new ProjectDefinition(
+                query.projectId(),
+                query.displayName(),
+                query.repositoryOwner(),
+                query.repositoryName(),
+                List.of());
+        ProjectFetchResult result = fetchProject(
+                query.projectId(), repository, cutoff,
+                query.maxReleases(), query.includePrereleases());
+        return new GitHubReleaseResult(result.releases(), fetchedAt, result.truncated());
     }
 
     private ProjectFetchResult fetchProject(

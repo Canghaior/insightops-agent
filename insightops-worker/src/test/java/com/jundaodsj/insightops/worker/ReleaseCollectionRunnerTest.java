@@ -4,6 +4,7 @@ import com.jundaodsj.insightops.project.application.ProjectUpdateStore;
 import com.jundaodsj.insightops.tool.application.github.GitHubRelease;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseGateway;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseResult;
+import com.jundaodsj.insightops.tool.application.github.GitHubRepositoryReleaseQuery;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolErrorCode;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolException;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,7 +48,7 @@ class ReleaseCollectionRunnerTest {
                 "spring-ai", "Spring AI", "v2.1.0", "Spring AI 2.1.0", NOW,
                 "https://github.com/spring-projects/spring-ai/releases/tag/v2.1.0",
                 false, "Release notes");
-        when(gateway.listReleases(any())).thenReturn(new GitHubReleaseResult(List.of(release), NOW));
+        when(gateway.listRepositoryReleases(any())).thenReturn(new GitHubReleaseResult(List.of(release), NOW));
         when(store.completeSuccessfulSync(eq(project), any(), eq(NOW), any()))
                 .thenReturn(new ProjectUpdateStore.SyncResult(1, 1));
 
@@ -56,11 +57,16 @@ class ReleaseCollectionRunnerTest {
         assertThat(result.succeededProjects()).isEqualTo(1);
         assertThat(result.newEvents()).isEqualTo(1);
         verify(store).completeSuccessfulSync(project, List.of(release), NOW, NOW.plus(Duration.ofHours(6)));
+        ArgumentCaptor<GitHubRepositoryReleaseQuery> query =
+                ArgumentCaptor.forClass(GitHubRepositoryReleaseQuery.class);
+        verify(gateway).listRepositoryReleases(query.capture());
+        assertThat(query.getValue().repositoryOwner()).isEqualTo("spring-projects");
+        assertThat(query.getValue().repositoryName()).isEqualTo("spring-ai");
     }
 
     @Test
     void rateLimitUsesOneHourRetryWithoutStoppingTheCycle() {
-        when(gateway.listReleases(any())).thenThrow(new GitHubToolException(
+        when(gateway.listRepositoryReleases(any())).thenThrow(new GitHubToolException(
                 GitHubToolErrorCode.RATE_LIMITED, new IllegalStateException("GitHub HTTP 429")));
 
         ReleaseCollectionRunner.CycleResult result = runner.collectDueProjects();

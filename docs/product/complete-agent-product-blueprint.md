@@ -175,23 +175,35 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 - 生产真实问答已验证官方引用、Run/Trace 追溯和 FastAPI 越界问题证据不足拒答。
 - 生产混合检索抽样耗时 476 ms，站内回答首 Token 1.149 秒。
 
-### 4.11 测试与持续集成
+### 4.11 可配置 GitHub 项目管理
 
-- 后端当前共有 117 个测试，包含 7 个 PostgreSQL/pgvector 数据库门禁测试，本轮全部通过。
+- Owner 和系统管理员可以在生产管理页添加、编辑、启用、停用和删除 GitHub 项目。
+- 仓库坐标由服务端校验并规范化，Canonical URL 由服务端生成。
+- 已产生 Release 快照或知识数据的项目禁止修改仓库坐标；仍可调整优先级或停用。
+- 有数据、关注者或活动任务的项目禁止删除；无业务数据项目删除时会清理终态采集任务历史。
+- Worker 直接使用数据库中的 owner/repository 采集 Release，不再受三个 P0 固定项目目录限制。
+- 动态项目会出现在用户关注列表；项目是否采集由管理端启停状态控制，个人关注只控制用户更新流。
+- 当前配置化范围是 GitHub Release；Issue、PR、官方知识源 CRUD、自定义频率和聊天项目路由仍属于后续阶段。
+- 生产验收详见 `docs/testing/results/p1-configurable-projects-production-acceptance-2026-08-20.md`。
+
+### 4.12 测试与持续集成
+
+- 后端当前共有 126 个测试，包含 8 个 PostgreSQL/pgvector 数据库门禁测试，本轮全部通过。
 - 前端当前 20 个测试全部通过。
 - 前端 ESLint 通过。
 - 前端生产构建通过。
 - GitHub Actions 已配置后端验证、前端 lint/test/build 和三个镜像构建。
+- GitHub `production` Environment Secrets 已完成配置，生产部署 Workflow Run `32271708481` 和 P1.5-A Run `32275352256` 均真实部署成功。
 - Dependabot 已覆盖 Maven、npm 和 GitHub Actions 依赖。
 
 ## 5. 当前部分完成的能力
 
-### 5.1 知识库来源与质量体系仍不可配置
+### 5.1 知识库来源与高级项目配置仍不可配置
 
 P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `docs/testing/results/p1-rag-production-acceptance-2026-08-19.md`。当前限制已经从“生产数据未完成”转为“产品配置与长期质量体系不足”：
 
-- 普通用户仍不能添加、编辑、暂停或删除项目与知识源。
-- 采集范围仍固定为 Spring AI、LangChain4j 和 Dify 官方文档。
+- Owner 和系统管理员已可管理 GitHub Release 项目；普通成员仍只能关注已启用项目。
+- 官方文档知识源仍固定为 Spring AI、LangChain4j 和 Dify，尚无来源 CRUD。
 - 尚未支持 Issue、PR、Security Advisory、Roadmap、RSS 和用户上传资料。
 - 评测集仍为 15 题，尚未扩充到 50～100 题并形成版本对比。
 - 尚未实现专用 Reranker、用户引用纠错和评测样本回流。
@@ -265,8 +277,8 @@ P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `do
 - 已有备份脚本，但没有确认每日 Cron 已配置。
 - 没有确认备份已加密同步到服务器之外。
 - 没有真实完成一次灾难恢复演练。
-- 已有 GitHub 生产部署 Workflow，但没有确认生产 Secrets 已全部配置并真实远程部署成功一次。
-- 当前实际生产发布仍主要依赖管理员 SSH 后手动执行部署脚本。
+- GitHub 生产部署 Workflow、专用部署密钥和五项 `production` Environment Secrets 已配置并完成两次真实部署验收。
+- 当前生产发布已以 GitHub Actions 为主，管理员 SSH 会话保留为故障处置通道。
 
 ### 5.7 安全能力仍是封闭 Alpha 水平
 
@@ -552,11 +564,11 @@ P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `do
 - [ ] 用户可以完成登录、连续提问、查看历史、查看引用和查看执行记录。
 - [ ] 每日备份、异地副本和恢复演练形成记录。
 - [ ] 应用级监控和关键告警启用。
-- [ ] GitHub Actions 生产部署真实成功执行一次。
+- [x] GitHub Actions 生产部署真实成功执行一次。
 
 ### 9.2 可配置技术情报产品完成标准
 
-- [ ] 用户无需修改代码即可添加、编辑、暂停和删除 GitHub 项目。
+- [x] Owner 或系统管理员无需修改代码即可添加、编辑、暂停和删除 GitHub Release 项目。
 - [ ] 用户无需修改代码即可添加和管理官方文档来源。
 - [ ] 至少支持 Release、Issue、PR、官方文档和 RSS 五类来源。
 - [ ] 支持不少于 10 个真实项目稳定持续采集。
@@ -598,7 +610,7 @@ P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `do
 
 ### 阶段 B：从固定演示升级为可配置产品
 
-1. 项目管理 CRUD。
+1. [x] 项目管理 CRUD（P1.5-A，GitHub Release）。
 2. 知识源管理 CRUD。
 3. 用户自定义采集频率和关注关键词。
 4. 增加 Issue、PR、Security Advisory、RSS。

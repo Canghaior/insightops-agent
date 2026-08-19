@@ -18,7 +18,7 @@ P1.4 生产 RAG 验收通过并关闭。三份官方知识库、当前切片 Emb
 - 公网首页和 `/api/v1/system/status` 均返回 HTTP 200，DeepSeek `deepseek-v4-flash` 状态为 ready。
 - 部署后 15 分钟 Server、Worker 日志未发现 `ERROR`、`Exception` 或 `FAILED`。
 
-GitHub Actions 的生产部署 Workflow Run `32265167106` 在部署前密钥校验阶段失败，未连接或修改生产服务器。本次部署改用现有 OrcaTerm 管理会话完成；补齐 GitHub `production` Environment Secrets 后仍需单独完成一次 Actions 生产部署验收。
+GitHub Actions 的首次生产部署 Workflow Run `32265167106` 在部署前密钥校验阶段失败，未连接或修改生产服务器；本次 P1.4 发布因此先通过现有 OrcaTerm 管理会话完成。随后已补齐 GitHub `production` Environment 的五项 Secrets，并使用专用部署公钥完成非交互 SSH 验证。Workflow Run `32271708481` 已以同一生产提交 `944955366af71c17726ae677b3ef44bb070d217d` 真实远程部署成功，Actions 生产部署闭环已补验通过。
 
 ## 知识库与 Embedding
 
@@ -94,4 +94,4 @@ LangChain4j 在 2026-08-19 的增量采集中新增 2 篇当前文档、变更 4
 
 ## 关闭判定
 
-阶段 A“关闭当前 P1.4 生产 RAG”的八项工作全部完成。后续工作转入可配置项目/知识源、更多数据源、50～100 题评测集、专用 Reranker、监控告警和 GitHub Actions 生产部署密钥修复，不再阻塞 P1.4。
+阶段 A“关闭当前 P1.4 生产 RAG”的八项工作全部完成。GitHub Actions 生产部署密钥也已于同日补验关闭；后续工作转入可配置项目/知识源、更多数据源、50～100 题评测集、专用 Reranker 和监控告警，不再阻塞 P1.4。

@@ -152,7 +152,7 @@ class AdminProjectServiceTest {
             return find(workspaceId, projectId).map(project -> {
                 ManagedProject updated = managed(projectId, owner, repository, priority,
                         project.enabled(), project.releaseCount(), project.knowledgeSourceCount(),
-                        project.watcherCount(), project.jobCount(), now);
+                        project.watcherCount(), project.activeJobCount(), now);
                 projects.put(projectId, updated);
                 return updated;
             });
@@ -165,7 +165,7 @@ class AdminProjectServiceTest {
                 ManagedProject updated = managed(projectId, project.repositoryOwner(),
                         project.repositoryName(), project.priority(), enabled,
                         project.releaseCount(), project.knowledgeSourceCount(),
-                        project.watcherCount(), project.jobCount(), now);
+                        project.watcherCount(), project.activeJobCount(), now);
                 projects.put(projectId, updated);
                 return updated;
             });

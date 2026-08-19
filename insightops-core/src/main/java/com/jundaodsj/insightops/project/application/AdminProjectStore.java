@@ -59,7 +59,7 @@ public interface AdminProjectStore {
             long releaseCount,
             long knowledgeSourceCount,
             long watcherCount,
-            long jobCount,
+            long activeJobCount,
             Instant createdAt,
             Instant updatedAt) {
 
@@ -68,7 +68,7 @@ public interface AdminProjectStore {
         }
 
         public boolean hasDependencies() {
-            return hasCollectedData() || watcherCount > 0 || jobCount > 0;
+            return hasCollectedData() || watcherCount > 0 || activeJobCount > 0;
         }
     }
 }

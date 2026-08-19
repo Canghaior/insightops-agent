@@ -29,7 +29,8 @@ public class JdbcAdminProjectStore implements AdminProjectStore {
                    (select count(*) from user_project_watch watch
                     where watch.project_id=project.id) as watcher_count,
                    (select count(*) from job_task job
-                    where job.project_id=project.id) as job_count,
+                    where job.project_id=project.id
+                      and job.status in ('PENDING', 'RUNNING', 'RETRY_WAIT')) as active_job_count,
                    project.created_at, project.updated_at
             from tracked_project project
             """;
@@ -143,27 +144,40 @@ public class JdbcAdminProjectStore implements AdminProjectStore {
     @Override
     @Transactional
     public DeleteResult deleteEmpty(UUID workspaceId, UUID projectId) {
-        int deleted = jdbcClient.sql("""
-                delete from tracked_project project
-                where project.workspace_id=:workspaceId and project.id=:projectId
-                  and not exists (select 1 from source_snapshot where project_id=project.id)
-                  and not exists (select 1 from knowledge_source where project_id=project.id)
-                  and not exists (select 1 from user_project_watch where project_id=project.id)
-                  and not exists (select 1 from job_task where project_id=project.id)
+        Optional<UUID> lockedProject = jdbcClient.sql("""
+                select id from tracked_project
+                where workspace_id=:workspaceId and id=:projectId
+                for update
                 """)
                 .param("workspaceId", workspaceId)
                 .param("projectId", projectId)
-                .update();
-        if (deleted == 1) return DeleteResult.DELETED;
-        boolean exists = jdbcClient.sql("""
-                select count(*)=1 from tracked_project
-                where workspace_id=:workspaceId and id=:projectId
+                .query(UUID.class)
+                .optional();
+        if (lockedProject.isEmpty()) return DeleteResult.NOT_FOUND;
+        boolean hasDependencies = jdbcClient.sql("""
+                select exists (select 1 from source_snapshot where project_id=:projectId)
+                    or exists (select 1 from knowledge_source where project_id=:projectId)
+                    or exists (select 1 from user_project_watch where project_id=:projectId)
+                    or exists (
+                        select 1 from job_task
+                        where project_id=:projectId
+                          and status in ('PENDING', 'RUNNING', 'RETRY_WAIT'))
                 """)
-                .param("workspaceId", workspaceId)
                 .param("projectId", projectId)
                 .query(Boolean.class)
                 .single();
-        return exists ? DeleteResult.HAS_DEPENDENCIES : DeleteResult.NOT_FOUND;
+        if (hasDependencies) return DeleteResult.HAS_DEPENDENCIES;
+        jdbcClient.sql("""
+                delete from job_task
+                where project_id=:projectId
+                  and status in ('SUCCEEDED', 'FAILED', 'DEAD_LETTER')
+                """)
+                .param("projectId", projectId)
+                .update();
+        jdbcClient.sql("delete from tracked_project where id=:projectId")
+                .param("projectId", projectId)
+                .update();
+        return DeleteResult.DELETED;
     }
 
     private static ManagedProject project(ResultSet resultSet, int rowNum) throws SQLException {
@@ -183,7 +197,7 @@ public class JdbcAdminProjectStore implements AdminProjectStore {
                 resultSet.getLong("release_count"),
                 resultSet.getLong("knowledge_source_count"),
                 resultSet.getLong("watcher_count"),
-                resultSet.getLong("job_count"),
+                resultSet.getLong("active_job_count"),
                 instant(resultSet, "created_at"),
                 instant(resultSet, "updated_at"));
     }

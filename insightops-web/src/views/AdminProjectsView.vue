@@ -168,7 +168,7 @@ onMounted(load)
           <div><dt>Release 快照</dt><dd>{{ project.releaseCount }}</dd></div>
           <div><dt>知识源</dt><dd>{{ project.knowledgeSourceCount }}</dd></div>
           <div><dt>关注人数</dt><dd>{{ project.watcherCount }}</dd></div>
-          <div><dt>关联任务</dt><dd>{{ project.jobCount }}</dd></div>
+          <div><dt>活动任务</dt><dd>{{ project.activeJobCount }}</dd></div>
           <div><dt>上次采集</dt><dd>{{ time(project.lastSyncAt) }}</dd></div>
           <div><dt>下次计划</dt><dd>{{ project.enabled ? time(project.nextSyncAt) : '已停用' }}</dd></div>
         </dl>
@@ -176,7 +176,7 @@ onMounted(load)
         <footer>
           <button class="secondary-button" @click="edit(project)">编辑</button>
           <button class="secondary-button" @click="toggle(project)">{{ project.enabled ? '停用' : '启用' }}</button>
-          <button class="danger-button" :disabled="project.releaseCount + project.knowledgeSourceCount + project.watcherCount + project.jobCount > 0" @click="remove(project)">删除</button>
+          <button class="danger-button" :disabled="project.releaseCount + project.knowledgeSourceCount + project.watcherCount + project.activeJobCount > 0" @click="remove(project)">删除</button>
         </footer>
       </article>
       <p v-if="!projects.length" class="panel empty-state">尚未配置项目。请添加一个 GitHub 仓库。</p>

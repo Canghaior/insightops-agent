@@ -51,7 +51,7 @@ export interface ManagedProject {
   releaseCount: number
   knowledgeSourceCount: number
   watcherCount: number
-  jobCount: number
+  activeJobCount: number
   createdAt: string
   updatedAt: string
 }

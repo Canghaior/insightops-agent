@@ -23,9 +23,9 @@ public class KnowledgeCollectionScheduler {
         if (!properties.isEnabled()) return;
         var result = runner.collectDueSources();
         if (result.claimedSources() > 0) {
-            log.info("Official document collection completed: claimed={}, succeeded={}, failed={}, pages={}, chunks={}",
+            log.info("Official document collection completed: claimed={}, succeeded={}, failed={}, leaseLost={}, pages={}, chunks={}",
                     result.claimedSources(), result.succeededSources(), result.failedSources(),
-                    result.collectedPages(), result.createdChunks());
+                    result.leaseLostSources(), result.collectedPages(), result.createdChunks());
         }
     }
 }

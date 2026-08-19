@@ -22,6 +22,7 @@ import com.jundaodsj.insightops.infrastructure.persistence.JdbcConversationManag
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcProjectUpdateStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcIntelligenceStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcKnowledgeStore;
+import com.jundaodsj.insightops.knowledge.application.KnowledgeCollectionLeaseLostException;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcKnowledgeEmbeddingStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserProjectWatchStore;
 import com.jundaodsj.insightops.infrastructure.knowledge.KnowledgeDocumentChunker;
@@ -63,6 +64,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @EnabledIfEnvironmentVariable(named = "INSIGHTOPS_CHAIN_GATE", matches = "true")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -112,7 +114,7 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(15);
+        assertThat(migration.migrationsExecuted).isEqualTo(16);
 
         jdbcClient = JdbcClient.create(dataSource);
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
@@ -476,8 +478,12 @@ class P0ChainDatabaseGateTest {
         var page = new KnowledgeStore.DocumentPage(
                 "https://docs.spring.io/spring-ai/reference/", "Spring AI Reference", "en", null,
                 "a".repeat(64), content, null, null, chunks);
+        Instant firstHeartbeat = firstRun.plusSeconds(2);
+        knowledgeStore.updateCollectionProgress(firstTask,
+                new KnowledgeStore.CollectionProgress(200, 14, 3, 1, page.canonicalUrl()),
+                firstHeartbeat, Duration.ofMinutes(5));
         var firstResult = knowledgeStore.completeSuccessfulSync(firstTask, List.of(page),
-                firstRun.plusSeconds(2), firstRun.plus(Duration.ofHours(24)));
+                firstRun.plusSeconds(3), firstRun.plus(Duration.ofHours(24)));
 
         assertThat(firstResult.newDocuments()).isEqualTo(1);
         assertThat(firstResult.chunkCount()).isEqualTo(chunks.size());
@@ -486,6 +492,12 @@ class P0ChainDatabaseGateTest {
         assertThat(firstStatus.documentCount()).isEqualTo(1);
         assertThat(firstStatus.revisionCount()).isEqualTo(1);
         assertThat(firstStatus.chunkCount()).isEqualTo(chunks.size());
+        assertThat(firstStatus.lockedUntil()).isNull();
+        assertThat(firstStatus.lastJob().maxPageCount()).isEqualTo(200);
+        assertThat(firstStatus.lastJob().discoveredUrlCount()).isEqualTo(14);
+        assertThat(firstStatus.lastJob().visitedUrlCount()).isEqualTo(3);
+        assertThat(firstStatus.lastJob().heartbeatAt()).isEqualTo(firstHeartbeat);
+        assertThat(firstStatus.lastJob().currentUrl()).isEqualTo(page.canonicalUrl());
 
         Instant secondRun = firstRun.plusSeconds(10);
         assertThat(knowledgeStore.requestSync(ACTOR.workspaceId(), sourceId, secondRun)).isTrue();
@@ -549,6 +561,32 @@ class P0ChainDatabaseGateTest {
                 "VECTOR", retrieval.size(), 12, retrieval, embeddingTime.plusSeconds(2));
         assertThat(jdbcClient.sql("select count(*) from retrieval_trace where retrieval_mode='VECTOR'")
                 .query(Long.class).single()).isEqualTo(1L);
+
+        Instant staleRun = firstRun.plusSeconds(100);
+        assertThat(knowledgeStore.requestSync(ACTOR.workspaceId(), sourceId, staleRun)).isTrue();
+        KnowledgeStore.SourceTask staleTask = knowledgeStore.claimDueSources(
+                staleRun.plusSeconds(1), Duration.ofMinutes(1), 1).getFirst();
+        KnowledgeStore.SourceTask replacementTask = knowledgeStore.claimDueSources(
+                staleRun.plusSeconds(62), Duration.ofMinutes(5), 1).getFirst();
+
+        assertThat(replacementTask.jobId()).isNotEqualTo(staleTask.jobId());
+        assertThatThrownBy(() -> knowledgeStore.updateCollectionProgress(staleTask,
+                new KnowledgeStore.CollectionProgress(200, 1, 1, 0, page.canonicalUrl()),
+                staleRun.plusSeconds(63), Duration.ofMinutes(1)))
+                .isInstanceOf(KnowledgeCollectionLeaseLostException.class);
+        assertThatThrownBy(() -> knowledgeStore.completeSuccessfulSync(
+                staleTask, List.of(page), staleRun.plusSeconds(63), staleRun.plus(Duration.ofHours(24))))
+                .isInstanceOf(KnowledgeCollectionLeaseLostException.class);
+
+        knowledgeStore.updateCollectionProgress(replacementTask,
+                new KnowledgeStore.CollectionProgress(200, 1, 1, 1, page.canonicalUrl()),
+                staleRun.plusSeconds(63), Duration.ofMinutes(5));
+        knowledgeStore.completeSuccessfulSync(replacementTask, List.of(page),
+                staleRun.plusSeconds(64), staleRun.plus(Duration.ofHours(24)));
+        assertThat(jdbcClient.sql("""
+                select error_code from knowledge_collection_job where id=:jobId
+                """).param("jobId", staleTask.jobId()).query(String.class).single())
+                .isEqualTo("LOCK_EXPIRED");
     }
 
     private static ActorContext actor(String userId) {

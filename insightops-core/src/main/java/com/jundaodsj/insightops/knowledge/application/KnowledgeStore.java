@@ -9,6 +9,9 @@ public interface KnowledgeStore {
 
     List<SourceTask> claimDueSources(Instant now, Duration lockDuration, int limit);
 
+    void updateCollectionProgress(SourceTask source, CollectionProgress progress,
+                                  Instant heartbeatAt, Duration lockDuration);
+
     SyncResult completeSuccessfulSync(SourceTask source, List<DocumentPage> pages,
                                       Instant completedAt, Instant nextSyncAt);
 
@@ -42,17 +45,24 @@ public interface KnowledgeStore {
             int unchangedDocuments, int chunkCount) {
     }
 
+    record CollectionProgress(
+            int maxPageCount, int discoveredUrlCount, int visitedUrlCount,
+            int collectedPageCount, String currentUrl) {
+    }
+
     record SourceStatus(
             UUID sourceId, UUID projectId, String projectName, String sourceKey,
             String name, String sourceType, String rootUrl, String trustTier,
             boolean enabled, String status, Instant lastSyncAt, Instant nextSyncAt,
             int consecutiveFailures, String lastError, long documentCount,
-            long revisionCount, long chunkCount, JobStatus lastJob) {
+            long revisionCount, long chunkCount, Instant lockedUntil, JobStatus lastJob) {
     }
 
     record JobStatus(
             UUID jobId, String status, int pageCount, int newDocumentCount,
             int changedDocumentCount, int unchangedDocumentCount, int chunkCount,
+            int maxPageCount, int discoveredUrlCount, int visitedUrlCount,
+            String currentUrl, Instant heartbeatAt, Instant leaseExpiresAt,
             String errorCode, String errorMessage, Instant startedAt, Instant finishedAt) {
     }
 }

@@ -2,6 +2,7 @@ package com.jundaodsj.insightops.infrastructure.persistence;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jundaodsj.insightops.knowledge.application.KnowledgeCollectionLeaseLostException;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -54,10 +55,12 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                 .list();
         List<SourceTask> claimed = new ArrayList<>();
         for (SourceTask source : due) {
+            Instant leaseExpiresAt = now.plus(lockDuration);
             jdbc.sql("""
                     update knowledge_collection_job
                     set status='FAILED', error_code='LOCK_EXPIRED',
-                        error_message='Previous worker lease expired before completion', finished_at=:now
+                        error_message='Previous worker lease expired before completion',
+                        finished_at=:now, lease_expires_at=coalesce(lease_expires_at, :now)
                     where source_id=:sourceId and status='RUNNING'
                     """)
                     .param("sourceId", source.sourceId())
@@ -65,21 +68,26 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                     .update();
             int updated = jdbc.sql("""
                     update knowledge_source
-                    set status='RUNNING', locked_until=:lockedUntil, last_error=null, updated_at=:now
+                    set status='RUNNING', locked_until=:lockedUntil, lock_token=:lockToken,
+                        last_error=null, updated_at=:now
                     where id=:id and (locked_until is null or locked_until < :now)
                     """)
                     .param("id", source.sourceId())
                     .param("now", timestamp(now))
-                    .param("lockedUntil", timestamp(now.plus(lockDuration)))
+                    .param("lockedUntil", timestamp(leaseExpiresAt))
+                    .param("lockToken", source.jobId())
                     .update();
             if (updated == 0) continue;
             jdbc.sql("""
-                    insert into knowledge_collection_job (id, source_id, status, started_at, created_at)
-                    values (:id, :sourceId, 'RUNNING', :startedAt, :startedAt)
+                    insert into knowledge_collection_job
+                        (id, source_id, status, heartbeat_at, lease_expires_at, started_at, created_at)
+                    values
+                        (:id, :sourceId, 'RUNNING', :startedAt, :leaseExpiresAt, :startedAt, :startedAt)
                     """)
                     .param("id", source.jobId())
                     .param("sourceId", source.sourceId())
                     .param("startedAt", timestamp(now))
+                    .param("leaseExpiresAt", timestamp(leaseExpiresAt))
                     .update();
             claimed.add(source);
         }
@@ -88,8 +96,50 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
 
     @Override
     @Transactional
+    public void updateCollectionProgress(SourceTask source, CollectionProgress progress,
+                                         Instant heartbeatAt, Duration lockDuration) {
+        Instant leaseExpiresAt = heartbeatAt.plus(lockDuration);
+        int jobUpdated = jdbc.sql("""
+                update knowledge_collection_job
+                set max_page_count=:maxPages,
+                    discovered_url_count=greatest(discovered_url_count, :discoveredUrls),
+                    visited_url_count=greatest(visited_url_count, :visitedUrls),
+                    page_count=greatest(page_count, :collectedPages),
+                    current_url=:currentUrl, heartbeat_at=:heartbeatAt,
+                    lease_expires_at=:leaseExpiresAt
+                where id=:jobId and source_id=:sourceId and status='RUNNING'
+                """)
+                .param("jobId", source.jobId())
+                .param("sourceId", source.sourceId())
+                .param("maxPages", Math.max(0, progress.maxPageCount()))
+                .param("discoveredUrls", Math.max(0, progress.discoveredUrlCount()))
+                .param("visitedUrls", Math.max(0, progress.visitedUrlCount()))
+                .param("collectedPages", Math.max(0, progress.collectedPageCount()))
+                .param("currentUrl", truncateUrl(progress.currentUrl()))
+                .param("heartbeatAt", timestamp(heartbeatAt))
+                .param("leaseExpiresAt", timestamp(leaseExpiresAt))
+                .update();
+        int sourceUpdated = jdbc.sql("""
+                update knowledge_source
+                set locked_until=:leaseExpiresAt, updated_at=:heartbeatAt
+                where id=:sourceId and status='RUNNING' and lock_token=:jobId
+                  and locked_until >= :heartbeatAt
+                """)
+                .param("sourceId", source.sourceId())
+                .param("jobId", source.jobId())
+                .param("heartbeatAt", timestamp(heartbeatAt))
+                .param("leaseExpiresAt", timestamp(leaseExpiresAt))
+                .update();
+        if (jobUpdated != 1 || sourceUpdated != 1) {
+            throw new KnowledgeCollectionLeaseLostException(source.jobId());
+        }
+    }
+
+    @Override
+    @Transactional
     public SyncResult completeSuccessfulSync(SourceTask source, List<DocumentPage> pages,
                                              Instant completedAt, Instant nextSyncAt) {
+        requireLeaseOwnership(source, completedAt);
         int newDocuments = 0;
         int changedDocuments = 0;
         int unchangedDocuments = 0;
@@ -172,7 +222,7 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
         }
         SyncResult result = new SyncResult(pages.size(), newDocuments, changedDocuments,
                 unchangedDocuments, chunkCount);
-        jdbc.sql("""
+        int jobUpdated = jdbc.sql("""
                 update knowledge_collection_job
                 set status='SUCCEEDED', page_count=:pages, new_document_count=:newDocuments,
                     changed_document_count=:changedDocuments,
@@ -188,16 +238,21 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                 .param("chunks", result.chunkCount())
                 .param("finishedAt", timestamp(completedAt))
                 .update();
-        jdbc.sql("""
+        int sourceUpdated = jdbc.sql("""
                 update knowledge_source
                 set status='SUCCEEDED', last_sync_at=:completedAt, next_sync_at=:nextSyncAt,
-                    locked_until=null, consecutive_failures=0, last_error=null, updated_at=:completedAt
-                where id=:id
+                    locked_until=null, lock_token=null, consecutive_failures=0,
+                    last_error=null, updated_at=:completedAt
+                where id=:id and lock_token=:jobId
                 """)
                 .param("id", source.sourceId())
+                .param("jobId", source.jobId())
                 .param("completedAt", timestamp(completedAt))
                 .param("nextSyncAt", timestamp(nextSyncAt))
                 .update();
+        if (jobUpdated != 1 || sourceUpdated != 1) {
+            throw new KnowledgeCollectionLeaseLostException(source.jobId());
+        }
         return result;
     }
 
@@ -205,8 +260,9 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
     @Transactional
     public void completeFailedSync(SourceTask source, String errorCode, String errorMessage,
                                    Instant failedAt, Instant nextRetryAt) {
+        requireLeaseOwnership(source, failedAt);
         String message = truncate(errorMessage, 1000);
-        jdbc.sql("""
+        int jobUpdated = jdbc.sql("""
                 update knowledge_collection_job
                 set status='FAILED', error_code=:errorCode, error_message=:errorMessage,
                     finished_at=:finishedAt
@@ -217,18 +273,22 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                 .param("errorMessage", message)
                 .param("finishedAt", timestamp(failedAt))
                 .update();
-        jdbc.sql("""
+        int sourceUpdated = jdbc.sql("""
                 update knowledge_source
-                set status='RETRY_WAIT', next_sync_at=:nextRetryAt, locked_until=null,
+                set status='RETRY_WAIT', next_sync_at=:nextRetryAt, locked_until=null, lock_token=null,
                     consecutive_failures=consecutive_failures+1, last_error=:lastError,
                     updated_at=:failedAt
-                where id=:id
+                where id=:id and lock_token=:jobId
                 """)
                 .param("id", source.sourceId())
+                .param("jobId", source.jobId())
                 .param("nextRetryAt", timestamp(nextRetryAt))
                 .param("lastError", message)
                 .param("failedAt", timestamp(failedAt))
                 .update();
+        if (jobUpdated != 1 || sourceUpdated != 1) {
+            throw new KnowledgeCollectionLeaseLostException(source.jobId());
+        }
     }
 
     @Override
@@ -238,6 +298,7 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                        source.source_key, source.name, source.source_type, source.root_url,
                        source.trust_tier, source.enabled, source.status, source.last_sync_at,
                        source.next_sync_at, source.consecutive_failures, source.last_error,
+                       source.locked_until,
                        (select count(*) from knowledge_document document
                         where document.source_id=source.id and document.active=true) as document_count,
                        (select count(*) from knowledge_revision revision
@@ -249,6 +310,8 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                        job.id as job_id, job.status as job_status, job.page_count,
                        job.new_document_count, job.changed_document_count,
                        job.unchanged_document_count, job.chunk_count as job_chunk_count,
+                       job.max_page_count, job.discovered_url_count, job.visited_url_count,
+                       job.current_url, job.heartbeat_at, job.lease_expires_at,
                        job.error_code, job.error_message, job.started_at, job.finished_at
                 from knowledge_source source
                 join tracked_project project on project.id=source.project_id
@@ -270,7 +333,7 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
     public boolean requestSync(UUID workspaceId, UUID sourceId, Instant now) {
         return jdbc.sql("""
                 update knowledge_source
-                set next_sync_at=:now, locked_until=null,
+                set next_sync_at=:now, locked_until=null, lock_token=null,
                     status='RETRY_WAIT',
                     updated_at=:now
                 where id=:sourceId and workspace_id=:workspaceId and enabled=true
@@ -380,7 +443,10 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
         JobStatus job = jobId == null ? null : new JobStatus(jobId, rs.getString("job_status"),
                 rs.getInt("page_count"), rs.getInt("new_document_count"),
                 rs.getInt("changed_document_count"), rs.getInt("unchanged_document_count"),
-                rs.getInt("job_chunk_count"), rs.getString("error_code"),
+                rs.getInt("job_chunk_count"), rs.getInt("max_page_count"),
+                rs.getInt("discovered_url_count"), rs.getInt("visited_url_count"),
+                rs.getString("current_url"), instant(rs, "heartbeat_at"),
+                instant(rs, "lease_expires_at"), rs.getString("error_code"),
                 rs.getString("error_message"), instant(rs, "started_at"), instant(rs, "finished_at"));
         return new SourceStatus(rs.getObject("id", UUID.class), rs.getObject("project_id", UUID.class),
                 rs.getString("project_name"), rs.getString("source_key"), rs.getString("name"),
@@ -388,7 +454,25 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                 rs.getBoolean("enabled"), rs.getString("status"), instant(rs, "last_sync_at"),
                 instant(rs, "next_sync_at"), rs.getInt("consecutive_failures"),
                 rs.getString("last_error"), rs.getLong("document_count"),
-                rs.getLong("revision_count"), rs.getLong("chunk_count"), job);
+                rs.getLong("revision_count"), rs.getLong("chunk_count"),
+                instant(rs, "locked_until"), job);
+    }
+
+    private void requireLeaseOwnership(SourceTask source, Instant now) {
+        boolean owned = jdbc.sql("""
+                select exists (
+                    select 1 from knowledge_source
+                    where id=:sourceId and status='RUNNING' and lock_token=:jobId
+                      and locked_until >= :now
+                    for update
+                )
+                """)
+                .param("sourceId", source.sourceId())
+                .param("jobId", source.jobId())
+                .param("now", timestamp(now))
+                .query(Boolean.class)
+                .single();
+        if (!owned) throw new KnowledgeCollectionLeaseLostException(source.jobId());
     }
 
     private String metadata(SourceTask source, DocumentPage page, DocumentChunk chunk) {
@@ -423,6 +507,11 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
     private static String truncate(String value, int max) {
         String text = value == null || value.isBlank() ? "Unknown collection failure" : value;
         return text.length() <= max ? text : text.substring(0, max);
+    }
+
+    private static String truncateUrl(String value) {
+        if (value == null || value.isBlank()) return null;
+        return value.length() <= 1024 ? value : value.substring(0, 1024);
     }
 
     private record DocumentState(UUID id, UUID currentRevisionId, String contentSha256) { }

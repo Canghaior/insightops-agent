@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.worker;
 
 import com.jundaodsj.insightops.knowledge.application.DocumentCollectionException;
+import com.jundaodsj.insightops.knowledge.application.KnowledgeCollectionLeaseLostException;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
 import com.jundaodsj.insightops.knowledge.application.OfficialDocumentGateway;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +21,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 class KnowledgeCollectionRunnerTest {
@@ -44,7 +46,12 @@ class KnowledgeCollectionRunnerTest {
     void storesCollectedPagesAndSchedulesNextDailySync() {
         var page = new KnowledgeStore.DocumentPage("https://docs.spring.io/spring-ai/reference/", "Spring AI",
                 "en", null, "a".repeat(64), "content", null, null, List.of());
-        when(gateway.collect(eq(source), any())).thenReturn(List.of(page));
+        when(gateway.collect(eq(source), any(), any())).thenAnswer(invocation -> {
+            OfficialDocumentGateway.ProgressListener listener = invocation.getArgument(2);
+            listener.onProgress(new KnowledgeStore.CollectionProgress(
+                    200, 10, 4, 1, page.canonicalUrl()));
+            return List.of(page);
+        });
         when(store.completeSuccessfulSync(eq(source), any(), eq(NOW), any()))
                 .thenReturn(new KnowledgeStore.SyncResult(1, 1, 0, 0, 3));
 
@@ -52,12 +59,14 @@ class KnowledgeCollectionRunnerTest {
 
         assertThat(result.succeededSources()).isEqualTo(1);
         assertThat(result.collectedPages()).isEqualTo(1);
+        assertThat(result.leaseLostSources()).isZero();
+        verify(store).updateCollectionProgress(eq(source), any(), eq(NOW), eq(Duration.ofMinutes(10)));
         verify(store).completeSuccessfulSync(source, List.of(page), NOW, NOW.plus(Duration.ofHours(24)));
     }
 
     @Test
     void validationFailureUsesLongRetryAndDoesNotLeakTheCause() {
-        when(gateway.collect(eq(source), any())).thenThrow(new DocumentCollectionException(
+        when(gateway.collect(eq(source), any(), any())).thenThrow(new DocumentCollectionException(
                 DocumentCollectionException.Code.VALIDATION_ERROR, "outside registered host"));
         ArgumentCaptor<Instant> retry = ArgumentCaptor.forClass(Instant.class);
 
@@ -67,5 +76,18 @@ class KnowledgeCollectionRunnerTest {
         verify(store).completeFailedSync(eq(source), eq("VALIDATION_ERROR"),
                 eq("outside registered host"), eq(NOW), retry.capture());
         assertThat(retry.getValue()).isEqualTo(NOW.plus(Duration.ofHours(24)));
+    }
+
+    @Test
+    void leaseLossStopsTheStaleWorkerWithoutCompletingTheJob() {
+        when(gateway.collect(eq(source), any(), any()))
+                .thenThrow(new KnowledgeCollectionLeaseLostException(source.jobId()));
+
+        var result = runner.collectDueSources();
+
+        assertThat(result.leaseLostSources()).isEqualTo(1);
+        assertThat(result.failedSources()).isZero();
+        verify(store, never()).completeSuccessfulSync(any(), any(), any(), any());
+        verify(store, never()).completeFailedSync(any(), any(), any(), any(), any());
     }
 }

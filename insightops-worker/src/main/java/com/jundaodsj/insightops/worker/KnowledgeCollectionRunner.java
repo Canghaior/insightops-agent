@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.worker;
 
 import com.jundaodsj.insightops.knowledge.application.DocumentCollectionException;
+import com.jundaodsj.insightops.knowledge.application.KnowledgeCollectionLeaseLostException;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
 import com.jundaodsj.insightops.knowledge.application.OfficialDocumentGateway;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,37 +34,52 @@ public class KnowledgeCollectionRunner {
 
     public CycleResult collectDueSources() {
         Instant startedAt = clock.instant();
-        var sources = store.claimDueSources(startedAt,
-                Duration.ofMinutes(Math.max(1, properties.getLockMinutes())),
+        Duration lockDuration = Duration.ofMinutes(Math.max(1, properties.getLockMinutes()));
+        var sources = store.claimDueSources(startedAt, lockDuration,
                 Math.max(1, properties.getBatchSize()));
         int succeeded = 0;
         int failed = 0;
+        int leaseLost = 0;
         int pages = 0;
         int chunks = 0;
         for (var source : sources) {
             try {
-                var documents = gateway.collect(source, options());
+                var documents = gateway.collect(source, options(), progress ->
+                        store.updateCollectionProgress(source, progress, clock.instant(), lockDuration));
                 Instant completedAt = clock.instant();
                 var result = store.completeSuccessfulSync(source, documents, completedAt,
                         completedAt.plus(Duration.ofHours(Math.max(1, properties.getSyncIntervalHours()))));
                 succeeded++;
                 pages += result.pageCount();
                 chunks += result.chunkCount();
+            } catch (KnowledgeCollectionLeaseLostException exception) {
+                leaseLost++;
             } catch (DocumentCollectionException exception) {
-                failed++;
                 Instant failedAt = clock.instant();
-                store.completeFailedSync(source, exception.code().name(), exception.getMessage(), failedAt,
-                        failedAt.plus(retryDelay(source.consecutiveFailures(), exception.code())));
+                if (completeFailure(source, exception.code().name(), exception.getMessage(), failedAt,
+                        failedAt.plus(retryDelay(source.consecutiveFailures(), exception.code())))) failed++;
+                else leaseLost++;
             } catch (RuntimeException exception) {
-                failed++;
                 Instant failedAt = clock.instant();
-                store.completeFailedSync(source, DocumentCollectionException.Code.INTERNAL_ERROR.name(),
+                if (completeFailure(source, DocumentCollectionException.Code.INTERNAL_ERROR.name(),
                         exception.getClass().getSimpleName(), failedAt,
                         failedAt.plus(retryDelay(source.consecutiveFailures(),
-                                DocumentCollectionException.Code.INTERNAL_ERROR)));
+                                DocumentCollectionException.Code.INTERNAL_ERROR)))) failed++;
+                else leaseLost++;
             }
         }
-        return new CycleResult(sources.size(), succeeded, failed, pages, chunks, startedAt, clock.instant());
+        return new CycleResult(sources.size(), succeeded, failed, leaseLost,
+                pages, chunks, startedAt, clock.instant());
+    }
+
+    private boolean completeFailure(KnowledgeStore.SourceTask source, String errorCode,
+                                    String errorMessage, Instant failedAt, Instant nextRetryAt) {
+        try {
+            store.completeFailedSync(source, errorCode, errorMessage, failedAt, nextRetryAt);
+            return true;
+        } catch (KnowledgeCollectionLeaseLostException exception) {
+            return false;
+        }
     }
 
     private OfficialDocumentGateway.CrawlOptions options() {
@@ -89,6 +105,7 @@ public class KnowledgeCollectionRunner {
     }
 
     public record CycleResult(int claimedSources, int succeededSources, int failedSources,
+                              int leaseLostSources,
                               int collectedPages, int createdChunks,
                               Instant startedAt, Instant finishedAt) { }
 }

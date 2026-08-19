@@ -6,7 +6,12 @@ import java.util.List;
 public interface OfficialDocumentGateway {
 
     List<KnowledgeStore.DocumentPage> collect(
-            KnowledgeStore.SourceTask source, CrawlOptions options);
+            KnowledgeStore.SourceTask source, CrawlOptions options, ProgressListener progressListener);
+
+    @FunctionalInterface
+    interface ProgressListener {
+        void onProgress(KnowledgeStore.CollectionProgress progress);
+    }
 
     record CrawlOptions(
             int maxPages, int maxDepth, int maxBytes, Duration requestTimeout,

@@ -10,17 +10,24 @@ import {
   requestKnowledgeSync,
   runRagEvaluation,
   searchKnowledge,
+  type KnowledgeCollectionJob,
   type KnowledgeEmbeddingOverview,
   type KnowledgeSearchResult,
   type KnowledgeSourceStatus,
   type RagEvaluationCase,
   type RagEvaluationReport,
 } from '@/api/admin'
+import {
+  beginKnowledgeStatusLoad,
+  completeKnowledgeStatusLoad,
+  failKnowledgeStatusLoad,
+} from './adminKnowledgeLoadState'
 
 const sources = ref<KnowledgeSourceStatus[]>([])
 const loading = ref(false)
 const syncing = ref<string | null>(null)
 const error = ref('')
+const refreshError = ref('')
 const notice = ref('')
 const embeddings = ref<KnowledgeEmbeddingOverview | null>(null)
 const retryingEmbeddings = ref(false)
@@ -45,7 +52,7 @@ const embeddingPercent = computed(() => {
 
 async function load(silent = false) {
   if (!silent) loading.value = true
-  if (!silent) error.value = ''
+  beginKnowledgeStatusLoad(error, refreshError, silent)
   try {
     const [sourceData, embeddingData, evaluationData] = await Promise.all([
       listKnowledgeSources(), getKnowledgeEmbeddingOverview(), getLatestRagEvaluation(),
@@ -53,8 +60,12 @@ async function load(silent = false) {
     sources.value = sourceData
     embeddings.value = embeddingData
     evaluation.value = evaluationData
+    completeKnowledgeStatusLoad(refreshError)
   }
-  catch (caught: unknown) { error.value = message(caught) }
+  catch (caught: unknown) {
+    const detail = message(caught)
+    failKnowledgeStatusLoad(error, refreshError, silent, detail)
+  }
   finally { if (!silent) loading.value = false }
 }
 
@@ -134,6 +145,19 @@ function jobStatusLabel(status: string): string {
   return ({ RUNNING: '采集中', SUCCEEDED: '已完成', FAILED: '失败' } as Record<string, string>)[status] ?? status
 }
 
+function progressLabel(job: KnowledgeCollectionJob): string {
+  const maxPages = job.maxPageCount ?? 0
+  const limit = maxPages > 0 ? ` / 上限 ${maxPages}` : ''
+  return `已访问 ${job.visitedUrlCount ?? 0} · 已发现 ${job.discoveredUrlCount ?? 0} · 有效页面 ${job.pageCount}${limit}`
+}
+
+function leaseLabel(job: KnowledgeCollectionJob): string {
+  if (!job.heartbeatAt) return '尚无心跳'
+  const age = Date.now() - new Date(job.heartbeatAt).getTime()
+  if (job.status === 'RUNNING' && age > 60_000) return `心跳可能中断 · ${time(job.heartbeatAt)}`
+  return `最近心跳 ${time(job.heartbeatAt)}`
+}
+
 function statusClass(source: KnowledgeSourceStatus): string {
   if (source.status === 'SUCCEEDED') return 'status-succeeded'
   if (source.status === 'RUNNING' || source.status === 'RETRY_WAIT') return 'status-running'
@@ -190,7 +214,7 @@ onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer)
       <p>只采集登记过的官方 HTTPS 域名与路径；切片使用本机 Ollama bge-m3 生成向量，原文和向量均保存在本机 PostgreSQL，不调用 DeepSeek。</p>
     </div>
 
-    <p v-if="error" class="stream-error">{{ error }}</p>
+    <p v-if="error || refreshError" class="stream-error">{{ error || refreshError }}</p>
     <p v-if="notice" class="success-notice">{{ notice }}</p>
     <p v-if="loading" class="run-loading">正在读取知识源状态…</p>
 
@@ -281,8 +305,24 @@ onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer)
           <div><dt>连续失败</dt><dd>{{ source.consecutiveFailures }}</dd></div>
         </dl>
         <div v-if="source.lastJob" class="knowledge-job">
-          <b>最近任务：{{ jobStatusLabel(source.lastJob.status) }}</b>
-          <span>{{ source.lastJob.pageCount }} 页 · {{ source.lastJob.chunkCount }} 个新切片</span>
+          <div class="knowledge-job-summary">
+            <b>最近任务：{{ jobStatusLabel(source.lastJob.status) }}</b>
+            <span>{{ progressLabel(source.lastJob) }}</span>
+            <span>{{ source.lastJob.chunkCount }} 个新切片 · {{ leaseLabel(source.lastJob) }}</span>
+            <span v-if="source.lastJob.status === 'RUNNING' && source.lastJob.leaseExpiresAt">
+              租约到期 {{ time(source.lastJob.leaseExpiresAt) }}
+            </span>
+          </div>
+          <a
+            v-if="source.lastJob.currentUrl"
+            class="knowledge-current-url"
+            :href="source.lastJob.currentUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            :title="source.lastJob.currentUrl"
+          >
+            {{ source.lastJob.status === 'RUNNING' ? '当前 URL' : '最后 URL' }}：{{ source.lastJob.currentUrl }}
+          </a>
         </div>
         <p v-if="source.lastError" class="stream-error">{{ source.lastError }}</p>
         <footer>

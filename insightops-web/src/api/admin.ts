@@ -64,6 +64,12 @@ export interface KnowledgeCollectionJob {
   changedDocumentCount: number
   unchangedDocumentCount: number
   chunkCount: number
+  maxPageCount: number
+  discoveredUrlCount: number
+  visitedUrlCount: number
+  currentUrl: string | null
+  heartbeatAt: string | null
+  leaseExpiresAt: string | null
   errorCode: string | null
   errorMessage: string | null
   startedAt: string
@@ -88,6 +94,7 @@ export interface KnowledgeSourceStatus {
   documentCount: number
   revisionCount: number
   chunkCount: number
+  lockedUntil: string | null
   lastJob: KnowledgeCollectionJob | null
 }
 

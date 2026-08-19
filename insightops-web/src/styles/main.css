@@ -157,8 +157,10 @@ a { color: inherit; text-decoration: none; }
 .knowledge-source-card dl div { display: flex; justify-content: space-between; gap: 12px; }
 .knowledge-source-card dt { color: var(--muted); }
 .knowledge-source-card dd { margin: 0; text-align: right; }
-.knowledge-job { display: flex; justify-content: space-between; gap: 10px; padding: 10px; margin-bottom: 14px; border-radius: 10px; background: rgba(0, 0, 0, .16); }
+.knowledge-job { display: grid; gap: 8px; padding: 10px; margin-bottom: 14px; border-radius: 10px; background: rgba(0, 0, 0, .16); }
+.knowledge-job-summary { display: grid; gap: 4px; }
 .knowledge-job span, .knowledge-source-card footer > span { color: var(--muted); font-size: 11px; }
+.knowledge-current-url { display: block; color: var(--accent); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .embedding-panel, .rag-evaluation-panel, .knowledge-search-panel { margin-bottom: 18px; }
 .embedding-panel header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .embedding-panel h3, .knowledge-search-panel h3 { margin: 5px 0 12px; }

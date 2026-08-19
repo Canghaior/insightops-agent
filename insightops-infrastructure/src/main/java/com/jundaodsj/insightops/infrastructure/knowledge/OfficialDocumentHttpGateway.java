@@ -59,8 +59,11 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
     }
 
     @Override
-    public List<KnowledgeStore.DocumentPage> collect(KnowledgeStore.SourceTask source, CrawlOptions options) {
+    public List<KnowledgeStore.DocumentPage> collect(KnowledgeStore.SourceTask source, CrawlOptions options,
+                                                     ProgressListener progressListener) {
         URI discovery = validate(source.discoveryUrl(), source, true);
+        int maxPages = Math.max(1, options.maxPages());
+        report(progressListener, maxPages, 0, 0, 0, discovery.toString());
         RobotsRules robots = readRobots(source, options);
         ArrayDeque<Candidate> queue = new ArrayDeque<>();
         Set<String> queued = new HashSet<>();
@@ -79,12 +82,17 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
         } else {
             enqueue(queue, queued, source, discovery.toString(), 0, robots);
         }
+        report(progressListener, maxPages, queued.size(), 0, 0, discovery.toString());
 
         List<KnowledgeStore.DocumentPage> pages = new ArrayList<>();
         long lastRequestAt = 0;
-        while (!queue.isEmpty() && pages.size() < Math.max(1, options.maxPages())) {
+        int visitedUrls = 0;
+        while (!queue.isEmpty() && pages.size() < maxPages) {
             Candidate candidate = queue.removeFirst();
             if (!visited.add(candidate.uri().toString())) continue;
+            visitedUrls++;
+            report(progressListener, maxPages, queued.size(), visitedUrls, pages.size(),
+                    candidate.uri().toString());
             delay(lastRequestAt, options.requestDelay());
             FetchResult fetched = fetch(candidate.uri(), source, options, false);
             lastRequestAt = System.nanoTime();
@@ -97,16 +105,26 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
                             parsed.content(), fetched.etag(), fetched.lastModified(), chunks));
                 }
             }
+            report(progressListener, maxPages, queued.size(), visitedUrls, pages.size(),
+                    candidate.uri().toString());
             if (candidate.depth() >= Math.max(0, options.maxDepth())) continue;
             for (String link : parsed.links()) {
                 enqueue(queue, queued, source, link, candidate.depth() + 1, robots);
             }
+            report(progressListener, maxPages, queued.size(), visitedUrls, pages.size(),
+                    candidate.uri().toString());
         }
         if (pages.isEmpty()) {
             throw new DocumentCollectionException(DocumentCollectionException.Code.UNSUPPORTED_CONTENT,
                     "Official documentation source returned no collectable text pages");
         }
         return List.copyOf(pages);
+    }
+
+    private static void report(ProgressListener listener, int maxPages, int discoveredUrls,
+                               int visitedUrls, int collectedPages, String currentUrl) {
+        listener.onProgress(new KnowledgeStore.CollectionProgress(
+                maxPages, discoveredUrls, visitedUrls, collectedPages, currentUrl));
     }
 
     private ParsedPage parse(FetchResult fetched, KnowledgeStore.SourceTask source) {

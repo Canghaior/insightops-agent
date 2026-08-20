@@ -207,6 +207,7 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 - 用户可以配置通用 HTTPS Webhook；完整端点使用 AES-256-GCM 加密，页面和审计只显示主机掩码。
 - Webhook Worker 支持并发租约、过期接管、幂等键、指数退避、最终失败手动重试和送达审计。
 - URL 策略禁止非 HTTPS、非 443 端口、凭据、重定向和解析到非公网地址的目标。
+- P1.8 已于 2026-08-20 完成生产验收，详见 `docs/testing/results/p1-8-report-delivery-production-acceptance-2026-08-20.md`。
 
 ### 4.14 测试与持续集成
 
@@ -215,7 +216,7 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 - 前端 ESLint 通过。
 - 前端生产构建通过。
 - GitHub Actions 已配置后端验证、前端 lint/test/build 和三个镜像构建。
-- GitHub `production` Environment Secrets 已完成配置，P1.7-A CI Run `32346071059` 和生产部署 Run `32346378528` 均成功。
+- GitHub `production` Environment Secrets 已完成配置，P1.8 最终 CI Run `32362244974` 和生产部署 Run `32362658160` 均成功。
 - Dependabot 已覆盖 Maven、npm 和 GitHub Actions 依赖。
 
 ## 5. 当前部分完成的能力

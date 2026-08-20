@@ -1,19 +1,16 @@
 package com.jundaodsj.insightops.server.chat;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jundaodsj.insightops.server.tool.RegisteredToolExecutionService;
+import com.jundaodsj.insightops.tool.application.registry.AgentToolNames;
 import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeEmbeddingStore;
 import com.jundaodsj.insightops.server.knowledge.KnowledgeSearchService;
 import com.jundaodsj.insightops.server.knowledge.KnowledgeAnswerabilityPolicy;
-import com.jundaodsj.insightops.tool.application.AgentToolExecutionStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -24,34 +21,29 @@ import java.util.UUID;
 
 @Service
 public class KnowledgeRagService {
-    public static final String TOOL_NAME = "knowledge_hybrid_search";
+    public static final String TOOL_NAME = AgentToolNames.KNOWLEDGE_HYBRID_SEARCH;
     private static final Logger LOGGER = LoggerFactory.getLogger(KnowledgeRagService.class);
 
     private final KnowledgeSearchService searchService;
-    private final AgentToolExecutionStore executionStore;
+    private final RegisteredToolExecutionService toolExecution;
     private final KnowledgeRagProperties properties;
-    private final ObjectMapper objectMapper;
     private final KnowledgeAnswerabilityPolicy answerabilityPolicy;
 
     @Autowired
     public KnowledgeRagService(KnowledgeSearchService searchService,
-                               AgentToolExecutionStore executionStore,
+                               RegisteredToolExecutionService toolExecution,
                                KnowledgeRagProperties properties,
-                               ObjectMapper objectMapper,
                                KnowledgeAnswerabilityPolicy answerabilityPolicy) {
         this.searchService = searchService;
-        this.executionStore = executionStore;
+        this.toolExecution = toolExecution;
         this.properties = properties;
-        this.objectMapper = objectMapper;
         this.answerabilityPolicy = answerabilityPolicy;
     }
 
     KnowledgeRagService(KnowledgeSearchService searchService,
-                        AgentToolExecutionStore executionStore,
-                        KnowledgeRagProperties properties,
-                        ObjectMapper objectMapper) {
-        this(searchService, executionStore, properties, objectMapper,
-                new KnowledgeAnswerabilityPolicy());
+                        RegisteredToolExecutionService toolExecution,
+                        KnowledgeRagProperties properties) {
+        this(searchService, toolExecution, properties, new KnowledgeAnswerabilityPolicy());
     }
 
     public Optional<RagEvidence> retrieve(UUID runId, UUID workspaceId, String query,
@@ -65,13 +57,10 @@ public class KnowledgeRagService {
         if (!properties.isEnabled()) {
             return Optional.empty();
         }
-        UUID stepId = UUID.randomUUID();
-        UUID toolCallId = UUID.randomUUID();
-        Instant startedAt = Instant.now();
-        executionStore.startTool(runId, stepId, toolCallId, 2, TOOL_NAME,
-                runId + ":" + TOOL_NAME + ":1",
-                json(Map.of("query", query, "candidateLimit", candidateLimit())), startedAt);
-        listener.onStarted(toolCallId, TOOL_NAME);
+        RegisteredToolExecutionService.Session session = toolExecution.start(
+                runId, 2, 1, 1, TOOL_NAME,
+                Map.of("query", query, "candidateLimit", candidateLimit()));
+        listener.onStarted(session.toolCallId(), session.toolName());
 
         try {
             var response = viewerUserId == null && systemAdmin
@@ -82,22 +71,21 @@ public class KnowledgeRagService {
                     workspaceId, query, response.results()).answerable();
             List<KnowledgeEmbeddingStore.SearchResult> selected = answerable
                     ? select(response.results()) : List.of();
-            RagEvidence evidence = evidence(response, selected, toolCallId, answerable);
-            long durationMs = Duration.between(startedAt, Instant.now()).toMillis();
-            executionStore.succeedTool(runId, stepId, toolCallId, json(resultPayload(evidence)),
-                    durationMs, Instant.now());
-            listener.onCompleted(toolCallId, TOOL_NAME, selected.size(), response.model());
+            RagEvidence evidence = evidence(response, selected, session.toolCallId(), answerable);
+            session.succeed(resultPayload(evidence));
+            listener.onCompleted(
+                    session.toolCallId(), session.toolName(), selected.size(), response.model());
             return Optional.of(evidence);
         }
         catch (KnowledgeSearchService.EmbeddingUnavailableException exception) {
-            fail(stepId, toolCallId, "EMBEDDING_UNAVAILABLE", startedAt);
-            listener.onCompleted(toolCallId, TOOL_NAME, 0, "unavailable");
+            session.failIfRunning("EMBEDDING_UNAVAILABLE");
+            listener.onCompleted(session.toolCallId(), session.toolName(), 0, "unavailable");
             LOGGER.warn("RAG retrieval unavailable for run {}: {}", runId, exception.getMessage());
             return Optional.empty();
         }
         catch (RuntimeException exception) {
-            fail(stepId, toolCallId, "RETRIEVAL_ERROR", startedAt);
-            listener.onCompleted(toolCallId, TOOL_NAME, 0, "unavailable");
+            session.failIfRunning("RETRIEVAL_ERROR");
+            listener.onCompleted(session.toolCallId(), session.toolName(), 0, "unavailable");
             LOGGER.error("RAG retrieval failed for run {}", runId, exception);
             return Optional.empty();
         }
@@ -191,26 +179,15 @@ public class KnowledgeRagService {
         return Map.of("provider", evidence.provider(), "model", evidence.model(),
                 "mode", evidence.mode(), "vectorAvailable", evidence.vectorAvailable(),
                 "answerable", evidence.answerable(),
-                "retrievalDurationMs", evidence.retrievalDurationMs(), "sources", sources);
+                "retrievalDurationMs", evidence.retrievalDurationMs(),
+                "resultCount", sources.size(), "sources", sources);
     }
 
-    private void fail(UUID stepId, UUID toolCallId, String code, Instant startedAt) {
-        executionStore.failTool(stepId, toolCallId, code,
-                Duration.between(startedAt, Instant.now()).toMillis(), Instant.now());
-    }
 
     private int candidateLimit() {
         return Math.max(1, Math.min(20, properties.getCandidateLimit()));
     }
 
-    private String json(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        }
-        catch (JsonProcessingException exception) {
-            throw new IllegalStateException("Unable to serialize RAG audit payload", exception);
-        }
-    }
 
     private static String clean(String value) {
         return value == null ? "" : value.replace('\u0000', ' ').strip();

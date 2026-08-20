@@ -49,8 +49,11 @@ import com.jundaodsj.insightops.server.chat.GitHubReleaseEvidenceFormatter;
 import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
 import com.jundaodsj.insightops.server.chat.ReleaseQuestionRouter;
 import com.jundaodsj.insightops.server.chat.ReleaseToolService;
+import com.jundaodsj.insightops.server.tool.AgentToolRegistryConfiguration;
+import com.jundaodsj.insightops.server.tool.RegisteredToolExecutionService;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import com.jundaodsj.insightops.tool.application.github.GitHubRelease;
+import com.jundaodsj.insightops.tool.application.registry.AgentToolRegistry;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseGateway;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseQuery;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseResult;
@@ -179,9 +182,11 @@ class P0ChainDatabaseGateTest {
                         return releaseResult(query.projectId(), query.displayName());
                     }
                 },
-                new JdbcAgentToolExecutionStore(jdbcClient),
-                new GitHubReleaseEvidenceFormatter(),
-                objectMapper());
+                new RegisteredToolExecutionService(
+                        new AgentToolRegistry(AgentToolRegistryConfiguration.definitions(true)),
+                        new JdbcAgentToolExecutionStore(jdbcClient),
+                        objectMapper()),
+                new GitHubReleaseEvidenceFormatter());
     }
 
     private static GitHubReleaseResult releaseResult(String projectId, String projectName) {

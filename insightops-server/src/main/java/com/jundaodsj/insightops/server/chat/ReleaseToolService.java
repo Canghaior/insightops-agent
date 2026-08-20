@@ -1,8 +1,7 @@
 package com.jundaodsj.insightops.server.chat;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.jundaodsj.insightops.tool.application.AgentToolExecutionStore;
+import com.jundaodsj.insightops.server.tool.RegisteredToolExecutionService;
+import com.jundaodsj.insightops.tool.application.registry.AgentToolNames;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseGateway;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseQuery;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseResult;
@@ -10,34 +9,32 @@ import com.jundaodsj.insightops.tool.application.github.GitHubToolErrorCode;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolException;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class ReleaseToolService {
 
-    public static final String TOOL_NAME = "github_release_list";
+    public static final String TOOL_NAME = AgentToolNames.GITHUB_RELEASE_LIST;
 
     private final ReleaseQuestionRouter router;
     private final GitHubReleaseGateway gateway;
-    private final AgentToolExecutionStore executionStore;
+    private final RegisteredToolExecutionService toolExecution;
     private final GitHubReleaseEvidenceFormatter evidenceFormatter;
-    private final ObjectMapper objectMapper;
 
     public ReleaseToolService(
             ReleaseQuestionRouter router,
             GitHubReleaseGateway gateway,
-            AgentToolExecutionStore executionStore,
-            GitHubReleaseEvidenceFormatter evidenceFormatter,
-            ObjectMapper objectMapper) {
+            RegisteredToolExecutionService toolExecution,
+            GitHubReleaseEvidenceFormatter evidenceFormatter) {
         this.router = router;
         this.gateway = gateway;
-        this.executionStore = executionStore;
+        this.toolExecution = toolExecution;
         this.evidenceFormatter = evidenceFormatter;
-        this.objectMapper = objectMapper;
     }
 
     public Optional<ToolEvidence> execute(
@@ -65,12 +62,9 @@ public class ReleaseToolService {
             UUID runId, ReleaseQuestionRouter.ResolvedReleaseQuery resolved,
             ToolProgressListener listener) {
         GitHubReleaseQuery query = resolved.evidenceQuery();
-        UUID stepId = UUID.randomUUID();
-        UUID toolCallId = UUID.randomUUID();
+        RegisteredToolExecutionService.Session session = start(runId, 1, query);
         Instant startedAt = Instant.now();
-        executionStore.startTool(runId, stepId, toolCallId, 1, TOOL_NAME,
-                runId + ":" + TOOL_NAME + ":1", json(query), startedAt);
-        listener.onStarted(toolCallId, TOOL_NAME);
+        listener.onStarted(session.toolCallId(), session.toolName());
         try {
             java.util.ArrayList<com.jundaodsj.insightops.tool.application.github.GitHubRelease> releases =
                     new java.util.ArrayList<>();
@@ -83,16 +77,15 @@ public class ReleaseToolService {
                 truncated = truncated || current.truncated();
             }
             GitHubReleaseResult result = new GitHubReleaseResult(releases, fetchedAt, truncated);
-            long durationMs = Duration.between(startedAt, Instant.now()).toMillis();
-            executionStore.succeedTool(runId, stepId, toolCallId, json(result), durationMs, Instant.now());
-            listener.onCompleted(toolCallId, TOOL_NAME, result.releases().size());
+            session.succeed(resultPayload(result));
+            listener.onCompleted(session.toolCallId(), session.toolName(), result.releases().size());
             return Optional.of(new ToolEvidence(evidenceFormatter.format(query, result),
-                    result.sourceUrls(), toolCallId, result.releases().size()));
+                    result.sourceUrls(), session.toolCallId(), result.releases().size()));
         } catch (GitHubToolException exception) {
-            fail(stepId, toolCallId, exception.code().name(), startedAt);
+            session.failIfRunning(exception.code().name());
             throw exception;
         } catch (RuntimeException exception) {
-            fail(stepId, toolCallId, GitHubToolErrorCode.INTERNAL_ERROR.name(), startedAt);
+            session.failIfRunning(GitHubToolErrorCode.INTERNAL_ERROR.name());
             throw new GitHubToolException(GitHubToolErrorCode.INTERNAL_ERROR, exception);
         }
     }
@@ -110,64 +103,49 @@ public class ReleaseToolService {
         }
 
         GitHubReleaseQuery query = routed.get();
-        UUID stepId = UUID.randomUUID();
-        UUID toolCallId = UUID.randomUUID();
-        Instant startedAt = Instant.now();
-        String requestPayload = json(query);
-        executionStore.startTool(
-                runId,
-                stepId,
-                toolCallId,
-                1,
-                TOOL_NAME,
-                runId + ":" + TOOL_NAME + ":1",
-                requestPayload,
-                startedAt);
-        listener.onStarted(toolCallId, TOOL_NAME);
+        RegisteredToolExecutionService.Session session = start(runId, 1, query);
+        listener.onStarted(session.toolCallId(), session.toolName());
 
         try {
             GitHubReleaseResult result = gateway.listReleases(query);
-            long durationMs = Duration.between(startedAt, Instant.now()).toMillis();
-            executionStore.succeedTool(
-                    runId,
-                    stepId,
-                    toolCallId,
-                    json(result),
-                    durationMs,
-                    Instant.now());
-            listener.onCompleted(toolCallId, TOOL_NAME, result.releases().size());
+            session.succeed(resultPayload(result));
+            listener.onCompleted(
+                    session.toolCallId(),
+                    session.toolName(),
+                    result.releases().size());
             return Optional.of(new ToolEvidence(
                     evidenceFormatter.format(query, result),
                     result.sourceUrls(),
-                    toolCallId,
+                    session.toolCallId(),
                     result.releases().size()));
         }
         catch (GitHubToolException exception) {
-            fail(stepId, toolCallId, exception.code().name(), startedAt);
+            session.failIfRunning(exception.code().name());
             throw exception;
         }
         catch (RuntimeException exception) {
-            fail(stepId, toolCallId, GitHubToolErrorCode.INTERNAL_ERROR.name(), startedAt);
+            session.failIfRunning(GitHubToolErrorCode.INTERNAL_ERROR.name());
             throw new GitHubToolException(GitHubToolErrorCode.INTERNAL_ERROR, exception);
         }
     }
 
-    private void fail(UUID stepId, UUID toolCallId, String errorCode, Instant startedAt) {
-        executionStore.failTool(
-                stepId,
-                toolCallId,
-                errorCode,
-                Duration.between(startedAt, Instant.now()).toMillis(),
-                Instant.now());
+    private static Map<String, Object> resultPayload(GitHubReleaseResult result) {
+        return Map.of(
+                "releases", result.releases(),
+                "fetchedAt", result.fetchedAt().toString(),
+                "truncated", result.truncated());
     }
 
-    private String json(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
+    private RegisteredToolExecutionService.Session start(
+            UUID runId, int stepNo, GitHubReleaseQuery query) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("projectIds", query.projectIds());
+        if (query.timeWindowDays() != null) {
+            input.put("timeWindowDays", query.timeWindowDays());
         }
-        catch (JsonProcessingException exception) {
-            throw new GitHubToolException(GitHubToolErrorCode.INTERNAL_ERROR, exception);
-        }
+        input.put("maxReleasesPerProject", query.maxReleasesPerProject());
+        input.put("includePrereleases", query.includePrereleases());
+        return toolExecution.start(runId, stepNo, 1, 1, TOOL_NAME, input);
     }
 
     public record ToolEvidence(

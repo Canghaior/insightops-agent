@@ -1,14 +1,11 @@
 package com.jundaodsj.insightops.server.chat;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jundaodsj.insightops.server.tool.RegisteredToolExecutionService;
+import com.jundaodsj.insightops.tool.application.registry.AgentToolNames;
 import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.project.application.ProjectUpdateStore;
-import com.jundaodsj.insightops.tool.application.AgentToolExecutionStore;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -20,22 +17,22 @@ import java.util.UUID;
 @Service
 public class ProjectEventEvidenceService {
 
-    public static final String TOOL_NAME = "project_intelligence_event_search";
+    public static final String TOOL_NAME = AgentToolNames.PROJECT_INTELLIGENCE_EVENT_SEARCH;
     private final ProjectUpdateStore store;
-    private final AgentToolExecutionStore executionStore;
-    private final ObjectMapper objectMapper;
+    private final RegisteredToolExecutionService toolExecution;
 
     public ProjectEventEvidenceService(
-            ProjectUpdateStore store, AgentToolExecutionStore executionStore, ObjectMapper objectMapper) {
-        this.store=store; this.executionStore=executionStore; this.objectMapper=objectMapper;
+            ProjectUpdateStore store, RegisteredToolExecutionService toolExecution) {
+        this.store = store;
+        this.toolExecution = toolExecution;
     }
 
     public Optional<EventEvidence> retrieve(UUID runId, UUID workspaceId, String question) {
         List<String> types=eventTypes(question);
         if(types.isEmpty()) return Optional.empty();
-        UUID stepId=UUID.randomUUID(); UUID toolCallId=UUID.randomUUID(); Instant started=Instant.now();
-        executionStore.startTool(runId,stepId,toolCallId,3,TOOL_NAME,runId+":"+TOOL_NAME+":1",
-                json(Map.of("question",question,"eventTypes",types,"limit",12)),started);
+        RegisteredToolExecutionService.Session session = toolExecution.start(
+                runId, 3, 1, 1, TOOL_NAME,
+                Map.of("question", question, "eventTypes", types, "limit", 12));
         try {
             List<ProjectUpdateStore.EventEvidence> results=store.searchEvents(workspaceId,"",12,types);
             StringBuilder prompt=new StringBuilder("""
@@ -57,13 +54,11 @@ public class ProjectEventEvidenceService {
                         .append(item.sourceUrl()).append("\n\n");
             }
             prompt.append("</project_event_evidence>\n");
-            long duration=Duration.between(started,Instant.now()).toMillis();
-            executionStore.succeedTool(runId,stepId,toolCallId,
-                    json(Map.of("resultCount",results.size(),"sources",urls)),duration,Instant.now());
-            return Optional.of(new EventEvidence(prompt.toString(),List.copyOf(urls),citations,toolCallId));
+            session.succeed(Map.of("resultCount", results.size(), "sources", urls));
+            return Optional.of(new EventEvidence(
+                    prompt.toString(), List.copyOf(urls), citations, session.toolCallId()));
         } catch(RuntimeException exception){
-            executionStore.failTool(stepId,toolCallId,"EVENT_RETRIEVAL_ERROR",
-                    Duration.between(started,Instant.now()).toMillis(),Instant.now());
+            session.failIfRunning("EVENT_RETRIEVAL_ERROR");
             return Optional.empty();
         }
     }
@@ -80,7 +75,6 @@ public class ProjectEventEvidenceService {
         return List.copyOf(types);
     }
 
-    private String json(Object value){try{return objectMapper.writeValueAsString(value);}catch(JsonProcessingException e){throw new IllegalStateException(e);}}
     private static String clean(String value){String safe=value==null?"":value.replace('\u0000',' ').trim();return safe.length()<=1600?safe:safe.substring(0,1600)+"…";}
     public record EventEvidence(String systemPromptAppendix,List<String> sourceUrls,List<ChatCitation> citations,UUID toolCallId){}
 }

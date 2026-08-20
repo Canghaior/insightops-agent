@@ -1,7 +1,10 @@
 package com.jundaodsj.insightops.server.chat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jundaodsj.insightops.server.tool.AgentToolRegistryConfiguration;
+import com.jundaodsj.insightops.server.tool.RegisteredToolExecutionService;
 import com.jundaodsj.insightops.tool.application.AgentToolExecutionStore;
+import com.jundaodsj.insightops.tool.application.registry.AgentToolRegistry;
 import com.jundaodsj.insightops.tool.application.github.GitHubRelease;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseResult;
 import org.junit.jupiter.api.Test;
@@ -29,9 +32,10 @@ class ReleaseToolServiceTest {
                         "https://github.com/spring-projects/spring-ai/releases/tag/v2.0.0",
                         false,
                         "Tool Calling improvements")), Instant.parse("2026-08-16T00:00:00Z")),
-                store,
-                new GitHubReleaseEvidenceFormatter(),
-                new ObjectMapper().findAndRegisterModules());
+                new RegisteredToolExecutionService(
+                        new AgentToolRegistry(AgentToolRegistryConfiguration.definitions(true)),
+                        store, new ObjectMapper().findAndRegisterModules()),
+                new GitHubReleaseEvidenceFormatter());
         List<String> progress = new ArrayList<>();
 
         var evidence = service.execute(

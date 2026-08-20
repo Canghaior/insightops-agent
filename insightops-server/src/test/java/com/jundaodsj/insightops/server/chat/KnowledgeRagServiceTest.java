@@ -3,7 +3,10 @@ package com.jundaodsj.insightops.server.chat;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeEmbeddingStore;
 import com.jundaodsj.insightops.server.knowledge.KnowledgeSearchService;
+import com.jundaodsj.insightops.server.tool.AgentToolRegistryConfiguration;
+import com.jundaodsj.insightops.server.tool.RegisteredToolExecutionService;
 import com.jundaodsj.insightops.tool.application.AgentToolExecutionStore;
+import com.jundaodsj.insightops.tool.application.registry.AgentToolRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -35,8 +38,7 @@ class KnowledgeRagServiceTest {
         RecordingStore store = new RecordingStore();
         KnowledgeRagProperties properties = properties(true);
         List<String> progress = new ArrayList<>();
-        KnowledgeRagService service = new KnowledgeRagService(search, store, properties,
-                new ObjectMapper().findAndRegisterModules());
+        KnowledgeRagService service = new KnowledgeRagService(search, execution(store), properties);
 
         var evidence = service.retrieve(runId, workspaceId, "Spring AI embedding",
                 new KnowledgeRagService.ToolProgressListener() {
@@ -71,8 +73,7 @@ class KnowledgeRagServiceTest {
         when(search.search(eq(runId), eq(workspaceId), eq("question"), eq(12)))
                 .thenThrow(new KnowledgeSearchService.EmbeddingUnavailableException("offline"));
         RecordingStore store = new RecordingStore();
-        KnowledgeRagService service = new KnowledgeRagService(search, store, properties(true),
-                new ObjectMapper());
+        KnowledgeRagService service = new KnowledgeRagService(search, execution(store), properties(true));
         List<String> progress = new ArrayList<>();
 
         var evidence = service.retrieve(runId, workspaceId, "question", listener(progress));
@@ -95,8 +96,7 @@ class KnowledgeRagServiceTest {
                         List.of(unrelated)));
         RecordingStore store = new RecordingStore();
         List<String> progress = new ArrayList<>();
-        KnowledgeRagService service = new KnowledgeRagService(search, store, properties(true),
-                new ObjectMapper());
+        KnowledgeRagService service = new KnowledgeRagService(search, execution(store), properties(true));
 
         var evidence = service.retrieve(runId, workspaceId, "Kubernetes Ingress TLS 怎么配置？",
                 listener(progress)).orElseThrow();
@@ -124,8 +124,7 @@ class KnowledgeRagServiceTest {
                 .thenReturn(new KnowledgeSearchService.SearchResponse(
                         "总结团队降级方案", "ollama", "bge-m3", 9, List.of(uploaded)));
         RecordingStore store = new RecordingStore();
-        KnowledgeRagService service = new KnowledgeRagService(search, store, properties(true),
-                new ObjectMapper());
+        KnowledgeRagService service = new KnowledgeRagService(search, execution(store), properties(true));
 
         var evidence = service.retrieve(runId, workspaceId, "总结团队降级方案",
                 listener(new ArrayList<>())).orElseThrow();
@@ -137,6 +136,12 @@ class KnowledgeRagServiceTest {
             assertThat(citation.sourceType()).isEqualTo("USER_UPLOAD");
             assertThat(citation.url()).endsWith("/content#page=2");
         });
+    }
+
+    private static RegisteredToolExecutionService execution(RecordingStore store) {
+        return new RegisteredToolExecutionService(
+                new AgentToolRegistry(AgentToolRegistryConfiguration.definitions(true)),
+                store, new ObjectMapper().findAndRegisterModules());
     }
 
     private static KnowledgeRagService.ToolProgressListener listener(List<String> progress) {

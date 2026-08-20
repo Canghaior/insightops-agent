@@ -263,7 +263,7 @@ P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `do
 - Planner 和 Executor。
 - Plan-Act-Observe 循环。
 - 根据观察结果决定继续、换工具或结束。
-- 动态 Tool Registry。
+- Tool Registry 已建立并统一登记当前三类只读工具，但尚未由模型动态选择。
 - 工具依赖、补偿和统一重试策略。
 - MCP 工具接入。
 - 敏感操作人工审批。
@@ -636,7 +636,7 @@ Owner 和系统管理员已经可以通过页面管理 GitHub 仓库，系统也
 
 ### 阶段 C：升级为真正 Agent
 
-1. 设计 Tool Registry。
+1. [x] 设计 Tool Registry（P2.0-A：三类真实工具已统一注册、校验和审计）。
 2. 设计 Planner、Executor 和 Observation。
 3. 接入模型 Function Calling。
 4. 实现多轮工具循环。

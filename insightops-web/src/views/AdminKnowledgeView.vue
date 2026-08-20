@@ -167,7 +167,7 @@ async function evaluateRag() {
   try {
     evaluation.value = await runRagEvaluation(3, true)
     notice.value = evaluation.value.summary?.passed
-      ? 'RAG 质量评测已通过。15 道题的完整结果已经保存。'
+      ? `RAG 质量评测已通过。${evaluation.value.caseCount} 道题的完整结果已经保存。`
       : 'RAG 质量评测已完成，但有指标未达到门禁，请查看失败题目。'
   } catch (caught: unknown) { error.value = message(caught) }
   finally { evaluating.value = false }
@@ -365,7 +365,7 @@ onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer)
         <div>
           <span class="eyebrow">自动化质量门禁</span>
           <h3>RAG 评测集</h3>
-          <p>固定运行 15 道题：12 道三项目知识题与 3 道越界题；抽样 3 题调用 DeepSeek 检查引用和忠实度。</p>
+          <p>固定运行 50 道题：42 道三项目知识题与 8 道安全/越界题，并覆盖多语言、版本冲突、跨来源、多轮指代和提示注入；抽样 3 题调用 DeepSeek 检查引用和忠实度。</p>
         </div>
         <div class="evaluation-action">
           <i class="status-pill" :class="evaluation?.status === 'PASSED' ? 'status-succeeded' : evaluation ? 'status-failed' : ''">

@@ -6,6 +6,7 @@ import com.jundaodsj.insightops.identity.application.AccountWorkspaceStore;
 import com.jundaodsj.insightops.identity.application.AdminAccountStore;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
 import com.jundaodsj.insightops.project.application.AdminProjectStore;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,7 @@ public class AdminKnowledgeSourceService {
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
+    @Autowired
     public AdminKnowledgeSourceService(KnowledgeStore store, AdminProjectStore projectStore,
                                        AdminAccountStore auditStore, ObjectMapper objectMapper) {
         this(store, projectStore, auditStore, objectMapper, Clock.systemUTC());

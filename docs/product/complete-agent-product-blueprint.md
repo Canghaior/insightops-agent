@@ -49,8 +49,8 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 
 | 目标形态 | 当前估算 | 说明 |
 |---|---:|---|
-| 固定三项目的封闭 Alpha | 约 78% | 三项目生产知识库、Embedding、RAG 评测、真实引用问答和采集可观测性已验收 |
-| 用户可自由配置的技术情报产品 | 约 50% | 项目、知识源和通知渠道仍大量固定，用户不能自行扩展 |
+| 固定三项目的封闭 Alpha | 约 88% | 三项目生产知识库、50 题 RAG 门禁、统一事件流、真实引用问答和采集可观测性已验收 |
+| 用户可自由配置的技术情报产品 | 约 65% | 项目、知识源、用户关注规则和站内通知已配置化；RSS、外部交付和十项目稳定性仍待完成 |
 | 通用多工具自主 Agent | 约 35% | 当前是固定工具编排，不是真正的 Plan-Act-Observe 多轮 Agent |
 | 可公开运营的 SaaS | 约 35% | 缺少注册、找回密码、配额、计费、合规、完整监控和容灾 |
 
@@ -186,18 +186,19 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 - 项目支持 1～720 小时采集周期与聊天别名；聊天 Release 工具按当前 Workspace 的已启用项目动态识别仓库，不再固定为三个 P0 项目。
 - 系统管理员可以创建、编辑、启用、停用和删除空知识源；来源 URL 由服务端实施公开 HTTPS、同域和路径边界校验。
 - 已产生文档的知识源锁定项目、根 URL 与路径边界；仍可修改名称、类型、发现 URL 和 1～720 小时采集周期。
-- 当前配置化范围是 GitHub Release 与官方知识源；Issue、PR、Security Advisory、RSS 和用户级关注关键词仍属于后续阶段。
+- 当前配置化范围覆盖 GitHub Release、Issue、Pull Request、Security Advisory、官方知识源和用户级关注规则；RSS、Roadmap 与站外通知仍属于后续阶段。
 - 生产验收详见 `docs/testing/results/p1-configurable-projects-production-acceptance-2026-08-20.md`。
 - P1.5-B 生产验收详见 `docs/testing/results/p1-configurable-knowledge-sources-and-routing-production-acceptance-2026-08-20.md`。
+- P1.6 生产验收详见 `docs/testing/results/p1-6-proactive-intelligence-production-acceptance-2026-08-20.md`。
 
 ### 4.12 测试与持续集成
 
-- 后端当前共有 132 个测试槽，包含 8 个 PostgreSQL/pgvector 数据库门禁测试，本轮全部通过。
-- 前端当前 21 个测试全部通过。
+- 后端当前共有 137 个测试槽，包含 9 个 PostgreSQL/pgvector 数据库门禁测试，本轮全部通过。
+- 前端当前 23 个测试全部通过。
 - 前端 ESLint 通过。
 - 前端生产构建通过。
 - GitHub Actions 已配置后端验证、前端 lint/test/build 和三个镜像构建。
-- GitHub `production` Environment Secrets 已完成配置，P1.5-B CI Run `32336167376` 和生产部署 Run `32336407366` 均成功。
+- GitHub `production` Environment Secrets 已完成配置，P1.6 CI Run `32341509561` 和生产部署 Run `32341685844` 均成功。
 - Dependabot 已覆盖 Maven、npm 和 GitHub Actions 依赖。
 
 ## 5. 当前部分完成的能力
@@ -209,10 +210,10 @@ P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `do
 - Owner 和系统管理员已可管理 GitHub Release 项目；普通成员仍只能关注已启用项目。
 - 系统管理员已可管理官方知识源，配置公开 HTTPS 采集边界、发现 URL、来源类型和采集周期。
 - 项目采集周期与聊天项目别名已可配置，Release 问答按 Workspace 动态路由。
-- 尚未支持 Issue、PR、Security Advisory、Roadmap、RSS 和用户上传资料。
-- 尚未支持用户级关注关键词、项目规则和通知过滤条件。
-- 评测集仍为 15 题，尚未扩充到 50～100 题并形成版本对比。
-- 尚未实现专用 Reranker、用户引用纠错和评测样本回流。
+- 已支持 Issue、PR 与 Security Advisory 的统一采集、标准化、证据链接和事件问答；Roadmap、RSS 和用户上传资料仍待实现。
+- 已支持用户级项目、关键词、排除词、事件类型、最低重要度、即时通知和摘要规则。
+- RAG 发布门禁已扩充为固定 50 题，覆盖三项目、多语言、版本冲突、跨来源、多轮指代、提示注入和越界拒答。
+- 已支持答案反馈和逐条引用纠错入库；专用 Reranker、管理员反馈复核页和评测样本自动回流仍待实现。
 
 ### 5.2 当前不是完整自主 Agent
 
@@ -575,12 +576,12 @@ P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `do
 ### 9.2 可配置技术情报产品完成标准
 
 - [x] Owner 或系统管理员无需修改代码即可添加、编辑、暂停和删除 GitHub Release 项目。
-- [ ] 用户无需修改代码即可添加和管理官方文档来源。
+- [x] 用户无需修改代码即可添加和管理官方文档来源。
 - [ ] 至少支持 Release、Issue、PR、官方文档和 RSS 五类来源。
 - [ ] 支持不少于 10 个真实项目稳定持续采集。
-- [ ] 支持用户定义关键词、风险和通知规则。
-- [ ] 支持答案反馈和引用纠错。
-- [ ] RAG 评测集扩充到 50～100 题并进入发布门禁。
+- [x] 支持用户定义关键词、风险和通知规则。
+- [x] 支持答案反馈和引用纠错。
+- [x] RAG 评测集扩充到 50～100 题并进入发布门禁。
 - [ ] 报告可以导出或发送到站外渠道。
 
 ### 9.3 真正 Agent 完成标准
@@ -619,10 +620,11 @@ P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `do
 1. [x] 项目管理 CRUD（P1.5-A，GitHub Release）。
 2. [x] 知识源管理 CRUD（P1.5-B，官方 HTTPS 来源）。
 3. [x] 项目/知识源自定义采集频率与聊天项目别名（P1.5-B）。
-4. 用户级关注关键词、规则和通知过滤条件。
-5. 增加 Issue、PR、Security Advisory、RSS。
-6. 增加用户反馈和引用纠错。
-7. 增加报告导出和至少一种站外通知。
+4. [x] 用户级关注关键词、规则和通知过滤条件（P1.6）。
+5. [x] 增加 Issue、PR、Security Advisory（P1.6）。
+6. [ ] 增加 RSS、Roadmap 和用户上传资料。
+7. [x] 增加用户反馈和引用纠错（P1.6）。
+8. [ ] 增加报告导出和至少一种站外通知。
 
 ### 阶段 C：升级为真正 Agent
 

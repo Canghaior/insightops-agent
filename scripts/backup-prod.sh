@@ -23,31 +23,32 @@ temporary="$target.partial"
 uploads_target="$BACKUP_DIR/insightops-$timestamp.uploads.tar.gz"
 uploads_temporary="$uploads_target.partial"
 checksum_target="$BACKUP_DIR/insightops-$timestamp.sha256"
-running_app_services=()
+running_app_container_ids=()
 
 cleanup() {
   rm -f -- "$temporary" "$uploads_temporary"
-  if (( ${#running_app_services[@]} > 0 )); then
-    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" start "${running_app_services[@]}" >/dev/null || true
+  if (( ${#running_app_container_ids[@]} > 0 )); then
+    docker start "${running_app_container_ids[@]}" >/dev/null || true
   fi
 }
 trap cleanup EXIT
 
 for service in server worker; do
-  if docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps --status running -q "$service" | grep -q .; then
-    running_app_services+=("$service")
+  container_id="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps --status running -q "$service")"
+  if [[ -n "$container_id" ]]; then
+    running_app_container_ids+=("$container_id")
   fi
 done
-if (( ${#running_app_services[@]} > 0 )); then
+if (( ${#running_app_container_ids[@]} > 0 )); then
   echo "Stopping application containers for a consistent database and upload snapshot..."
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" stop "${running_app_services[@]}"
+  docker stop "${running_app_container_ids[@]}"
 fi
 
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
   pg_dump --format=custom --compress=9 --no-owner --no-privileges \
   --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" > "$temporary"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm --no-deps \
-  --entrypoint sh server -c 'mkdir -p /var/lib/insightops/uploads && tar -C /var/lib/insightops/uploads -czf - .' \
+  --entrypoint sh uploads-init -c 'mkdir -p /var/lib/insightops/uploads && tar -C /var/lib/insightops/uploads -czf - .' \
   > "$uploads_temporary"
 
 test -s "$temporary"
@@ -56,9 +57,9 @@ mv -- "$temporary" "$target"
 mv -- "$uploads_temporary" "$uploads_target"
 sha256sum "$target" "$uploads_target" > "$checksum_target"
 chmod 600 "$target" "$uploads_target" "$checksum_target"
-if (( ${#running_app_services[@]} > 0 )); then
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" start "${running_app_services[@]}"
-  running_app_services=()
+if (( ${#running_app_container_ids[@]} > 0 )); then
+  docker start "${running_app_container_ids[@]}"
+  running_app_container_ids=()
 fi
 
 retention_days="${BACKUP_RETENTION_DAYS:-30}"

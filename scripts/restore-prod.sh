@@ -38,17 +38,18 @@ POSTGRES_DB="$(prod_env_get POSTGRES_DB "$ENV_FILE")"
 POSTGRES_USER="${POSTGRES_USER:-insightops}"
 POSTGRES_DB="${POSTGRES_DB:-insightops}"
 
-running_app_services=()
+running_app_container_ids=()
 for service in server worker; do
-  if docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
-      ps --status running -q "$service" | grep -q .; then
-    running_app_services+=("$service")
+  container_id="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+    ps --status running -q "$service")"
+  if [[ -n "$container_id" ]]; then
+    running_app_container_ids+=("$container_id")
   fi
 done
 
-if (( ${#running_app_services[@]} > 0 )); then
+if (( ${#running_app_container_ids[@]} > 0 )); then
   echo "Stopping application containers before restore..."
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" stop "${running_app_services[@]}"
+  docker stop "${running_app_container_ids[@]}"
 fi
 
 restore_failed=0
@@ -57,13 +58,13 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
   --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" < "$resolved_backup" || restore_failed=1
 if (( restore_failed == 0 )); then
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm --no-deps \
-    --entrypoint sh server -c \
-    'mkdir -p /var/lib/insightops/uploads && find /var/lib/insightops/uploads -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && tar -C /var/lib/insightops/uploads -xzf -' \
+    --entrypoint sh uploads-init -c \
+    'mkdir -p /var/lib/insightops/uploads && find /var/lib/insightops/uploads -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && tar -C /var/lib/insightops/uploads -xzf - && chown -R 10001:10001 /var/lib/insightops/uploads' \
     < "$uploads_backup" || restore_failed=1
 fi
 
-if (( ${#running_app_services[@]} > 0 )); then
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" start "${running_app_services[@]}"
+if (( ${#running_app_container_ids[@]} > 0 )); then
+  docker start "${running_app_container_ids[@]}"
 fi
 if (( restore_failed != 0 )); then
   echo "Restore failed; inspect PostgreSQL and upload-volume state before accepting service." >&2

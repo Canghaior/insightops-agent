@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.report.application.ReportDeliveryGateway;
 import com.jundaodsj.insightops.report.application.ReportDeliveryStore;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -25,6 +26,7 @@ public class WebhookReportDeliveryGateway implements ReportDeliveryGateway {
     private final Duration requestTimeout;
     private final String publicBaseUrl;
 
+    @Autowired
     public WebhookReportDeliveryGateway(ObjectMapper json,
             @Value("${insightops.delivery.request-timeout-seconds:20}") int requestTimeoutSeconds,
             @Value("${insightops.delivery.public-base-url:https://insightops.canghaior.com}") String publicBaseUrl) {

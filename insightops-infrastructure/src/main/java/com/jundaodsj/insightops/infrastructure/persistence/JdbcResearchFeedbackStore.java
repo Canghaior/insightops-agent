@@ -25,7 +25,9 @@ public class JdbcResearchFeedbackStore implements ResearchFeedbackStore {
                     (id,user_id,workspace_id,run_id,helpful,reason,comment,created_at,updated_at)
                 values (:id,:userId,:workspaceId,:runId,:helpful,:reason,:comment,:now,:now)
                 on conflict (user_id,run_id) do update set helpful=excluded.helpful,
-                    reason=excluded.reason,comment=excluded.comment,review_status='PENDING',updated_at=excluded.updated_at
+                    reason=excluded.reason,comment=excluded.comment,review_status='PENDING',
+                    reviewer_user_id=null,reviewer_note=null,reviewed_at=null,
+                    updated_at=excluded.updated_at
                 """).param("id", UUID.randomUUID()).param("userId", actor.userId())
                 .param("workspaceId", actor.workspaceId()).param("runId", runId).param("helpful", helpful)
                 .param("reason", clean(reason,48)).param("comment", clean(comment,1000))
@@ -44,7 +46,8 @@ public class JdbcResearchFeedbackStore implements ResearchFeedbackStore {
                     (id,user_id,workspace_id,run_id,citation_url,correct,comment,created_at,updated_at)
                 values (:id,:userId,:workspaceId,:runId,:url,:correct,:comment,:now,:now)
                 on conflict (user_id,run_id,citation_url) do update set correct=excluded.correct,
-                    comment=excluded.comment,review_status='PENDING',updated_at=excluded.updated_at
+                    comment=excluded.comment,review_status='PENDING',reviewer_user_id=null,
+                    reviewer_note=null,reviewed_at=null,updated_at=excluded.updated_at
                 """).param("id",UUID.randomUUID()).param("userId",actor.userId())
                 .param("workspaceId",actor.workspaceId()).param("runId",runId).param("url",url)
                 .param("correct",correct).param("comment",clean(comment,1000)).param("now",timestamp(now)).update();

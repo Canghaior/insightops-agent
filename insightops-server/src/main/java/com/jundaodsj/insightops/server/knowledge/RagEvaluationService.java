@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.server.knowledge;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeEmbeddingStore;
+import com.jundaodsj.insightops.knowledge.application.QualityReviewStore;
 import com.jundaodsj.insightops.knowledge.application.RagEvaluationStore;
 import com.jundaodsj.insightops.model.application.ChatModelGateway;
 import com.jundaodsj.insightops.model.application.ChatModelRequest;
@@ -26,6 +27,7 @@ public class RagEvaluationService {
     private final KnowledgeAnswerabilityPolicy answerabilityPolicy;
     private final RagEvaluationStore store;
     private final RagEvaluationProperties properties;
+    private final QualityReviewStore qualityStore;
     private final ObjectProvider<ChatModelGateway> modelProvider;
     private final ObjectMapper json;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -35,6 +37,7 @@ public class RagEvaluationService {
                                 KnowledgeAnswerabilityPolicy answerabilityPolicy,
                                 RagEvaluationStore store,
                                 RagEvaluationProperties properties,
+                                QualityReviewStore qualityStore,
                                 ObjectProvider<ChatModelGateway> modelProvider,
                                 ObjectMapper json) {
         this.dataset = dataset;
@@ -42,16 +45,38 @@ public class RagEvaluationService {
         this.answerabilityPolicy = answerabilityPolicy;
         this.store = store;
         this.properties = properties;
+        this.qualityStore = qualityStore;
         this.modelProvider = modelProvider;
         this.json = json;
     }
 
     public RagEvaluationStore.Report run(UUID workspaceId, int generationSampleSize,
                                          boolean judgeFaithfulness) {
+        return run(workspaceId, generationSampleSize, judgeFaithfulness, null);
+    }
+
+    public RagEvaluationStore.Report run(UUID workspaceId, int generationSampleSize,
+                                         boolean judgeFaithfulness, UUID datasetVersionId) {
         if (!running.compareAndSet(false, true)) {
             throw new EvaluationAlreadyRunningException();
         }
-        List<RagEvaluationDataset.EvaluationCase> cases = dataset.load();
+        List<RagEvaluationDataset.EvaluationCase> cases;
+        Optional<QualityReviewStore.DatasetSelection> selection;
+        try {
+            cases = new ArrayList<>(dataset.load());
+            selection = qualityStore.datasetSelection(workspaceId, datasetVersionId);
+            selection.ifPresent(selected -> selected.cases().forEach(item -> cases.add(
+                    new RagEvaluationDataset.EvaluationCase(
+                            item.id(), item.question(), item.answerable(), item.expectedProject(),
+                            item.category(), item.mustHitTerms(), item.answerMustInclude(),
+                            item.sourceDomain(), item.status()))));
+        }
+        catch (RuntimeException exception) {
+            running.set(false);
+            throw exception;
+        }
+        String datasetName = selection.map(QualityReviewStore.DatasetSelection::name)
+                .orElse(RagEvaluationDataset.NAME);
         int sampleSize = Math.max(0, Math.min(6, generationSampleSize));
         ChatModelGateway model = sampleSize == 0 ? null : modelProvider.getIfAvailable();
         if (sampleSize > 0 && model == null) {
@@ -60,10 +85,12 @@ public class RagEvaluationService {
         }
         Set<String> generatedCases = generationSample(cases, sampleSize);
         UUID runId = UUID.randomUUID();
-        store.start(runId, workspaceId, RagEvaluationDataset.NAME, cases.size(), sampleSize, Instant.now());
         List<RagEvaluationStore.CaseResult> results = new ArrayList<>();
         String modelName = null;
+        boolean started = false;
         try {
+            store.start(runId, workspaceId, datasetName, cases.size(), sampleSize, Instant.now());
+            started = true;
             for (RagEvaluationDataset.EvaluationCase item : cases) {
                 var response = searchService.search(workspaceId, item.question(), 10);
                 var retrieval = RagQualityMetrics.retrieval(item, response, answerabilityPolicy);
@@ -101,7 +128,7 @@ public class RagEvaluationService {
             return store.latest(workspaceId).orElseThrow();
         }
         catch (RuntimeException exception) {
-            store.fail(runId, exception.getMessage(), Instant.now());
+            if (started) store.fail(runId, exception.getMessage(), Instant.now());
             throw exception;
         }
         finally {

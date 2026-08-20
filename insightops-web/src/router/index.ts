@@ -36,6 +36,12 @@ const router = createRouter({
       component: () => import('@/views/AdminKnowledgeView.vue'),
       meta: { systemAdmin: true },
     },
+    {
+      path: '/admin/quality',
+      name: 'admin-quality',
+      component: () => import('@/views/AdminQualityReviewView.vue'),
+      meta: { systemAdmin: true },
+    },
   ],
 })
 

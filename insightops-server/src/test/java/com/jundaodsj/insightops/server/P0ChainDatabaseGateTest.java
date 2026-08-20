@@ -28,9 +28,11 @@ import com.jundaodsj.insightops.knowledge.application.KnowledgeCollectionLeaseLo
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcKnowledgeEmbeddingStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcWatchRuleStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcResearchFeedbackStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcQualityReviewStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserProjectWatchStore;
 import com.jundaodsj.insightops.infrastructure.knowledge.KnowledgeDocumentChunker;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
+import com.jundaodsj.insightops.knowledge.application.QualityReviewStore;
 import com.jundaodsj.insightops.model.application.ChatStreamEvent;
 import com.jundaodsj.insightops.model.application.ChatStreamSession;
 import com.jundaodsj.insightops.model.application.ModelUsage;
@@ -103,6 +105,7 @@ class P0ChainDatabaseGateTest {
     private static JdbcKnowledgeEmbeddingStore knowledgeEmbeddingStore;
     private static JdbcWatchRuleStore watchRuleStore;
     private static JdbcResearchFeedbackStore feedbackStore;
+    private static JdbcQualityReviewStore qualityReviewStore;
 
     @BeforeAll
     static void prepareIsolatedSchema() throws Exception {
@@ -126,7 +129,7 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(18);
+        assertThat(migration.migrationsExecuted).isEqualTo(19);
 
         jdbcClient = JdbcClient.create(dataSource);
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
@@ -137,6 +140,7 @@ class P0ChainDatabaseGateTest {
         knowledgeEmbeddingStore = new JdbcKnowledgeEmbeddingStore(jdbcClient, objectMapper());
         watchRuleStore = new JdbcWatchRuleStore(jdbcClient);
         feedbackStore = new JdbcResearchFeedbackStore(jdbcClient);
+        qualityReviewStore = new JdbcQualityReviewStore(jdbcClient, objectMapper());
         DeepSeekCostEstimator estimator = new DeepSeekCostEstimator(pricing());
         runStore = new JdbcChatRunStore(jdbcClient, estimator);
         runQuery = new JdbcAgentRunQuery(jdbcClient, objectMapper());
@@ -746,6 +750,90 @@ class P0ChainDatabaseGateTest {
                 ACTOR, runId, issue.sourceUrl(), true, null, Instant.now())).isTrue();
         assertThat(jdbcClient.sql("select count(*) from research_answer_feedback where run_id=:runId")
                 .param("runId", runId).query(Long.class).single()).isEqualTo(1);
+    }
+
+    @Test
+    @Order(10)
+    void feedbackReviewCandidateVersionAndActivationRequireAPassedGate() {
+        var feedbackPage = qualityReviewStore.listFeedback(ACTOR.workspaceId(), 0, 20, "PENDING", null);
+        assertThat(feedbackPage.total()).isGreaterThanOrEqualTo(2);
+        var answerFeedback = feedbackPage.items().stream()
+                .filter(item -> "ANSWER".equals(item.type())).findFirst().orElseThrow();
+
+        var candidateCommand = new QualityReviewStore.CandidateCommand(
+                "Which Spring AI evidence is required for vector store initialization?",
+                true, "spring-ai", "feedback-regression", List.of("vector store"),
+                List.of("initialization"), "docs.spring.io");
+        var reviewed = qualityReviewStore.reviewFeedback(
+                ACTOR.workspaceId(), ACTOR.userId(), answerFeedback.id(), "ANSWER",
+                new QualityReviewStore.ReviewCommand(
+                        "ADD_TO_EVAL", "Verified missing evidence", candidateCommand), Instant.now())
+                .orElseThrow();
+        assertThat(reviewed.reviewStatus()).isEqualTo("ADDED_TO_EVAL");
+        assertThat(reviewed.candidateId()).isNotNull();
+
+        var candidate = qualityReviewStore.listCandidates(
+                ACTOR.workspaceId(), 0, 20, "DRAFT").items().getFirst();
+        assertThat(candidate.question()).contains("Spring AI");
+        candidate = qualityReviewStore.decideCandidate(
+                ACTOR.workspaceId(), ACTOR.userId(), candidate.id(), "APPROVED",
+                "Ready for the next quality gate", Instant.now()).orElseThrow();
+        assertThat(candidate.status()).isEqualTo("APPROVED");
+
+        var version = qualityReviewStore.createVersion(
+                ACTOR.workspaceId(), ACTOR.userId(), "p1-rag-feedback-v1",
+                List.of(candidate.id()), Instant.now());
+        assertThat(version.status()).isEqualTo("DRAFT");
+        assertThat(version.candidateCount()).isEqualTo(1);
+        assertThatThrownBy(() -> qualityReviewStore.createVersion(
+                ACTOR.workspaceId(), ACTOR.userId(), "p1-rag-questions-v3-50",
+                List.of(), Instant.now()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reserved");
+        assertThatThrownBy(() -> qualityReviewStore.activateVersion(
+                ACTOR.workspaceId(), ACTOR.userId(), version.id(), Instant.now()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("pass the RAG evaluation gate");
+
+        var gateStartedAt = Instant.now().atOffset(java.time.ZoneOffset.UTC);
+        UUID olderPassedRunId = UUID.randomUUID();
+        jdbcClient.sql("""
+                insert into rag_evaluation_run
+                    (id,workspace_id,dataset_name,status,case_count,generation_sample_size,
+                     recall_at_k,mean_reciprocal_rank,project_hit_rate,term_coverage,
+                     no_answer_accuracy,started_at,finished_at)
+                values (:id,:workspaceId,:name,'PASSED',51,0,1,1,1,1,1,:now,:now)
+                """).param("id", olderPassedRunId).param("workspaceId", ACTOR.workspaceId())
+                .param("name", version.name()).param("now", gateStartedAt)
+                .update();
+        UUID gateRunId = UUID.randomUUID();
+        jdbcClient.sql("""
+                insert into rag_evaluation_run
+                    (id,workspace_id,dataset_name,status,case_count,generation_sample_size,
+                     started_at,finished_at,error_message)
+                values (:id,:workspaceId,:name,'FAILED',51,0,:now,:now,'quality regression')
+                """).param("id", gateRunId).param("workspaceId", ACTOR.workspaceId())
+                .param("name", version.name()).param("now", gateStartedAt.plusSeconds(1))
+                .update();
+        assertThatThrownBy(() -> qualityReviewStore.activateVersion(
+                ACTOR.workspaceId(), ACTOR.userId(), version.id(), Instant.now()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("latest RAG evaluation run");
+        jdbcClient.sql("""
+                update rag_evaluation_run set status='PASSED', error_message=null,
+                    recall_at_k=1, mean_reciprocal_rank=1, project_hit_rate=1,
+                    term_coverage=1, no_answer_accuracy=1 where id=:id
+                """).param("id", gateRunId).update();
+        var active = qualityReviewStore.activateVersion(
+                ACTOR.workspaceId(), ACTOR.userId(), version.id(), Instant.now()).orElseThrow();
+        assertThat(active.status()).isEqualTo("ACTIVE");
+        assertThat(active.gateRunId()).isEqualTo(gateRunId);
+        assertThat(qualityReviewStore.datasetSelection(ACTOR.workspaceId(), null)).get()
+                .satisfies(selection -> {
+                    assertThat(selection.name()).isEqualTo("p1-rag-feedback-v1");
+                    assertThat(selection.cases()).hasSize(1);
+                    assertThat(selection.cases().getFirst().mustHitTerms()).contains("vector store");
+                });
     }
 
     private static ActorContext actor(String userId) {

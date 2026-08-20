@@ -109,6 +109,36 @@ class KnowledgeRagServiceTest {
         assertThat(store.resultPayload).contains("\"answerable\":false");
     }
 
+    @Test
+    void exposesAuthenticatedPageCitationForVisibleUserUpload() {
+        UUID runId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID uploadId = UUID.randomUUID();
+        KnowledgeSearchService search = mock(KnowledgeSearchService.class);
+        var uploaded = new KnowledgeEmbeddingStore.SearchResult(
+                UUID.randomUUID(), UUID.randomUUID(), "spring-ai", "architecture.pdf",
+                "architecture.pdf", "upload://" + uploadId + "/architecture.pdf#page=2",
+                "architecture.pdf · Page 2", "The approved fallback uses a circuit breaker.",
+                "und", "T2_USER_UPLOAD", 0.82);
+        when(search.search(eq(runId), eq(workspaceId), eq("总结团队降级方案"), eq(12)))
+                .thenReturn(new KnowledgeSearchService.SearchResponse(
+                        "总结团队降级方案", "ollama", "bge-m3", 9, List.of(uploaded)));
+        RecordingStore store = new RecordingStore();
+        KnowledgeRagService service = new KnowledgeRagService(search, store, properties(true),
+                new ObjectMapper());
+
+        var evidence = service.retrieve(runId, workspaceId, "总结团队降级方案",
+                listener(new ArrayList<>())).orElseThrow();
+
+        assertThat(evidence.answerable()).isTrue();
+        assertThat(evidence.sourceUrls()).containsExactly(
+                "/api/v1/knowledge/uploads/" + uploadId + "/content#page=2");
+        assertThat(evidence.citations()).singleElement().satisfies(citation -> {
+            assertThat(citation.sourceType()).isEqualTo("USER_UPLOAD");
+            assertThat(citation.url()).endsWith("/content#page=2");
+        });
+    }
+
     private static KnowledgeRagService.ToolProgressListener listener(List<String> progress) {
         return new KnowledgeRagService.ToolProgressListener() {
             @Override public void onStarted(UUID id, String name) { progress.add("started:" + name); }

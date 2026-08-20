@@ -38,14 +38,28 @@ public interface KnowledgeStore {
             String projectName, String sourceKey, String name, String sourceType,
             String rootUrl, String discoveryUrl, String allowedHost,
             String allowedPathPrefix, String trustTier, int syncIntervalHours,
-            int consecutiveFailures) {
+            int consecutiveFailures, String fetchEtag, String fetchLastModified,
+            String uploadStorageKey, String uploadOriginalName, String uploadMediaType,
+            String uploadVisibility, UUID uploadUserId) {
+        public SourceTask(UUID jobId, UUID sourceId, UUID workspaceId, UUID projectId,
+                          String projectName, String sourceKey, String name, String sourceType,
+                          String rootUrl, String discoveryUrl, String allowedHost,
+                          String allowedPathPrefix, String trustTier, int syncIntervalHours,
+                          int consecutiveFailures) {
+            this(jobId, sourceId, workspaceId, projectId, projectName, sourceKey, name,
+                    sourceType, rootUrl, discoveryUrl, allowedHost, allowedPathPrefix,
+                    trustTier, syncIntervalHours, consecutiveFailures, null, null,
+                    null, null, null, null, null);
+        }
+
         public SourceTask(UUID jobId, UUID sourceId, UUID workspaceId, UUID projectId,
                           String projectName, String sourceKey, String name, String sourceType,
                           String rootUrl, String discoveryUrl, String allowedHost,
                           String allowedPathPrefix, String trustTier, int consecutiveFailures) {
             this(jobId, sourceId, workspaceId, projectId, projectName, sourceKey, name,
                     sourceType, rootUrl, discoveryUrl, allowedHost, allowedPathPrefix,
-                    trustTier, 24, consecutiveFailures);
+                    trustTier, 24, consecutiveFailures, null, null,
+                    null, null, null, null, null);
         }
     }
 

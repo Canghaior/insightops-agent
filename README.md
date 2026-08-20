@@ -8,7 +8,7 @@
 
 面向需要持续跟踪 AI 开源项目的 Java 开发者、架构师和技术负责人的开源情报 Agent。
 
-当前处于 Alpha/P1：在 P0 GitHub Releases 真实数据链路之上，已加入登录、个人工作区隔离、账号级会话管理、长期记忆、个人项目关注、邀请制用户与权限管理、项目更新与情报分析，以及基于三个项目官方文档的本地混合检索 RAG 问答。
+当前处于 Alpha/P1：已具备登录和 Workspace 隔离、会话/长期记忆、可配置项目与官方知识源、Release/Issue/PR/Security/RSS/Roadmap 持续采集、用户资料上传、情报分析、报告交付，以及基于可信证据的本地混合检索 RAG 问答。
 
 ## 工程结构
 
@@ -155,11 +155,16 @@ GET/POST /api/v1/delivery-channels
 POST /api/v1/reports/{reportId}/deliveries
 GET  /api/v1/report-deliveries
 POST /api/v1/report-deliveries/{deliveryId}/retry
+GET  /api/v1/knowledge/uploads
+POST /api/v1/knowledge/uploads
+POST /api/v1/knowledge/uploads/{uploadId}/retry
+DELETE /api/v1/knowledge/uploads/{uploadId}
+GET  /api/v1/knowledge/uploads/{uploadId}/content
 ```
 
 首次请求不传 `sessionId`，服务端创建当前登录用户的会话并在 `started` 事件返回该 ID；后续请求传回该 `sessionId` 即可继续同一会话。会话列表来自 PostgreSQL，可跨标签页和设备恢复，并支持改名、归档、恢复和删除。删除会话时保留 Agent Run 审计记录。长期记忆由用户显式新增、启停、修改和删除，只用于个性化表达，不作为版本事实证据。
 
-当问题明确涉及三个白名单项目的 Release、版本、发布、升级或近期变化时，Agent 会执行只读工具 `github_release_list`；研究问答同时可执行本地 `knowledge_vector_search`，从已采集的官方文档切片中选取证据。两种工具都保存 Agent Step、Tool Call 和来源，再由 DeepSeek 基于证据生成回答。系统仍不允许模型指定任意仓库，也不查询 Issue、PR 或 Roadmap。
+当问题涉及当前 Workspace 已启用项目的版本、升级或近期变化时，Agent 会按数据库项目别名执行只读 GitHub 工具，并联合本地 `knowledge_vector_search` 检索官方文档、RSS、Roadmap 和当前用户有权查看的上传资料。Release、Issue、PR、Security、Roadmap/RSS 与知识切片都保存 Agent Step、Tool Call 和来源，再由 DeepSeek 基于证据生成回答；模型不能指定未登记仓库或绕过上传资料可见性。
 
 项目更新中心只展示当前工作区已关注项目的 Release。采集证据全局去重保存，已读状态按用户隔离；点击“基于本次更新研究”会把带项目和版本的研究问题预填到问答页。`SYSTEM_ADMIN` 可在用户管理页查看每个项目的采集状态、错误和下次执行时间，并请求立即同步。设计细节见 [P1 项目更新中心](docs/architecture/p1-project-update-center.md)。
 
@@ -188,6 +193,10 @@ POST /api/v1/report-deliveries/{deliveryId}/retry
 ## P1.4-E RAG 自动化质量评测
 
 系统管理员可在“知识库采集”页面一键运行固定的 15 题质量集：12 道覆盖 Spring AI、LangChain4j、Dify 的可回答题和 3 道越界拒答题。每次必跑本地混合检索指标，并默认从三个项目各抽一题调用 DeepSeek 检查引用准确率、引用覆盖率和回答忠实度。汇总指标、门禁结果和每题明细保存到 PostgreSQL，可重复运行并查看最近结果；越界问题会被强制判为“当前官方证据不足”。设计见 [P1.4-E RAG 自动化质量评测](docs/architecture/p1-rag-evaluation-quality-gate.md)，真实验收见 [P1.4-E 验收结果](docs/testing/results/p1-rag-evaluation-e2e-2026-08-17.md)。
+
+## P1.9 多来源、用户资料与稳定性
+
+系统预置 10 个真实项目，并通过统一租约管线持续采集 Spring 官方博客 RSS 和 Spring AI GitHub Milestone。用户可在“我的资料”上传 Markdown、文本或 PDF，选择项目以及私有/Workspace 可见性；文件完成解析和 Embedding 后可直接进入 RAG，引用通过登录接口下载并保留 PDF 页码。上传卷和数据库采用一致备份，Prometheus 规则覆盖服务不可用、采集租约、Embedding 积压、上传失败和 5xx。设计边界见 [P1.9 多来源、用户资料与生产稳定性](docs/architecture/p1-9-sources-uploads-stability.md)。
 
 ## DeepSeek API Key
 

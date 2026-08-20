@@ -63,6 +63,12 @@ insightops:
     public-base-url: ${APP_PUBLIC_URL:https://insightops.canghaior.com}
     encryption-key: ${DELIVERY_ENCRYPTION_KEY:${DB_PASSWORD:insightops_dev}}
   knowledge:
+    upload:
+      directory: ${KNOWLEDGE_UPLOAD_DIRECTORY:./data/knowledge-uploads}
+      max-file-bytes: ${KNOWLEDGE_UPLOAD_MAX_FILE_BYTES:20971520}
+      workspace-quota-bytes: ${KNOWLEDGE_UPLOAD_WORKSPACE_QUOTA_BYTES:1073741824}
+      max-pdf-pages: ${KNOWLEDGE_UPLOAD_MAX_PDF_PAGES:500}
+      max-extracted-characters: ${KNOWLEDGE_UPLOAD_MAX_EXTRACTED_CHARACTERS:2000000}
     embedding:
       enabled: ${EMBEDDING_ENABLED:false}
       provider: ${EMBEDDING_PROVIDER:ollama}

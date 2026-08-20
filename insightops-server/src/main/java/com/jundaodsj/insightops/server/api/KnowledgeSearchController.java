@@ -30,7 +30,8 @@ public class KnowledgeSearchController {
     public ApiResponse<KnowledgeSearchService.SearchResponse> search(@Valid @RequestBody SearchRequest input,
                                                                      HttpServletRequest request) {
         var account = CurrentAccount.account(request);
-        var result = service.search(account.workspaceId(), input.query().strip(),
+        var result = service.searchForUser(null, account.workspaceId(), account.userId(),
+                "SYSTEM_ADMIN".equals(account.systemRole()), input.query().strip(),
                 input.limit() == null ? 8 : input.limit());
         return new ApiResponse<>((String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE), result);
     }

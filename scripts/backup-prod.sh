@@ -20,18 +20,46 @@ chmod 700 "$BACKUP_DIR"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 target="$BACKUP_DIR/insightops-$timestamp.dump"
 temporary="$target.partial"
+uploads_target="$BACKUP_DIR/insightops-$timestamp.uploads.tar.gz"
+uploads_temporary="$uploads_target.partial"
+checksum_target="$BACKUP_DIR/insightops-$timestamp.sha256"
+running_app_services=()
 
-cleanup() { rm -f -- "$temporary"; }
+cleanup() {
+  rm -f -- "$temporary" "$uploads_temporary"
+  if (( ${#running_app_services[@]} > 0 )); then
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" start "${running_app_services[@]}" >/dev/null || true
+  fi
+}
 trap cleanup EXIT
+
+for service in server worker; do
+  if docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps --status running -q "$service" | grep -q .; then
+    running_app_services+=("$service")
+  fi
+done
+if (( ${#running_app_services[@]} > 0 )); then
+  echo "Stopping application containers for a consistent database and upload snapshot..."
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" stop "${running_app_services[@]}"
+fi
 
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
   pg_dump --format=custom --compress=9 --no-owner --no-privileges \
   --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" > "$temporary"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm --no-deps \
+  --entrypoint sh server -c 'mkdir -p /var/lib/insightops/uploads && tar -C /var/lib/insightops/uploads -czf - .' \
+  > "$uploads_temporary"
 
 test -s "$temporary"
+test -s "$uploads_temporary"
 mv -- "$temporary" "$target"
-sha256sum "$target" > "$target.sha256"
-chmod 600 "$target" "$target.sha256"
+mv -- "$uploads_temporary" "$uploads_target"
+sha256sum "$target" "$uploads_target" > "$checksum_target"
+chmod 600 "$target" "$uploads_target" "$checksum_target"
+if (( ${#running_app_services[@]} > 0 )); then
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" start "${running_app_services[@]}"
+  running_app_services=()
+fi
 
 retention_days="${BACKUP_RETENTION_DAYS:-30}"
 if ! [[ "$retention_days" =~ ^[0-9]+$ ]] || (( retention_days < 7 )); then
@@ -39,8 +67,9 @@ if ! [[ "$retention_days" =~ ^[0-9]+$ ]] || (( retention_days < 7 )); then
   exit 1
 fi
 find "$BACKUP_DIR" -maxdepth 1 -type f \
-  \( -name 'insightops-*.dump' -o -name 'insightops-*.dump.sha256' \) \
+  \( -name 'insightops-*.dump' -o -name 'insightops-*.uploads.tar.gz' \
+     -o -name 'insightops-*.sha256' \) \
   -mtime "+$retention_days" -delete
 
 trap - EXIT
-echo "Backup created: $target"
+echo "Backup created: $target + $uploads_target"

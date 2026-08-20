@@ -39,9 +39,16 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                        project.repository_name as project_name, source.source_key,
                        source.name, source.source_type, source.root_url, source.discovery_url,
                        source.allowed_host, source.allowed_path_prefix, source.trust_tier,
-                       source.sync_interval_hours, source.consecutive_failures
+                       source.sync_interval_hours, source.consecutive_failures,
+                       source.fetch_etag, source.fetch_last_modified,
+                       upload.storage_key as upload_storage_key,
+                       upload.original_name as upload_original_name,
+                       upload.media_type as upload_media_type,
+                       upload.visibility as upload_visibility,
+                       upload.uploaded_by as upload_user_id
                 from knowledge_source source
                 join tracked_project project on project.id = source.project_id
+                left join knowledge_upload upload on upload.source_id = source.id
                 where source.enabled = true
                   and source.next_sync_at <= :now
                   and (source.locked_until is null or source.locked_until < :now)
@@ -78,6 +85,12 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                     .param("lockToken", source.jobId())
                     .update();
             if (updated == 0) continue;
+            jdbc.sql("""
+                    update knowledge_upload set status='PROCESSING', error_message=null, updated_at=:now
+                    where source_id=:sourceId and status in ('PENDING', 'FAILED', 'PROCESSING')
+                    """)
+                    .param("sourceId", source.sourceId()).param("now", timestamp(now))
+                    .update();
             jdbc.sql("""
                     insert into knowledge_collection_job
                         (id, source_id, status, heartbeat_at, lease_expires_at, started_at, created_at)
@@ -220,6 +233,11 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                     .param("id", documentId)
                     .update();
         }
+        if (isExternalUpdateSource(source)) {
+            for (DocumentPage page : pages) {
+                upsertExternalUpdate(source, page, completedAt);
+            }
+        }
         SyncResult result = new SyncResult(pages.size(), newDocuments, changedDocuments,
                 unchangedDocuments, chunkCount);
         int jobUpdated = jdbc.sql("""
@@ -238,18 +256,29 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                 .param("chunks", result.chunkCount())
                 .param("finishedAt", timestamp(completedAt))
                 .update();
+        String fetchEtag = pages.isEmpty() ? null : pages.getFirst().etag();
+        String fetchLastModified = pages.isEmpty() ? null : pages.getFirst().lastModified();
         int sourceUpdated = jdbc.sql("""
                 update knowledge_source
                 set status='SUCCEEDED', last_sync_at=:completedAt, next_sync_at=:nextSyncAt,
                     locked_until=null, lock_token=null, consecutive_failures=0,
-                    last_error=null, updated_at=:completedAt
+                    last_error=null, fetch_etag=coalesce(:fetchEtag, fetch_etag),
+                    fetch_last_modified=coalesce(:fetchLastModified, fetch_last_modified),
+                    updated_at=:completedAt
                 where id=:id and lock_token=:jobId
                 """)
                 .param("id", source.sourceId())
                 .param("jobId", source.jobId())
                 .param("completedAt", timestamp(completedAt))
                 .param("nextSyncAt", timestamp(nextSyncAt))
+                .param("fetchEtag", fetchEtag)
+                .param("fetchLastModified", fetchLastModified)
                 .update();
+        jdbc.sql("""
+                update knowledge_upload set status='SUCCEEDED', page_count=:pages,
+                    error_message=null, updated_at=:now where source_id=:sourceId
+                """).param("pages", result.pageCount()).param("now", timestamp(completedAt))
+                .param("sourceId", source.sourceId()).update();
         if (jobUpdated != 1 || sourceUpdated != 1) {
             throw new KnowledgeCollectionLeaseLostException(source.jobId());
         }
@@ -286,6 +315,11 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                 .param("lastError", message)
                 .param("failedAt", timestamp(failedAt))
                 .update();
+        jdbc.sql("""
+                update knowledge_upload set status='FAILED', error_message=:error,
+                    updated_at=:now where source_id=:sourceId
+                """).param("error", message).param("now", timestamp(failedAt))
+                .param("sourceId", source.sourceId()).update();
         if (jobUpdated != 1 || sourceUpdated != 1) {
             throw new KnowledgeCollectionLeaseLostException(source.jobId());
         }
@@ -554,7 +588,120 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                 rs.getString("source_type"), rs.getString("root_url"), rs.getString("discovery_url"),
                 rs.getString("allowed_host"), rs.getString("allowed_path_prefix"),
                 rs.getString("trust_tier"), rs.getInt("sync_interval_hours"),
-                rs.getInt("consecutive_failures"));
+                rs.getInt("consecutive_failures"), rs.getString("fetch_etag"),
+                rs.getString("fetch_last_modified"), rs.getString("upload_storage_key"),
+                rs.getString("upload_original_name"), rs.getString("upload_media_type"),
+                rs.getString("upload_visibility"), rs.getObject("upload_user_id", UUID.class));
+    }
+
+    private static boolean isExternalUpdateSource(SourceTask source) {
+        return "OFFICIAL_BLOG_RSS".equals(source.sourceType())
+                || "OFFICIAL_ROADMAP".equals(source.sourceType());
+    }
+
+    private void upsertExternalUpdate(SourceTask source, DocumentPage page, Instant collectedAt) {
+        String snapshotType = "OFFICIAL_BLOG_RSS".equals(source.sourceType()) ? "RSS" : "ROADMAP";
+        String eventType = "OFFICIAL_BLOG_RSS".equals(source.sourceType())
+                ? "OFFICIAL_BLOG" : "ROADMAP";
+        Instant occurredAt = externalOccurredAt(page.versionLabel(), collectedAt);
+        String externalId = UUID.nameUUIDFromBytes(page.canonicalUrl()
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+        String raw;
+        try {
+            raw = json.writeValueAsString(Map.of(
+                    "title", page.title(), "url", page.canonicalUrl(),
+                    "content", page.contentText(), "sourceKey", source.sourceKey()));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Unable to serialize external knowledge update", exception);
+        }
+        UUID snapshotId = jdbc.sql("""
+                insert into source_snapshot
+                    (id, project_id, source_type, external_id, version_tag, source_url,
+                     content_sha256, raw_content, published_at, collected_at)
+                values (gen_random_uuid(), :projectId, :sourceType, :externalId, :version,
+                        :url, :hash, cast(:raw as jsonb), :occurredAt, :collectedAt)
+                on conflict (project_id, source_type, external_id) do update set
+                    version_tag=excluded.version_tag, source_url=excluded.source_url,
+                    content_sha256=excluded.content_sha256, raw_content=excluded.raw_content,
+                    published_at=coalesce(source_snapshot.published_at, excluded.published_at),
+                    collected_at=excluded.collected_at
+                returning id
+                """).param("projectId", source.projectId()).param("sourceType", snapshotType)
+                .param("externalId", externalId).param("version", page.versionLabel())
+                .param("url", page.canonicalUrl()).param("hash", page.contentSha256())
+                .param("raw", raw).param("occurredAt", timestamp(occurredAt))
+                .param("collectedAt", timestamp(collectedAt)).query(UUID.class).single();
+        String summary = truncate(page.contentText().replaceAll("\\s+", " "), 1000);
+        UUID eventId = jdbc.sql("""
+                insert into intelligence_event
+                    (id, project_id, snapshot_id, event_type, title, summary,
+                     importance, occurred_at, payload, updated_at)
+                values (gen_random_uuid(), :projectId, :snapshotId, :eventType, :title,
+                        :summary, 3, :occurredAt, cast(:payload as jsonb), :updatedAt)
+                on conflict (snapshot_id) do update set
+                    event_type=excluded.event_type, title=excluded.title,
+                    summary=excluded.summary,
+                    payload=excluded.payload, updated_at=excluded.updated_at
+                returning id
+                """).param("projectId", source.projectId()).param("snapshotId", snapshotId)
+                .param("eventType", eventType).param("title", truncate(page.title(), 512))
+                .param("summary", summary).param("occurredAt", timestamp(occurredAt))
+                .param("payload", raw).param("updatedAt", timestamp(collectedAt))
+                .query(UUID.class).single();
+        jdbc.sql("""
+                insert into event_evidence
+                    (id, event_id, snapshot_id, source_url, evidence_text, sort_order, created_at)
+                values (gen_random_uuid(), :eventId, :snapshotId, :url, :evidence, 0, :now)
+                on conflict (event_id, snapshot_id, sort_order) do update set
+                    source_url=excluded.source_url, evidence_text=excluded.evidence_text
+                """).param("eventId", eventId).param("snapshotId", snapshotId)
+                .param("url", page.canonicalUrl()).param("evidence", summary)
+                .param("now", timestamp(collectedAt)).update();
+        applyWatchRules(eventId, collectedAt);
+    }
+
+    private void applyWatchRules(UUID eventId, Instant matchedAt) {
+        jdbc.sql("""
+                insert into event_rule_match (rule_id, event_id, user_id, workspace_id, matched_at)
+                select rule.id, event.id, rule.user_id, rule.workspace_id, :matchedAt
+                from intelligence_event event
+                join tracked_project project on project.id=event.project_id
+                join user_watch_rule rule on rule.workspace_id=project.workspace_id and rule.enabled=true
+                where event.id=:eventId
+                  and (rule.project_id is null or rule.project_id=event.project_id)
+                  and event.importance >= rule.minimum_importance
+                  and (cardinality(rule.event_types)=0 or event.event_type=any(rule.event_types))
+                  and (cardinality(rule.keywords)=0 or exists (
+                      select 1 from unnest(rule.keywords) keyword
+                      where lower(event.title || ' ' || event.summary || ' ' || array_to_string(event.labels, ' '))
+                            like '%' || lower(keyword) || '%'))
+                  and not exists (select 1 from unnest(rule.excluded_keywords) keyword
+                      where lower(event.title || ' ' || event.summary || ' ' || array_to_string(event.labels, ' '))
+                            like '%' || lower(keyword) || '%')
+                on conflict (rule_id, event_id) do nothing
+                """).param("eventId", eventId).param("matchedAt", timestamp(matchedAt)).update();
+        jdbc.sql("""
+                insert into user_notification
+                    (id, user_id, workspace_id, notification_type, entity_id,
+                     severity, title, body, created_at)
+                select gen_random_uuid(), match.user_id, match.workspace_id, 'RULE_MATCH', event.id,
+                       'INFO', '关注规则命中：' || left(event.title, 230),
+                       left(project.repository_owner || '/' || project.repository_name || ' · '
+                            || event.event_type || ' · ' || event.summary, 1000), :createdAt
+                from event_rule_match match
+                join user_watch_rule rule on rule.id=match.rule_id and rule.immediate_notification=true
+                join intelligence_event event on event.id=match.event_id
+                join tracked_project project on project.id=event.project_id
+                where match.event_id=:eventId
+                on conflict (user_id, notification_type, entity_id) do nothing
+                """).param("eventId", eventId).param("createdAt", timestamp(matchedAt)).update();
+        jdbc.sql("""
+                update intelligence_event event set analysis_eligible=true
+                where event.id=:eventId and exists (
+                    select 1 from event_rule_match match
+                    join user_watch_rule rule on rule.id=match.rule_id
+                    where match.event_id=event.id and rule.include_in_digest=true)
+                """).param("eventId", eventId).update();
     }
 
     private SourceStatus sourceStatus(ResultSet rs, int rowNum) throws SQLException {
@@ -633,6 +780,20 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
     private static String truncateUrl(String value) {
         if (value == null || value.isBlank()) return null;
         return value.length() <= 1024 ? value : value.substring(0, 1024);
+    }
+
+    private static Instant externalOccurredAt(String value, Instant fallback) {
+        if (value == null || value.isBlank()) return fallback;
+        try {
+            return Instant.parse(value);
+        } catch (java.time.format.DateTimeParseException ignored) {
+            try {
+                return java.time.ZonedDateTime.parse(
+                        value, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+            } catch (java.time.format.DateTimeParseException alsoIgnored) {
+                return fallback;
+            }
+        }
     }
 
     private record DocumentState(UUID id, UUID currentRevisionId, String contentSha256) { }

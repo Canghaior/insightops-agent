@@ -53,8 +53,8 @@ public class ChatStreamController {
 
     private static final String SYSTEM_PROMPT = """
             你是 InsightOps Agent，面向 Java 开发者、架构师和技术负责人回答 AI 开源项目问题。
-            当前已启用 GitHub Release、Issue、Pull Request、Security Advisory 与本地官方文档知识库。
-            不得声称查询了 Roadmap 或系统未提供的来源。
+            当前可使用 GitHub Release、Issue、Pull Request、Security Advisory、官方文档、官方博客/RSS、Roadmap 与当前用户有权访问的上传资料。
+            不得声称查询了系统证据中没有出现的来源。
             如果系统提示中附有工具或知识库证据，只能基于该证据回答可验证事实，并为关键事实保留 [S#] 引用或官方 URL。
             如果没有证据，不要编造实时版本、发布日期、接口能力或来源链接；其他问题使用中文清晰、简洁地回答。
             """;
@@ -123,7 +123,8 @@ public class ChatStreamController {
         UUID runUuid = UUID.randomUUID();
         String runId = runUuid.toString();
         String traceId = (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE);
-        ActorContext actor = CurrentAccount.actor(request);
+        var account = CurrentAccount.account(request);
+        ActorContext actor = account.actor();
         Instant startedAt = Instant.now();
         String userMessage;
         try {
@@ -243,6 +244,8 @@ public class ChatStreamController {
                 : knowledgeRagService.retrieve(
                 runUuid,
                 actor.workspaceId(),
+                actor.userId(),
+                "SYSTEM_ADMIN".equals(account.systemRole()),
                 retrievalQuery(history, userMessage),
                 new KnowledgeRagService.ToolProgressListener() {
                     @Override
@@ -309,7 +312,12 @@ public class ChatStreamController {
         });
         eventEvidence.ifPresent(evidence -> citationDetails.addAll(evidence.citations()));
         try {
-            guardrail.verifyTrustedSources(citations);
+            toolEvidence.ifPresent(evidence ->
+                    guardrail.verifyTrustedReleaseSources(evidence.sourceUrls()));
+            ragEvidence.ifPresent(evidence ->
+                    guardrail.verifyTrustedKnowledgeSources(evidence.sourceUrls()));
+            eventEvidence.ifPresent(evidence ->
+                    guardrail.verifyTrustedProjectEventSources(evidence.sourceUrls()));
         }
         catch (P0ChatGuardrail.GuardrailViolation exception) {
             failRunSafely(runUuid, answer, exception.code());

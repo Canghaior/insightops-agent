@@ -13,6 +13,7 @@ import com.jundaodsj.insightops.tool.application.github.GitHubRepositoryReleaseQ
 import com.jundaodsj.insightops.tool.application.github.GitHubToolErrorCode;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -35,27 +36,35 @@ public class GitHubReleaseHttpGateway implements GitHubReleaseGateway {
     private final GitHubToolProperties properties;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final String token;
 
     @Autowired
     public GitHubReleaseHttpGateway(
             GitHubToolProperties properties,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            @Value("${insightops.tool.github.token:}") String token) {
         this(
                 properties,
                 objectMapper,
                 HttpClient.newBuilder()
                         .connectTimeout(Duration.ofSeconds(properties.connectTimeoutSeconds()))
                         .followRedirects(HttpClient.Redirect.NORMAL)
-                        .build());
+                        .build(), token);
     }
 
     GitHubReleaseHttpGateway(
             GitHubToolProperties properties,
             ObjectMapper objectMapper,
             HttpClient httpClient) {
+        this(properties, objectMapper, httpClient, "");
+    }
+
+    GitHubReleaseHttpGateway(GitHubToolProperties properties, ObjectMapper objectMapper,
+                             HttpClient httpClient, String token) {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.httpClient = httpClient;
+        this.token = token == null ? "" : token.trim();
     }
 
     @Override
@@ -113,15 +122,15 @@ public class GitHubReleaseHttpGateway implements GitHubReleaseGateway {
                 URI uri = URI.create(properties.baseUrl()
                         + "/repos/" + repository.repositoryOwner() + "/" + repository.repositoryName()
                         + "/releases?per_page=" + PAGE_SIZE + "&page=" + page);
-                HttpRequest request = HttpRequest.newBuilder(uri)
+                HttpRequest.Builder request = HttpRequest.newBuilder(uri)
                         .timeout(Duration.ofSeconds(properties.requestTimeoutSeconds()))
                         .header("Accept", "application/vnd.github+json")
                         .header("X-GitHub-Api-Version", properties.apiVersion())
                         .header("User-Agent", "InsightOps-Agent/0.1")
-                        .GET()
-                        .build();
+                        .GET();
+                if (!token.isBlank()) request.header("Authorization", "Bearer " + token);
                 HttpResponse<String> response = httpClient.send(
-                        request,
+                        request.build(),
                         HttpResponse.BodyHandlers.ofString());
                 validateStatus(response.statusCode());
                 PageResult parsed = parsePage(

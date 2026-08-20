@@ -56,6 +56,12 @@ public class KnowledgeRagService {
 
     public Optional<RagEvidence> retrieve(UUID runId, UUID workspaceId, String query,
                                           ToolProgressListener listener) {
+        return retrieve(runId, workspaceId, null, true, query, listener);
+    }
+
+    public Optional<RagEvidence> retrieve(UUID runId, UUID workspaceId, UUID viewerUserId,
+                                          boolean systemAdmin, String query,
+                                          ToolProgressListener listener) {
         if (!properties.isEnabled()) {
             return Optional.empty();
         }
@@ -68,8 +74,12 @@ public class KnowledgeRagService {
         listener.onStarted(toolCallId, TOOL_NAME);
 
         try {
-            var response = searchService.search(runId, workspaceId, query, candidateLimit());
-            boolean answerable = answerabilityPolicy.assess(query, response.results()).answerable();
+            var response = viewerUserId == null && systemAdmin
+                    ? searchService.search(runId, workspaceId, query, candidateLimit())
+                    : searchService.searchForUser(runId, workspaceId, viewerUserId,
+                            systemAdmin, query, candidateLimit());
+            boolean answerable = answerabilityPolicy.assess(
+                    workspaceId, query, response.results()).answerable();
             List<KnowledgeEmbeddingStore.SearchResult> selected = answerable
                     ? select(response.results()) : List.of();
             RagEvidence evidence = evidence(response, selected, toolCallId, answerable);
@@ -130,7 +140,7 @@ public class KnowledgeRagService {
         if (!answerable) {
             return new RagEvidence("""
 
-                    官方知识库证据判定：当前问题不属于 Spring AI、LangChain4j 或 Dify 的已收录官方文档范围，
+                    官方知识库证据判定：当前问题不属于系统当前已收录项目的官方文档或授权上传资料范围，
                     或检索结果没有命中问题所指项目。必须明确回答“当前官方证据不足”，不得依赖模型记忆补充事实。
                     """, List.of(), List.of(), toolCallId, response.provider(), response.model(),
                     response.mode(), response.vectorAvailable(), false,
@@ -147,10 +157,12 @@ public class KnowledgeRagService {
         List<ChatCitation> citations = new ArrayList<>();
         for (int index = 0; index < selected.size(); index++) {
             var item = selected.get(index);
-            urls.add(item.canonicalUrl());
+            String sourceUrl = citationUrl(item.canonicalUrl());
+            boolean upload = item.canonicalUrl().startsWith("upload://");
+            urls.add(sourceUrl);
             citations.add(new ChatCitation(
-                    "S" + (index + 1), item.title(), item.canonicalUrl(), item.projectName(),
-                    item.headingPath(), "OFFICIAL_DOCUMENT", item.score()));
+                    "S" + (index + 1), item.title(), sourceUrl, item.projectName(),
+                    item.headingPath(), upload ? "USER_UPLOAD" : "OFFICIAL_DOCUMENT", item.score()));
             prompt.append("[S").append(index + 1).append("]\n")
                     .append("项目：").append(clean(item.projectName())).append('\n')
                     .append("文档：").append(clean(item.title())).append('\n')
@@ -202,6 +214,19 @@ public class KnowledgeRagService {
 
     private static String clean(String value) {
         return value == null ? "" : value.replace('\u0000', ' ').strip();
+    }
+
+    private static String citationUrl(String canonicalUrl) {
+        if (canonicalUrl == null || !canonicalUrl.startsWith("upload://")) return canonicalUrl;
+        try {
+            java.net.URI value = java.net.URI.create(canonicalUrl);
+            UUID uploadId = UUID.fromString(value.getHost());
+            String fragment = value.getFragment();
+            return "/api/v1/knowledge/uploads/" + uploadId + "/content"
+                    + (fragment == null || fragment.isBlank() ? "" : "#" + fragment);
+        } catch (IllegalArgumentException exception) {
+            return "#unavailable-upload-citation";
+        }
     }
 
     public record RagEvidence(String systemPromptAppendix, List<String> sourceUrls,

@@ -25,7 +25,8 @@ import java.util.UUID;
 @Service
 public class AdminKnowledgeSourceService {
     private static final Set<String> SOURCE_TYPES = Set.of(
-            "OFFICIAL_DOCUMENTATION", "MIGRATION_GUIDE", "OFFICIAL_RELEASE_NOTES");
+            "OFFICIAL_DOCUMENTATION", "MIGRATION_GUIDE", "OFFICIAL_RELEASE_NOTES",
+            "OFFICIAL_BLOG_RSS", "OFFICIAL_ROADMAP");
     private final KnowledgeStore store;
     private final AdminProjectStore projectStore;
     private final AdminAccountStore auditStore;

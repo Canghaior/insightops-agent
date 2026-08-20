@@ -25,6 +25,17 @@ public interface KnowledgeEmbeddingStore {
 
     List<SearchResult> searchKeyword(UUID workspaceId, String query, int limit);
 
+    default List<SearchResult> searchVisible(UUID workspaceId, UUID viewerUserId, boolean systemAdmin,
+                                             String model, float[] queryEmbedding,
+                                             int limit, double minimumScore) {
+        return search(workspaceId, model, queryEmbedding, limit, minimumScore);
+    }
+
+    default List<SearchResult> searchKeywordVisible(UUID workspaceId, UUID viewerUserId,
+                                                    boolean systemAdmin, String query, int limit) {
+        return searchKeyword(workspaceId, query, limit);
+    }
+
     void recordRetrieval(UUID runId, UUID workspaceId, String query, String mode, int resultCount,
                          long durationMs, List<SearchResult> results, Instant createdAt);
 

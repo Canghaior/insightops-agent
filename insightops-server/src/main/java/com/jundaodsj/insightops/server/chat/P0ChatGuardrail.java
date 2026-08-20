@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 
 import java.net.URI;
 import java.util.List;
+import java.util.UUID;
 
 @Component
 public class P0ChatGuardrail {
@@ -81,12 +82,50 @@ public class P0ChatGuardrail {
         }
     }
 
+    public void verifyTrustedKnowledgeSources(List<String> sources) {
+        for (String source : sources) {
+            if (!trustedKnowledgeSource(source)) {
+                throw new GuardrailViolation("OUTPUT_SOURCE_NOT_ALLOWED");
+            }
+        }
+    }
+
+    public void verifyTrustedProjectEventSources(List<String> sources) {
+        for (String source : sources) {
+            if (!trustedProjectEventSource(source)) {
+                throw new GuardrailViolation("OUTPUT_SOURCE_NOT_ALLOWED");
+            }
+        }
+    }
+
     public void verifyTrustedSources(List<String> sources) {
         for (String source : sources) {
             if (!trustedReleaseSource(source) && !trustedProjectEventSource(source)
                     && !trustedDocumentationSource(source)) {
                 throw new GuardrailViolation("OUTPUT_SOURCE_NOT_ALLOWED");
             }
+        }
+    }
+
+    private static boolean trustedKnowledgeSource(String value) {
+        if (value != null && value.matches(
+                "/api/v1/knowledge/uploads/[0-9a-fA-F-]{36}/content(?:#page=[1-9][0-9]*)?")) {
+            try {
+                String id = value.substring("/api/v1/knowledge/uploads/".length(),
+                        value.indexOf("/content"));
+                UUID.fromString(id);
+                return true;
+            } catch (IllegalArgumentException exception) {
+                return false;
+            }
+        }
+        try {
+            URI uri = URI.create(value);
+            return "https".equalsIgnoreCase(uri.getScheme()) && uri.getHost() != null
+                    && !uri.getHost().isBlank() && uri.getUserInfo() == null
+                    && (uri.getPort() == -1 || uri.getPort() == 443);
+        } catch (IllegalArgumentException exception) {
+            return false;
         }
     }
 

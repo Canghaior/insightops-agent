@@ -1,0 +1,33 @@
+groups:
+  - name: insightops-production
+    rules:
+      - alert: InsightOpsServiceDown
+        expr: up{job=~"insightops-server|insightops-worker"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "InsightOps {{ $labels.job }} is unavailable"
+      - alert: KnowledgeCollectionLeaseExpired
+        expr: insightops_knowledge_collection_expired_leases > 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "A knowledge collection worker lease has expired"
+      - alert: KnowledgeEmbeddingBacklog
+        expr: insightops_knowledge_embedding_backlog > 5000
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Knowledge embedding backlog exceeds 5,000 chunks"
+      - alert: KnowledgeUploadFailures
+        expr: insightops_knowledge_upload_failed > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "One or more uploaded knowledge files failed processing"
+      - alert: InsightOpsHighHttpErrorRate
+        expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[10m])) / clamp_min(sum(rate(http_server_requests_seconds_count[10m])), 0.001) > 0.05
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "InsightOps HTTP 5xx rate is above 5%"

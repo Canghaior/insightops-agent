@@ -84,4 +84,22 @@ class P0ChatGuardrailTest {
                     .isEqualTo("OUTPUT_SOURCE_NOT_ALLOWED");
         }
     }
+
+    @Test
+    void shouldAcceptRegisteredDynamicAndAuthenticatedUploadKnowledgeSources() {
+        guardrail.verifyTrustedKnowledgeSources(List.of(
+                "https://spring.io/blog/2026/spring-ai-update",
+                "/api/v1/knowledge/uploads/123e4567-e89b-12d3-a456-426614174000/content#page=3"));
+
+        for (String source : List.of(
+                "http://spring.io/blog/update",
+                "https://user:pass@example.com/docs",
+                "/api/v1/knowledge/uploads/not-a-uuid/content",
+                "javascript:alert(1)")) {
+            assertThatThrownBy(() -> guardrail.verifyTrustedKnowledgeSources(List.of(source)))
+                    .isInstanceOf(P0ChatGuardrail.GuardrailViolation.class)
+                    .extracting("code")
+                    .isEqualTo("OUTPUT_SOURCE_NOT_ALLOWED");
+        }
+    }
 }

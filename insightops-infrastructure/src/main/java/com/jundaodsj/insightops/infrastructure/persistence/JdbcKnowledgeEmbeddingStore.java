@@ -219,6 +219,13 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
     @Override
     public List<SearchResult> search(UUID workspaceId, String model, float[] queryEmbedding,
                                      int limit, double minimumScore) {
+        return searchVisible(workspaceId, null, true, model, queryEmbedding, limit, minimumScore);
+    }
+
+    @Override
+    public List<SearchResult> searchVisible(UUID workspaceId, UUID viewerUserId, boolean systemAdmin,
+                                            String model, float[] queryEmbedding,
+                                            int limit, double minimumScore) {
         String query = vector(queryEmbedding);
         return jdbc.sql("""
                 select chunk.id as chunk_id, source.project_id, project.repository_name as project_name,
@@ -230,14 +237,19 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
                 join knowledge_document document on document.current_revision_id=chunk.revision_id and document.active=true
                 join knowledge_source source on source.id=document.source_id and source.enabled=true
                 join tracked_project project on project.id=source.project_id
+                left join knowledge_upload upload on upload.source_id=source.id
                 where source.workspace_id=:workspaceId and embedding.embedding_model=:model
                   and embedding.status='SUCCEEDED'
+                  and (source.source_type <> 'USER_UPLOAD' or :systemAdmin
+                       or upload.visibility='WORKSPACE' or upload.uploaded_by=:viewerUserId)
                   and 1 - (embedding.embedding OPERATOR(public.<=>) cast(:query as public.vector)) >= :minimumScore
                 order by embedding.embedding OPERATOR(public.<=>) cast(:query as public.vector)
                 limit :limit
                 """)
                 .param("workspaceId", workspaceId)
                 .param("model", model)
+                .param("viewerUserId", viewerUserId)
+                .param("systemAdmin", systemAdmin)
                 .param("query", query)
                 .param("minimumScore", Math.max(-1.0, Math.min(1.0, minimumScore)))
                 .param("limit", Math.max(1, Math.min(20, limit)))
@@ -252,6 +264,12 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
 
     @Override
     public List<SearchResult> searchKeyword(UUID workspaceId, String query, int limit) {
+        return searchKeywordVisible(workspaceId, null, true, query, limit);
+    }
+
+    @Override
+    public List<SearchResult> searchKeywordVisible(UUID workspaceId, UUID viewerUserId,
+                                                   boolean systemAdmin, String query, int limit) {
         String keywordQuery = keywordExpression(query);
         if (keywordQuery.isBlank()) {
             return List.of();
@@ -268,13 +286,18 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
                   on document.current_revision_id=chunk.revision_id and document.active=true
                 join knowledge_source source on source.id=document.source_id and source.enabled=true
                 join tracked_project project on project.id=source.project_id
+                left join knowledge_upload upload on upload.source_id=source.id
                 where source.workspace_id=:workspaceId
+                  and (source.source_type <> 'USER_UPLOAD' or :systemAdmin
+                       or upload.visibility='WORKSPACE' or upload.uploaded_by=:viewerUserId)
                   and to_tsvector('simple', coalesce(chunk.content, ''))
                       @@ websearch_to_tsquery('simple', :query)
                 order by score desc, chunk.id
                 limit :limit
                 """)
                 .param("workspaceId", workspaceId)
+                .param("viewerUserId", viewerUserId)
+                .param("systemAdmin", systemAdmin)
                 .param("query", keywordQuery)
                 .param("limit", Math.max(1, Math.min(50, limit)))
                 .query((rs, rowNum) -> new SearchResult(

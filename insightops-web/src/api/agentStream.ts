@@ -14,7 +14,7 @@ export interface ChatCitation {
   url: string
   project: string | null
   heading: string | null
-  sourceType: 'OFFICIAL_DOCUMENT' | 'GITHUB_RELEASE'
+  sourceType: 'OFFICIAL_DOCUMENT' | 'GITHUB_RELEASE' | 'USER_UPLOAD'
   score: number | null
 }
 

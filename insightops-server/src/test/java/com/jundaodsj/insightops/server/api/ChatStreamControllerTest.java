@@ -214,13 +214,14 @@ class ChatStreamControllerTest {
         RecordingChatRunStore store = new RecordingChatRunStore();
         KnowledgeRagService rag = mock(KnowledgeRagService.class);
         String url = "https://docs.spring.io/spring-ai/reference/api/embeddings.html";
-        when(rag.retrieve(any(), eq(ACTOR.workspaceId()), anyString(), any()))
+        when(rag.retrieve(any(), eq(ACTOR.workspaceId()), eq(ACTOR.userId()), eq(true),
+                anyString(), any()))
                 .thenReturn(Optional.of(new KnowledgeRagService.RagEvidence(
                         "\n[S1] Spring AI Embedding Model API\n",
                         List.of(url), UUID.randomUUID(), "ollama", "bge-m3", 12, List.of())));
         ChatStreamController controller = new ChatStreamController(
                 (request, listener) -> {
-                    assertThat(request.systemPrompt()).contains("[S1]", "官方文档知识库");
+                    assertThat(request.systemPrompt()).contains("[S1]", "官方文档", "Roadmap", "上传资料");
                     listener.onEvent(ChatStreamEvent.delta("基于官方证据 [S1]"));
                     listener.onEvent(ChatStreamEvent.completed(
                             "deepseek", "deepseek-v4-flash", ModelUsage.unknown(),

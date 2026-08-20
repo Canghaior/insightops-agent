@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bell, ChatDotRound, DataAnalysis, FolderOpened, Operation, Setting, User, UserFilled } from '@element-plus/icons-vue'
+import { Bell, ChatDotRound, DataAnalysis, Document, FolderOpened, Operation, Setting, User, UserFilled } from '@element-plus/icons-vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -23,6 +23,7 @@ const navigation = [
   { path: '/digests', label: '情报摘要', icon: Operation, noticeBadge: true },
   { path: '/reports', label: '报告交付', icon: DataAnalysis },
   { path: '/chat', label: '研究问答', icon: ChatDotRound },
+  { path: '/knowledge-files', label: '知识文件', icon: Document },
   { path: '/memory', label: '长期记忆', icon: User },
   { path: '/runs', label: '执行记录', icon: Operation },
   { path: '/settings', label: '账号设置', icon: Setting },

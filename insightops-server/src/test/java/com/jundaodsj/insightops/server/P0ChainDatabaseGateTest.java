@@ -19,6 +19,7 @@ import com.jundaodsj.insightops.infrastructure.persistence.JdbcAdminProjectStore
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAccountWorkspaceStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentToolExecutionStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcChatRunStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcKnowledgeUploadStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserMemoryStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcConversationManager;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcProjectUpdateStore;
@@ -34,6 +35,8 @@ import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserProjectWatchS
 import com.jundaodsj.insightops.infrastructure.delivery.DeliverySecretCipher;
 import com.jundaodsj.insightops.infrastructure.knowledge.KnowledgeDocumentChunker;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
+import com.jundaodsj.insightops.knowledge.application.KnowledgeUploadQuotaExceededException;
+import com.jundaodsj.insightops.knowledge.application.KnowledgeUploadStore;
 import com.jundaodsj.insightops.knowledge.application.QualityReviewStore;
 import com.jundaodsj.insightops.report.application.ReportDeliveryStore;
 import com.jundaodsj.insightops.model.application.ChatStreamEvent;
@@ -105,6 +108,7 @@ class P0ChainDatabaseGateTest {
     private static JdbcProjectUpdateStore projectUpdateStore;
     private static JdbcIntelligenceStore intelligenceStore;
     private static JdbcKnowledgeStore knowledgeStore;
+    private static JdbcKnowledgeUploadStore knowledgeUploadStore;
     private static JdbcKnowledgeEmbeddingStore knowledgeEmbeddingStore;
     private static JdbcWatchRuleStore watchRuleStore;
     private static JdbcResearchFeedbackStore feedbackStore;
@@ -133,14 +137,23 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(20);
+        assertThat(migration.migrationsExecuted).isEqualTo(24);
 
         jdbcClient = JdbcClient.create(dataSource);
+        assertThat(jdbcClient.sql("select count(*) from tracked_project")
+                .query(Long.class).single()).isEqualTo(10L);
+        assertThat(jdbcClient.sql("""
+                select count(*) from knowledge_source
+                where source_type in ('OFFICIAL_BLOG_RSS', 'OFFICIAL_ROADMAP')
+                """).query(Long.class).single()).isEqualTo(2L);
+        assertThat(jdbcClient.sql("select count(*) from knowledge_upload")
+                .query(Long.class).single()).isZero();
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
         adminProjectStore = new JdbcAdminProjectStore(jdbcClient);
         projectUpdateStore = new JdbcProjectUpdateStore(jdbcClient, objectMapper());
         intelligenceStore = new JdbcIntelligenceStore(jdbcClient, objectMapper());
         knowledgeStore = new JdbcKnowledgeStore(jdbcClient, objectMapper());
+        knowledgeUploadStore = new JdbcKnowledgeUploadStore(jdbcClient);
         knowledgeEmbeddingStore = new JdbcKnowledgeEmbeddingStore(jdbcClient, objectMapper());
         watchRuleStore = new JdbcWatchRuleStore(jdbcClient);
         feedbackStore = new JdbcResearchFeedbackStore(jdbcClient);
@@ -223,7 +236,7 @@ class P0ChainDatabaseGateTest {
 
         assertThat(projectUpdateStore.requestSync(ACTOR.workspaceId(), spring.id(), now.plusSeconds(2))).isTrue();
         ProjectUpdateStore.TrackedProject secondClaim = projectUpdateStore.claimDueProjects(
-                now.plusSeconds(2), Duration.ofMinutes(5), 3).stream()
+                now.plusSeconds(2), Duration.ofMinutes(5), 20).stream()
                 .filter(project -> project.id().equals(spring.id())).findFirst().orElseThrow();
         ProjectUpdateStore.SyncResult second = projectUpdateStore.completeSuccessfulSync(
                 secondClaim, List.of(release), now.plusSeconds(3), now.plus(Duration.ofHours(6)));
@@ -654,15 +667,15 @@ class P0ChainDatabaseGateTest {
         UUID projectId = UUID.randomUUID();
         Instant now = Instant.parse("2026-08-19T08:00:00Z");
         var created = adminProjectStore.create(
-                projectId, ACTOR.workspaceId(), "openai", "openai-java",
-                "https://github.com/openai/openai-java", 2, 12,
-                List.of("openai sdk"), now);
+                projectId, ACTOR.workspaceId(), "chain-gate", "insightops-fixture",
+                "https://github.com/chain-gate/insightops-fixture", 2, 12,
+                List.of("chain gate fixture"), now);
 
-        assertThat(created.repositoryName()).isEqualTo("openai-java");
+        assertThat(created.repositoryName()).isEqualTo("insightops-fixture");
         assertThat(created.enabled()).isTrue();
         assertThat(created.nextSyncAt()).isEqualTo(now);
         assertThat(created.syncIntervalHours()).isEqualTo(12);
-        assertThat(created.chatAliases()).containsExactly("openai sdk");
+        assertThat(created.chatAliases()).containsExactly("chain gate fixture");
         assertThat(adminProjectStore.list(ACTOR.workspaceId()))
                 .extracting(AdminProjectStore.ManagedProject::projectId)
                 .contains(projectId);
@@ -671,21 +684,21 @@ class P0ChainDatabaseGateTest {
                         now.plusSeconds(1), Duration.ofMinutes(5), 20).stream()
                 .filter(project -> project.id().equals(projectId))
                 .findFirst().orElseThrow();
-        assertThat(claimed.owner()).isEqualTo("openai");
-        assertThat(claimed.repository()).isEqualTo("openai-java");
+        assertThat(claimed.owner()).isEqualTo("chain-gate");
+        assertThat(claimed.repository()).isEqualTo("insightops-fixture");
         assertThat(claimed.syncIntervalHours()).isEqualTo(12);
         projectUpdateStore.completeSuccessfulSync(
                 claimed, List.of(), now.plusSeconds(1), now.plus(Duration.ofHours(6)));
 
         var updated = adminProjectStore.update(
-                ACTOR.workspaceId(), projectId, "openai", "openai-agents-java",
-                "https://github.com/openai/openai-agents-java", 4, 8,
-                List.of("agents sdk"), now.plusSeconds(1))
+                ACTOR.workspaceId(), projectId, "chain-gate", "insightops-fixture-v2",
+                "https://github.com/chain-gate/insightops-fixture-v2", 4, 8,
+                List.of("chain gate fixture v2"), now.plusSeconds(1))
                 .orElseThrow();
-        assertThat(updated.repositoryName()).isEqualTo("openai-agents-java");
+        assertThat(updated.repositoryName()).isEqualTo("insightops-fixture-v2");
         assertThat(updated.priority()).isEqualTo(4);
         assertThat(updated.syncIntervalHours()).isEqualTo(8);
-        assertThat(updated.chatAliases()).containsExactly("agents sdk");
+        assertThat(updated.chatAliases()).containsExactly("chain gate fixture v2");
 
         assertThat(adminProjectStore.setEnabled(
                 ACTOR.workspaceId(), projectId, false, now.plusSeconds(2)))
@@ -918,6 +931,92 @@ class P0ChainDatabaseGateTest {
         assertThat(reportDeliveryStore.listChannels(ACTOR)).isEmpty();
         assertThat(reportDeliveryStore.listDeliveries(ACTOR, 0, 20, reportId).items())
                 .singleElement().extracting(ReportDeliveryStore.DeliveryRecord::status).isEqualTo("SUCCEEDED");
+    }
+
+
+    @Test
+    @Order(12)
+    void uploadedKnowledgeVisibilityRemainsScopedAndDeletable() {
+        Instant now = Instant.parse("2026-08-20T03:00:00Z");
+        UUID otherUser = UUID.randomUUID();
+        createTestUser(otherUser, "upload-isolated", "Upload Isolated");
+        UUID projectId = UUID.fromString("00000000-0000-0000-0000-000000000101");
+        UUID privateUpload = UUID.randomUUID();
+        UUID workspaceUpload = UUID.randomUUID();
+        knowledgeUploadStore.create(new KnowledgeUploadStore.CreateUpload(
+                privateUpload, UUID.randomUUID(), ACTOR.workspaceId(), projectId, ACTOR.userId(),
+                "private.md", privateUpload + ".bin", "text/markdown", 100,
+                "a".repeat(64), "PRIVATE", 1_073_741_824L), now);
+        knowledgeUploadStore.create(new KnowledgeUploadStore.CreateUpload(
+                workspaceUpload, UUID.randomUUID(), ACTOR.workspaceId(), projectId, ACTOR.userId(),
+                "workspace.txt", workspaceUpload + ".bin", "text/plain", 200,
+                "b".repeat(64), "WORKSPACE", 1_073_741_824L), now.plusSeconds(1));
+
+        assertThat(knowledgeUploadStore.listVisible(ACTOR.workspaceId(), ACTOR.userId(), false))
+                .extracting(KnowledgeUploadStore.UploadRecord::uploadId)
+                .contains(privateUpload, workspaceUpload);
+        assertThat(knowledgeUploadStore.listVisible(ACTOR.workspaceId(), otherUser, false))
+                .extracting(KnowledgeUploadStore.UploadRecord::uploadId)
+                .containsExactly(workspaceUpload);
+        assertThat(knowledgeUploadStore.listVisible(ACTOR.workspaceId(), otherUser, true))
+                .extracting(KnowledgeUploadStore.UploadRecord::uploadId)
+                .contains(privateUpload, workspaceUpload);
+        assertThat(knowledgeUploadStore.workspaceBytes(ACTOR.workspaceId())).isEqualTo(300L);
+        UUID rejectedUpload = UUID.randomUUID();
+        assertThatThrownBy(() -> knowledgeUploadStore.create(new KnowledgeUploadStore.CreateUpload(
+                rejectedUpload, UUID.randomUUID(), ACTOR.workspaceId(), projectId, ACTOR.userId(),
+                "over-quota.txt", rejectedUpload + ".bin", "text/plain", 1,
+                "d".repeat(64), "PRIVATE", 300L), now.plusSeconds(2)))
+                .isInstanceOf(KnowledgeUploadQuotaExceededException.class);
+        assertThat(knowledgeUploadStore.workspaceBytes(ACTOR.workspaceId())).isEqualTo(300L);
+
+        assertThat(knowledgeUploadStore.delete(
+                ACTOR.workspaceId(), otherUser, false, privateUpload)).isEmpty();
+        assertThat(knowledgeUploadStore.delete(
+                ACTOR.workspaceId(), ACTOR.userId(), false, privateUpload)).isPresent();
+        assertThat(knowledgeUploadStore.findVisible(
+                ACTOR.workspaceId(), ACTOR.userId(), false, privateUpload)).isEmpty();
+    }
+
+    @Test
+    @Order(13)
+    void externalKnowledgeEventsPreserveOfficialPublicationTime() {
+        UUID sourceId = UUID.fromString("00000000-0000-0000-0000-000000000404");
+        Instant collectedAt = Instant.parse("2026-08-20T04:00:00Z");
+        Instant publishedAt = Instant.parse("2026-08-19T10:30:00Z");
+        jdbcClient.sql("update knowledge_source set next_sync_at=:later where id<>:sourceId")
+                .param("later", java.time.OffsetDateTime.parse("2099-01-01T00:00:00Z"))
+                .param("sourceId", sourceId).update();
+        assertThat(knowledgeStore.requestSync(ACTOR.workspaceId(), sourceId, collectedAt)).isTrue();
+        KnowledgeStore.SourceTask task = knowledgeStore.claimDueSources(
+                collectedAt.plusSeconds(1), Duration.ofMinutes(5), 1).getFirst();
+        assertThat(task.sourceId()).isEqualTo(sourceId);
+
+        String content = "# Spring Blog Update\n\nA production-ready Spring AI update.";
+        var chunks = new KnowledgeDocumentChunker().chunk(content, 200, 20);
+        var page = new KnowledgeStore.DocumentPage(
+                "https://spring.io/blog/2026/08/19/spring-ai-update",
+                "Spring AI update", "en", "Wed, 19 Aug 2026 10:30:00 GMT",
+                "c".repeat(64), content, null, null, chunks);
+        knowledgeStore.completeSuccessfulSync(task, List.of(page),
+                collectedAt.plusSeconds(2), collectedAt.plus(Duration.ofHours(6)));
+
+        assertThat(jdbcClient.sql("""
+                select published_at from source_snapshot where source_url=:url
+                """).param("url", page.canonicalUrl())
+                .query(java.time.OffsetDateTime.class).single().toInstant()).isEqualTo(publishedAt);
+        assertThat(jdbcClient.sql("""
+                select event.occurred_at from intelligence_event event
+                join source_snapshot snapshot on snapshot.id=event.snapshot_id
+                where snapshot.source_url=:url
+                """).param("url", page.canonicalUrl())
+                .query(java.time.OffsetDateTime.class).single().toInstant()).isEqualTo(publishedAt);
+        assertThat(jdbcClient.sql("""
+                select event_type from intelligence_event event
+                join source_snapshot snapshot on snapshot.id=event.snapshot_id
+                where snapshot.source_url=:url
+                """).param("url", page.canonicalUrl())
+                .query(String.class).single()).isEqualTo("OFFICIAL_BLOG");
     }
 
     private static ActorContext actor(String userId) {

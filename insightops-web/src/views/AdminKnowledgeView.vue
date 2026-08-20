@@ -323,6 +323,8 @@ onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer)
           <option value="OFFICIAL_DOCUMENTATION">官方文档</option>
           <option value="MIGRATION_GUIDE">迁移指南</option>
           <option value="OFFICIAL_RELEASE_NOTES">官方发布说明</option>
+          <option value="OFFICIAL_BLOG_RSS">官方博客 RSS / Atom</option>
+          <option value="OFFICIAL_ROADMAP">官方 Roadmap / GitHub Milestones</option>
         </select>
       </label>
       <label>采集周期（小时）<input v-model.number="sourceForm.syncIntervalHours" type="number" min="1" max="720" required></label>
@@ -416,7 +418,7 @@ onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer)
     </article>
 
     <div class="knowledge-source-grid">
-      <article v-for="source in sources" :key="source.sourceId" class="panel knowledge-source-card">
+      <article v-for="source in sources.filter(item => item.sourceType !== 'USER_UPLOAD')" :key="source.sourceId" class="panel knowledge-source-card">
         <header>
           <div><span class="eyebrow">{{ source.projectName }}</span><h3>{{ source.name }}</h3></div>
           <i class="status-pill" :class="statusClass(source)">{{ statusLabel(source) }}</i>

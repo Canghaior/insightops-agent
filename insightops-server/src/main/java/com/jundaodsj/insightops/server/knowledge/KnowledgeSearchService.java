@@ -36,10 +36,20 @@ public class KnowledgeSearchService {
     }
 
     public SearchResponse search(UUID workspaceId, String query, int limit) {
-        return search(null, workspaceId, query, limit);
+        return searchVisible(null, workspaceId, null, true, query, limit);
     }
 
     public SearchResponse search(UUID runId, UUID workspaceId, String query, int limit) {
+        return searchVisible(runId, workspaceId, null, true, query, limit);
+    }
+
+    public SearchResponse searchForUser(UUID runId, UUID workspaceId, UUID viewerUserId,
+                                        boolean systemAdmin, String query, int limit) {
+        return searchVisible(runId, workspaceId, viewerUserId, systemAdmin, query, limit);
+    }
+
+    private SearchResponse searchVisible(UUID runId, UUID workspaceId, UUID viewerUserId,
+                                         boolean systemAdmin, String query, int limit) {
         Instant startedAt = clock.instant();
         List<KnowledgeEmbeddingStore.SearchResult> vectorResults = List.of();
         boolean vectorAvailable = properties.isEnabled();
@@ -50,8 +60,12 @@ public class KnowledgeSearchService {
                         || vectors.getFirst().length != properties.getDimensions()) {
                     throw new IllegalStateException("Embedding model returned an invalid vector");
                 }
-                vectorResults = store.search(workspaceId, properties.getModel(), vectors.getFirst(),
-                        Math.max(1, Math.min(50, limit * 2)), properties.getMinimumScore());
+                int candidateLimit = Math.max(1, Math.min(50, limit * 2));
+                vectorResults = systemAdmin
+                        ? store.search(workspaceId, properties.getModel(), vectors.getFirst(),
+                                candidateLimit, properties.getMinimumScore())
+                        : store.searchVisible(workspaceId, viewerUserId, false, properties.getModel(),
+                                vectors.getFirst(), candidateLimit, properties.getMinimumScore());
             }
             catch (RuntimeException exception) {
                 vectorAvailable = false;
@@ -59,8 +73,10 @@ public class KnowledgeSearchService {
         }
         List<KnowledgeEmbeddingStore.SearchResult> keywordResults;
         try {
-            keywordResults = store.searchKeyword(workspaceId, query,
-                    Math.max(1, Math.min(50, limit * 2)));
+            int candidateLimit = Math.max(1, Math.min(50, limit * 2));
+            keywordResults = systemAdmin
+                    ? store.searchKeyword(workspaceId, query, candidateLimit)
+                    : store.searchKeywordVisible(workspaceId, viewerUserId, false, query, candidateLimit);
         }
         catch (RuntimeException exception) {
             if (!vectorAvailable) {

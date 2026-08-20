@@ -18,10 +18,10 @@ RUN ./mvnw --batch-mode --no-transfer-progress \
     -pl insightops-server -am clean package -DskipTests
 
 FROM eclipse-temurin:21-jre-jammy
-RUN apt-get update && apt-get install -y --no-install-recommends curl fonts-noto-cjk \
+RUN apt-get update && apt-get install -y --no-install-recommends curl fonts-noto-cjk tar \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system insightops \
-    && useradd --system --gid insightops --home-dir /app --shell /usr/sbin/nologin insightops
+    && groupadd --system --gid 10001 insightops \
+    && useradd --system --uid 10001 --gid 10001 --home-dir /app --shell /usr/sbin/nologin insightops
 WORKDIR /app
 COPY --from=build /workspace/insightops-server/target/insightops-server-0.1.0-SNAPSHOT.jar app.jar
 RUN chown -R insightops:insightops /app

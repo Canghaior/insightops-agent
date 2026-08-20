@@ -15,6 +15,7 @@ const router = createRouter({
     { path: '/digests', name: 'digests', component: () => import('@/views/DigestsView.vue') },
     { path: '/reports', name: 'reports', component: () => import('@/views/ReportsView.vue') },
     { path: '/chat', name: 'chat', component: () => import('@/views/ChatView.vue') },
+    { path: '/knowledge-files', name: 'knowledge-files', component: () => import('@/views/KnowledgeFilesView.vue') },
     { path: '/memory', name: 'memory', component: () => import('@/views/MemoryView.vue') },
     { path: '/runs', name: 'runs', component: () => import('@/views/RunsView.vue') },
     { path: '/runs/:runId', name: 'run-detail', component: () => import('@/views/RunsView.vue') },

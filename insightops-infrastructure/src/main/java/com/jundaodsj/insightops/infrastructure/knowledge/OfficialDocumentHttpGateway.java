@@ -1,5 +1,7 @@
 package com.jundaodsj.insightops.infrastructure.knowledge;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.knowledge.application.DocumentCollectionException;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
 import com.jundaodsj.insightops.knowledge.application.OfficialDocumentGateway;
@@ -8,6 +10,7 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.parser.Parser;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayOutputStream;
@@ -46,21 +49,55 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
 
     private final HttpClient http;
     private final KnowledgeDocumentChunker chunker;
+    private final ObjectMapper json;
+    private final SyndicationFeedParser feedParser;
+    private final UploadedDocumentCollector uploadCollector;
+    private final String githubToken;
 
     @Autowired
+    public OfficialDocumentHttpGateway(KnowledgeDocumentChunker chunker, ObjectMapper json,
+                                       UploadedDocumentCollector uploadCollector,
+                                       @Value("${insightops.tool.github.token:}") String githubToken) {
+        this(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
+                .followRedirects(HttpClient.Redirect.NEVER).build(), chunker, json, uploadCollector, githubToken);
+    }
+
     public OfficialDocumentHttpGateway(KnowledgeDocumentChunker chunker) {
         this(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
-                .followRedirects(HttpClient.Redirect.NEVER).build(), chunker);
+                .followRedirects(HttpClient.Redirect.NEVER).build(), chunker, new ObjectMapper(), null, "");
     }
 
     OfficialDocumentHttpGateway(HttpClient http, KnowledgeDocumentChunker chunker) {
+        this(http, chunker, new ObjectMapper(), null, "");
+    }
+
+    OfficialDocumentHttpGateway(HttpClient http, KnowledgeDocumentChunker chunker, ObjectMapper json,
+                                UploadedDocumentCollector uploadCollector, String githubToken) {
         this.http = http;
         this.chunker = chunker;
+        this.json = json;
+        this.feedParser = new SyndicationFeedParser();
+        this.uploadCollector = uploadCollector;
+        this.githubToken = githubToken == null ? "" : githubToken.trim();
     }
 
     @Override
     public List<KnowledgeStore.DocumentPage> collect(KnowledgeStore.SourceTask source, CrawlOptions options,
                                                      ProgressListener progressListener) {
+        if ("USER_UPLOAD".equals(source.sourceType())) {
+            if (uploadCollector == null) {
+                throw new DocumentCollectionException(DocumentCollectionException.Code.INTERNAL_ERROR,
+                        "Upload collector is unavailable");
+            }
+            return uploadCollector.collect(source, options, progressListener);
+        }
+        if ("OFFICIAL_BLOG_RSS".equals(source.sourceType())) {
+            return collectFeed(source, options, progressListener);
+        }
+        if ("OFFICIAL_ROADMAP".equals(source.sourceType())
+                && source.allowedHost().equalsIgnoreCase("api.github.com")) {
+            return collectGitHubMilestones(source, options, progressListener);
+        }
         URI discovery = validate(source.discoveryUrl(), source, true);
         int maxPages = Math.max(1, options.maxPages());
         report(progressListener, maxPages, 0, 0, 0, discovery.toString());
@@ -119,6 +156,88 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
                     "Official documentation source returned no collectable text pages");
         }
         return List.copyOf(pages);
+    }
+
+    private List<KnowledgeStore.DocumentPage> collectFeed(
+            KnowledgeStore.SourceTask source, CrawlOptions options, ProgressListener listener) {
+        URI discovery = validate(source.discoveryUrl(), source, true);
+        int maxPages = Math.max(1, options.maxPages());
+        report(listener, maxPages, 1, 0, 0, discovery.toString());
+        FetchResult fetched = fetch(discovery, source, options, true, true);
+        if (fetched.notModified()) {
+            report(listener, maxPages, 1, 1, 0, discovery.toString());
+            return List.of();
+        }
+        List<SyndicationFeedParser.FeedItem> items;
+        try {
+            items = feedParser.parse(fetched.body(), discovery.toString(), maxPages);
+        } catch (IllegalArgumentException exception) {
+            throw new DocumentCollectionException(DocumentCollectionException.Code.UNSUPPORTED_CONTENT,
+                    "Official RSS/Atom feed could not be parsed", exception);
+        }
+        List<KnowledgeStore.DocumentPage> pages = new ArrayList<>();
+        int visited = 0;
+        for (var item : items) {
+            visited++;
+            URI canonical;
+            try {
+                canonical = validate(item.link(), source, false);
+            } catch (DocumentCollectionException exception) {
+                continue;
+            }
+            report(listener, maxPages, items.size(), visited, pages.size(), canonical.toString());
+            var chunks = chunker.chunk(item.content(), options.chunkMaxTokens(), options.chunkOverlapTokens());
+            if (!chunks.isEmpty()) {
+                pages.add(new KnowledgeStore.DocumentPage(canonical.toString(), item.title(), "en",
+                        truncate(item.published(), 128), KnowledgeDocumentChunker.sha256(item.content()),
+                        item.content(), fetched.etag(), fetched.lastModified(), chunks));
+            }
+            report(listener, maxPages, items.size(), visited, pages.size(), canonical.toString());
+        }
+        if (pages.isEmpty()) {
+            throw new DocumentCollectionException(DocumentCollectionException.Code.UNSUPPORTED_CONTENT,
+                    "RSS/Atom feed returned no entries inside the registered source boundary");
+        }
+        return List.copyOf(pages);
+    }
+
+    private List<KnowledgeStore.DocumentPage> collectGitHubMilestones(
+            KnowledgeStore.SourceTask source, CrawlOptions options, ProgressListener listener) {
+        URI discovery = validate(source.discoveryUrl(), source, true);
+        int maxPages = Math.max(1, options.maxPages());
+        report(listener, maxPages, 1, 0, 0, discovery.toString());
+        FetchResult fetched = fetch(discovery, source, options, true, true);
+        if (fetched.notModified()) {
+            report(listener, maxPages, 1, 1, 0, discovery.toString());
+            return List.of();
+        }
+        try {
+            JsonNode root = json.readTree(fetched.body());
+            if (!root.isArray()) throw new IllegalArgumentException("Milestone response is not an array");
+            List<KnowledgeStore.DocumentPage> pages = new ArrayList<>();
+            int discovered = Math.min(root.size(), maxPages);
+            for (JsonNode milestone : root) {
+                if (pages.size() >= maxPages) break;
+                int number = milestone.path("number").asInt(0);
+                String title = milestone.path("title").asText("Milestone " + number).strip();
+                String url = safeGitHubUrl(milestone.path("html_url").asText(), source, number);
+                String content = "# " + title + "\n\nState: " + milestone.path("state").asText("open")
+                        + "\n\nDue: " + milestone.path("due_on").asText("not set")
+                        + "\n\nOpen issues: " + milestone.path("open_issues").asInt(0)
+                        + "\n\nClosed issues: " + milestone.path("closed_issues").asInt(0)
+                        + "\n\n" + milestone.path("description").asText("").strip();
+                var chunks = chunker.chunk(content, options.chunkMaxTokens(), options.chunkOverlapTokens());
+                if (!chunks.isEmpty()) pages.add(new KnowledgeStore.DocumentPage(url, title, "en",
+                        truncate(milestone.path("updated_at").asText(), 128),
+                        KnowledgeDocumentChunker.sha256(content), content,
+                        fetched.etag(), fetched.lastModified(), chunks));
+                report(listener, maxPages, discovered, pages.size(), pages.size(), url);
+            }
+            return List.copyOf(pages);
+        } catch (IOException | IllegalArgumentException exception) {
+            throw new DocumentCollectionException(DocumentCollectionException.Code.UNSUPPORTED_CONTENT,
+                    "GitHub milestone roadmap could not be parsed", exception);
+        }
     }
 
     private static void report(ProgressListener listener, int maxPages, int discoveredUrls,
@@ -194,17 +313,36 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
 
     private FetchResult fetch(URI initial, KnowledgeStore.SourceTask source,
                               CrawlOptions options, boolean discoveryResource) {
+        return fetch(initial, source, options, discoveryResource, false);
+    }
+
+    private FetchResult fetch(URI initial, KnowledgeStore.SourceTask source,
+                              CrawlOptions options, boolean discoveryResource, boolean conditional) {
         URI current = initial;
         for (int redirects = 0; redirects <= 3; redirects++) {
             validateResolved(current, source, discoveryResource);
-            HttpRequest request = HttpRequest.newBuilder(current)
+            HttpRequest.Builder builder = HttpRequest.newBuilder(current)
                     .GET().timeout(options.requestTimeout())
                     .header("User-Agent", USER_AGENT)
-                    .header("Accept", "text/html,text/markdown,text/plain,application/xhtml+xml,application/xml;q=0.7")
-                    .build();
+                    .header("Accept", "text/html,text/markdown,text/plain,application/xhtml+xml,application/xml,application/rss+xml,application/atom+xml,application/json;q=0.8");
+            if (conditional && source.fetchEtag() != null && !source.fetchEtag().isBlank()) {
+                builder.header("If-None-Match", source.fetchEtag());
+            }
+            if (conditional && source.fetchLastModified() != null && !source.fetchLastModified().isBlank()) {
+                builder.header("If-Modified-Since", source.fetchLastModified());
+            }
+            if ("api.github.com".equalsIgnoreCase(current.getHost()) && !githubToken.isBlank()) {
+                builder.header("Authorization", "Bearer " + githubToken);
+            }
+            HttpRequest request = builder.build();
             try {
                 HttpResponse<InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
                 int status = response.statusCode();
+                if (status == 304 && conditional) {
+                    response.body().close();
+                    return new FetchResult(current, "", response.headers().firstValue("content-type").orElse(""),
+                            source.fetchEtag(), source.fetchLastModified(), true);
+                }
                 if (status >= 300 && status < 400) {
                     String location = response.headers().firstValue("location").orElseThrow(() ->
                             new DocumentCollectionException(DocumentCollectionException.Code.HTTP_ERROR,
@@ -232,7 +370,7 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
                 String contentType = response.headers().firstValue("content-type").orElse("text/plain");
                 return new FetchResult(current, new String(bytes, StandardCharsets.UTF_8), contentType,
                         response.headers().firstValue("etag").orElse(null),
-                        response.headers().firstValue("last-modified").orElse(null));
+                        response.headers().firstValue("last-modified").orElse(null), false);
             } catch (java.net.http.HttpTimeoutException exception) {
                 throw new DocumentCollectionException(DocumentCollectionException.Code.TIMEOUT,
                         "Official documentation request timed out", exception);
@@ -367,6 +505,47 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
         return name.isBlank() ? uri.getHost() : name.replace(".md", "").replace('-', ' ');
     }
 
+    private static String safeGitHubUrl(String raw, KnowledgeStore.SourceTask source, int number) {
+        try {
+            URI value = URI.create(raw).normalize();
+            if ("https".equalsIgnoreCase(value.getScheme())
+                    && "github.com".equalsIgnoreCase(value.getHost())
+                    && value.getUserInfo() == null && value.getPort() == -1
+                    && githubMilestonePathMatchesSource(value.getPath(), source)) {
+                return strip(value).toString();
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Use the registered API resource as the canonical fallback.
+        }
+        String base = source.rootUrl().endsWith("/")
+                ? source.rootUrl().substring(0, source.rootUrl().length() - 1) : source.rootUrl();
+        return validate(base + "/" + Math.max(0, number), source, false).toString();
+    }
+
+    private static boolean githubMilestonePathMatchesSource(String htmlPath, KnowledgeStore.SourceTask source) {
+        String apiPath = URI.create(source.discoveryUrl()).getPath();
+        String prefix = "/repos/";
+        String suffix = "/milestones";
+        if (apiPath == null || !apiPath.startsWith(prefix) || !apiPath.endsWith(suffix)) return false;
+        String repository = apiPath.substring(prefix.length(), apiPath.length() - suffix.length());
+        String[] parts = repository.split("/");
+        if (parts.length != 2 || htmlPath == null) return false;
+        String expected = "/" + parts[0] + "/" + parts[1] + "/milestone/";
+        if (!htmlPath.startsWith(expected)) return false;
+        String number = htmlPath.substring(expected.length());
+        if (number.isBlank() || number.contains("/")) return false;
+        try {
+            return Integer.parseInt(number) > 0;
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
+    }
+
+    private static String truncate(String value, int max) {
+        if (value == null || value.isBlank()) return null;
+        return value.length() <= max ? value : value.substring(0, max);
+    }
+
     private static Element first(Document document, String... selectors) {
         for (String selector : selectors) {
             Element element = document.selectFirst(selector);
@@ -432,6 +611,7 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
     }
 
     private record Candidate(URI uri, int depth) { }
-    private record FetchResult(URI uri, String body, String contentType, String etag, String lastModified) { }
+    private record FetchResult(URI uri, String body, String contentType, String etag,
+                               String lastModified, boolean notModified) { }
     private record ParsedPage(String title, String language, String content, List<String> links) { }
 }

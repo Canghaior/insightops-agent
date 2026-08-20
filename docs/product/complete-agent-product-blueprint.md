@@ -1,7 +1,7 @@
 # InsightOps Agent 完整产品蓝图与完成度清单
 
 > 文档状态：当前产品事实与后续总路线的统一基线
-> 版本：v1.2
+> 版本：v1.3
 > 创建日期：2026-08-18
 > 最近更新：2026-08-20
 > 适用项目：InsightOps Agent
@@ -78,7 +78,7 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 - 容器已配置健康检查、重启策略、日志轮转和内存上限。
 - 已具备部署前数据库备份、部署健康检查和失败回滚脚本。
 - 已使用 GHCR 保存 Server、Worker、Web 镜像。
-- 生产提交 `9449553` 已通过备份、镜像更新、六服务健康检查和公网回归完成部署。
+- 生产提交 `6bf6637af9a200992e9266fdb90bdf5daca7025a` 已通过数据库与上传卷联合备份、镜像更新、核心服务与监控健康检查和公网回归完成部署。
 
 ### 4.3 登录、账户与权限基础
 
@@ -215,7 +215,8 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 - 用户可上传 Markdown、TXT 和 PDF；文件使用不可预测 UUID 落盘，实施 20 MB、500 页、200 万字符和 Workspace 总量配额，并支持私有/Workspace 可见性、失败重试、下载和删除。
 - 项目种子扩展到 10 个真实 Java/AI 仓库，首次采集错峰进入现有租约、心跳、退避和重放链路；“长期稳定持续采集”仍需生产时间窗观察后关闭。
 - server 与 worker 使用固定非 root UID/GID，共享上传卷由一次性初始化容器设置权限；生产备份和恢复同时覆盖数据库、上传文件及校验清单。
-- Prometheus 已采集应用指标，并配置采集失败、任务卡死、队列积压、高 5xx 和磁盘空间 5 条关键告警；Grafana 保持可选 `observability` Profile。
+- Prometheus 与 Grafana 已通过 `observability` Profile 在生产启用并仅绑定回环地址；Server/Worker Target 均为 `up`，采集失败、任务卡死、队列积压、高 5xx 和磁盘空间 5 条关键规则已加载。
+- P1.9-A/B/C 已于 2026-08-20 完成功能与即时生产验收，详见 `docs/testing/results/p1-9-sources-uploads-stability-production-acceptance-2026-08-20.md`；10 项目长期稳定性仍需观察。
 - 设计与运维边界详见 `docs/architecture/p1-9-sources-uploads-stability.md`。
 
 ### 4.15 测试与持续集成
@@ -225,7 +226,7 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 - 前端 ESLint 通过。
 - 前端生产构建通过。
 - GitHub Actions 已配置后端验证、前端 lint/test/build 和三个镜像构建。
-- GitHub `production` Environment Secrets 已完成配置，P1.8 最终 CI Run `32362244974` 和生产部署 Run `32362658160` 均成功。
+- GitHub `production` Environment Secrets 已完成配置；P1.9 最终 CI Run `32384100581` 和生产部署 Run `32384377838` 均成功。
 - Dependabot 已覆盖 Maven、npm 和 GitHub Actions 依赖。
 
 ## 5. 当前部分完成的能力
@@ -301,14 +302,14 @@ P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `do
 - 没有项目级权限。
 - 没有所有权移交和成员退出流程。
 
-### 5.6 运维能力已有脚本但未全部形成闭环
+### 5.6 本机监控与备份已闭环，异地容灾仍待完成
 
-- Prometheus 和 Grafana 已有配置，但位于可选 `observability` Profile，默认生产部署不会自动启动。
-- 当前没有确认应用级监控和告警已经在生产启用。
-- 已有备份脚本，但没有确认每日 Cron 已配置。
+- Prometheus 和 Grafana 已通过 `observability` Profile 在生产启用，且仅绑定服务器回环地址。
+- Server/Worker Target 均为 `up`，5 条关键告警规则已加载；告警外发仍需接入 Alertmanager。
+- 数据库与上传卷联合备份已在真实部署中生成并通过校验，每日 03:17 的 Cron 已配置，使用 `flock` 防止重入。
 - 没有确认备份已加密同步到服务器之外。
-- 没有真实完成一次灾难恢复演练。
-- GitHub 生产部署 Workflow、专用部署密钥和五项 `production` Environment Secrets 已配置并完成两次真实部署验收。
+- 没有在隔离环境真实完成一次灾难恢复演练。
+- GitHub 生产部署 Workflow、专用部署密钥和五项 `production` Environment Secrets 已配置；P1.9 最终部署与公网回归成功。
 - 当前生产发布已以 GitHub Actions 为主，管理员 SSH 会话保留为故障处置通道。
 
 ### 5.7 安全能力仍是封闭 Alpha 水平
@@ -575,7 +576,7 @@ Owner 和系统管理员已经可以通过页面管理 GitHub 仓库，系统也
 - [ ] 采集成功率达到 95% 以上。
 - [ ] 用户可以完成登录、连续提问、查看历史、查看引用和查看执行记录。
 - [ ] 每日备份、异地副本和恢复演练形成记录。
-- [ ] 应用级监控和关键告警启用。
+- [x] 应用级监控和关键告警启用（Prometheus/Grafana、双 Target 与 5 条规则已完成生产验收；告警外发待接入 Alertmanager）。
 - [x] GitHub Actions 生产部署真实成功执行一次。
 
 ### 9.2 可配置技术情报产品完成标准
@@ -647,7 +648,7 @@ Owner 和系统管理员已经可以通过页面管理 GitHub 仓库，系统也
 1. 注册、邀请、找回密码和 MFA。
 2. 完整团队 Workspace。
 3. 配额、用量和计费。
-4. Prometheus、Grafana 和告警正式启用。
+4. [x] Prometheus、Grafana 和应用告警规则正式启用；Alertmanager 外发待补充。
 5. 异地备份和定期恢复演练。
 6. 安全扫描、WAF/CDN 和合规文档。
 

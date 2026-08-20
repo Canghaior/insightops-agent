@@ -71,5 +71,12 @@ if [[ "$deployment_ok" != "true" ]]; then
   exit 1
 fi
 
+if grep -q '^IMAGE_TAG=' "$ENV_FILE"; then
+  sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$requested_tag/" "$ENV_FILE"
+else
+  printf '\nIMAGE_TAG=%s\n' "$requested_tag" >> "$ENV_FILE"
+fi
+chmod 600 "$ENV_FILE"
+
 printf '%s\n' "$requested_tag" > "$STATE_DIR/last-successful-tag"
 echo "Deployment $requested_tag is healthy"

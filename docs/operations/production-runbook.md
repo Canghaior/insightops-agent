@@ -19,7 +19,9 @@ docker compose --env-file .env.prod -f infra/compose.prod.yml logs --tail=200 ca
 bash scripts/deploy-prod.sh 完整Git提交SHA
 ```
 
-脚本流程：生产预检 -> 当前数据库备份 -> 拉取镜像 -> 启动 -> 检查 PostgreSQL、Ollama、Server、Worker、Web -> 记录成功标签。健康检查失败且已有成功标签时自动回滚。
+脚本流程：生产预检 -> 当前数据库备份 -> 拉取镜像 -> 启动 -> 检查 PostgreSQL、Ollama、Server、Worker、Web -> 记录成功标签并把 `IMAGE_TAG` 写回权限为 `600` 的 `.env.prod`。持久化只在全部健康检查通过后发生，保证后续手工 Compose 命令继续使用已验收的不可变 SHA，而不会退回本地陈旧的 `latest`。健康检查失败且已有成功标签时自动回滚。
+
+不要手工把生产 `IMAGE_TAG` 改回 `latest`。首次部署或历史环境尚未持久化 SHA 时，先执行一次 `deploy-prod.sh`，再运行其他 Compose 运维命令。
 
 紧急手工回滚：
 
@@ -47,7 +49,7 @@ backups/insightops-<UTC时间>.sha256
 Cron 示例：
 
 ```cron
-17 3 * * * cd /opt/insightops-agent && /usr/bin/bash scripts/backup-prod.sh >> /var/log/insightops-backup.log 2>&1
+17 3 * * * cd /opt/insightops-agent && /usr/bin/flock -n /tmp/insightops-backup.lock /usr/bin/bash scripts/backup-prod.sh >> backups/backup-cron.log 2>&1
 ```
 
 ## 恢复
@@ -70,6 +72,8 @@ docker compose --profile observability --env-file .env.prod -f infra/compose.pro
 curl --fail --silent http://127.0.0.1:9090/-/ready
 curl --fail --silent http://127.0.0.1:3000/api/health
 ```
+
+这些命令依赖 `.env.prod` 中由成功部署持久化的 `IMAGE_TAG`。若 Compose 提示要重建 Server/Worker，应先停止操作并核对该值，不要用 `latest` 继续。
 
 如需从本地访问，使用 SSH 隧道，不要开放公网端口：
 

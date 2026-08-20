@@ -42,18 +42,27 @@ if docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps --status running 
   bash "$ROOT_DIR/scripts/backup-prod.sh"
 fi
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull server worker web
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans
-
 deployment_ok=true
-for service in postgres ollama server worker web caddy; do
-  if ! wait_for_health "$service"; then
-    echo "Health check failed for $service" >&2
-    deployment_ok=false
-    break
-  fi
-done
+if ! docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans; then
+  echo "Compose startup failed" >&2
+  deployment_ok=false
+fi
+
+if [[ "$deployment_ok" == "true" ]]; then
+  for service in postgres ollama server worker web caddy; do
+    if ! wait_for_health "$service"; then
+      echo "Health check failed for $service" >&2
+      deployment_ok=false
+      break
+    fi
+  done
+fi
 
 if [[ "$deployment_ok" != "true" ]]; then
+  echo "Deployment diagnostics for $requested_tag" >&2
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps >&2 || true
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+    logs --tail 200 --no-color server worker web >&2 || true
   if [[ -n "$previous_tag" && "$previous_tag" != "$requested_tag" ]]; then
     echo "Rolling back from $requested_tag to $previous_tag" >&2
     export IMAGE_TAG="$previous_tag"

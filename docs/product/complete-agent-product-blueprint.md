@@ -188,6 +188,7 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 - 已产生文档的知识源锁定项目、根 URL 与路径边界；仍可修改名称、类型、发现 URL 和 1～720 小时采集周期。
 - 当前配置化范围是 GitHub Release 与官方知识源；Issue、PR、Security Advisory、RSS 和用户级关注关键词仍属于后续阶段。
 - 生产验收详见 `docs/testing/results/p1-configurable-projects-production-acceptance-2026-08-20.md`。
+- P1.5-B 生产验收详见 `docs/testing/results/p1-configurable-knowledge-sources-and-routing-production-acceptance-2026-08-20.md`。
 
 ### 4.12 测试与持续集成
 
@@ -196,7 +197,7 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 - 前端 ESLint 通过。
 - 前端生产构建通过。
 - GitHub Actions 已配置后端验证、前端 lint/test/build 和三个镜像构建。
-- GitHub `production` Environment Secrets 已完成配置，生产部署 Workflow Run `32271708481` 和 P1.5-A Run `32275352256` 均真实部署成功。
+- GitHub `production` Environment Secrets 已完成配置，P1.5-B CI Run `32336167376` 和生产部署 Run `32336407366` 均成功。
 - Dependabot 已覆盖 Maven、npm 和 GitHub Actions 依赖。
 
 ## 5. 当前部分完成的能力

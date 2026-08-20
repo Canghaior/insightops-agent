@@ -1,5 +1,6 @@
 package com.jundaodsj.insightops.server.api;
 
+import com.jundaodsj.insightops.infrastructure.delivery.WebhookUrlPolicy;
 import com.jundaodsj.insightops.report.application.ReportDeliveryStore;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,6 +34,7 @@ public class ReportDeliveryController {
     public ApiResponse<ReportDeliveryStore.DeliveryChannel> createChannel(
             @Valid @RequestBody ChannelRequest body, HttpServletRequest request) {
         try {
+            WebhookUrlPolicy.syntax(body.endpointUrl());
             return response(request, store.createChannel(CurrentAccount.actor(request), UUID.randomUUID(),
                     body.name(), body.endpointUrl(), body.enabled(), Instant.now()));
         } catch (IllegalArgumentException exception) {
@@ -45,6 +47,9 @@ public class ReportDeliveryController {
             @PathVariable UUID channelId, @Valid @RequestBody ChannelRequest body,
             HttpServletRequest request) {
         try {
+            if (body.endpointUrl() != null && !body.endpointUrl().isBlank()) {
+                WebhookUrlPolicy.syntax(body.endpointUrl());
+            }
             return response(request, store.updateChannel(CurrentAccount.actor(request), channelId,
                     body.name(), body.endpointUrl(), body.enabled(), Instant.now()).orElseThrow(
                     () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Delivery channel not found")));

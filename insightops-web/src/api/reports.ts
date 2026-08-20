@@ -33,6 +33,26 @@ export interface DeliveryRecord {
 }
 export interface DeliveryPage { items: DeliveryRecord[]; page: number; size: number; total: number }
 
+export function isPublicHttpsWebhookUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw)
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    if (url.protocol !== 'https:' || !host || url.username || url.password || url.hash) return false
+    if (url.port && url.port !== '443') return false
+    if (host === 'localhost' || host.endsWith('.localhost')) return false
+    if (host === '::1' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:')) return false
+    const octets = host.split('.').map(Number)
+    if (octets.length === 4 && octets.every(value => Number.isInteger(value) && value >= 0 && value <= 255)) {
+      const [first, second] = octets
+      if (first === 10 || first === 127 || first === 0 || first >= 224
+        || (first === 169 && second === 254) || (first === 172 && second >= 16 && second <= 31)
+        || (first === 192 && second === 168) || (first === 100 && second >= 64 && second <= 127)) return false
+    }
+    return true
+  }
+  catch { return false }
+}
+
 export async function listReports(): Promise<ReportPage> {
   const response = await apiClient.get<{ data: ReportPage }>('/reports', { params: { page: 0, size: 50 } })
   return response.data.data

@@ -1,11 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { apiClient } from './client'
-import { createDeliveryChannel, createReport, downloadReport, enqueueReportDelivery } from './reports'
+import {
+  createDeliveryChannel, createReport, downloadReport, enqueueReportDelivery, isPublicHttpsWebhookUrl,
+} from './reports'
 
 afterEach(() => vi.restoreAllMocks())
 
 describe('report delivery api', () => {
+  it('accepts only syntactically public HTTPS webhook URLs', () => {
+    expect(isPublicHttpsWebhookUrl('https://hooks.example.com/token')).toBe(true)
+    expect(isPublicHttpsWebhookUrl('http://hooks.example.com/token')).toBe(false)
+    expect(isPublicHttpsWebhookUrl('https://127.0.0.1/token')).toBe(false)
+    expect(isPublicHttpsWebhookUrl('https://192.168.1.20/token')).toBe(false)
+    expect(isPublicHttpsWebhookUrl('https://user:pass@hooks.example.com/token')).toBe(false)
+  })
+
   it('creates a bounded report query', async () => {
     const post = vi.spyOn(apiClient, 'post').mockResolvedValue({
       data: { data: { id: 'r1', title: 'Weekly report', items: [], itemCount: 1, highRiskCount: 0 } },

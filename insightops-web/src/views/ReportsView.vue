@@ -5,7 +5,8 @@ import { listProjects, type ProjectWatch } from '@/api/projects'
 import {
   createDeliveryChannel, createReport, deleteDeliveryChannel, downloadReport,
   enqueueReportDelivery, listDeliveryChannels, listReportDeliveries, listReports,
-  retryReportDelivery, updateDeliveryChannel, type DeliveryChannel, type DeliveryRecord,
+  retryReportDelivery, updateDeliveryChannel, isPublicHttpsWebhookUrl,
+  type DeliveryChannel, type DeliveryRecord,
   type ReportEventType, type ResearchReport,
 } from '@/api/reports'
 
@@ -89,6 +90,9 @@ async function download(report: ResearchReport, format: 'md' | 'pdf') {
 
 async function addChannel() {
   if (!channelName.value.trim() || !endpointUrl.value.trim()) { error.value = '请填写渠道名称和 HTTPS Webhook 地址。'; return }
+  if (!isPublicHttpsWebhookUrl(endpointUrl.value.trim())) {
+    error.value = 'Webhook 地址必须使用公网 HTTPS，且不能指向本机或私网。'; return
+  }
   saving.value = true; error.value = ''
   try {
     await createDeliveryChannel(channelName.value.trim(), endpointUrl.value.trim())

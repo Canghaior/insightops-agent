@@ -6,7 +6,7 @@ export type Recommendation = 'WATCH' | 'TRY' | 'UPGRADE'
 
 export interface AnalysisSummary {
   analysisId: string; eventId: string; projectId: string; projectName: string
-  versionTag: string; releaseTitle: string; sourceUrl: string; status: AnalysisStatus
+  versionTag: string | null; releaseTitle: string; sourceUrl: string; status: AnalysisStatus
   riskLevel: RiskLevel | null; recommendation: Recommendation | null
   evidenceStatus: 'SUFFICIENT' | 'INSUFFICIENT' | null; oneLineSummary: string | null
   occurredAt: string; completedAt: string | null
@@ -28,7 +28,7 @@ export interface DigestSummary {
 export interface DigestPage { items: DigestSummary[]; page: number; size: number; total: number; unreadCount: number }
 export interface NotificationItem {
   id: string; type: string; severity: 'INFO' | 'WARNING' | 'CRITICAL'; title: string
-  body: string; entityId: string; read: boolean; createdAt: string
+  body: string; entityId: string; read: boolean; createdAt: string; sourceUrl: string | null
 }
 export interface NotificationPage { items: NotificationItem[]; page: number; size: number; total: number; unreadCount: number }
 

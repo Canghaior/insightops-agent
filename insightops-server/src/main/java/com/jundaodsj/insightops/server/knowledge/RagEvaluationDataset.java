@@ -12,7 +12,7 @@ import java.util.List;
 
 @Component
 public class RagEvaluationDataset {
-    public static final String NAME = "p1-rag-questions-v2";
+    public static final String NAME = "p1-rag-questions-v3-50";
     private final ObjectMapper json;
 
     public RagEvaluationDataset(ObjectMapper json) {

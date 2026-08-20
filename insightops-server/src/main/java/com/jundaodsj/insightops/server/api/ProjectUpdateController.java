@@ -31,9 +31,13 @@ public class ProjectUpdateController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) UUID projectId,
             @RequestParam(defaultValue = "false") boolean unreadOnly,
+            @RequestParam(required = false) String eventType,
+            @RequestParam(required = false) String riskLevel,
+            @RequestParam(defaultValue = "false") boolean matchedOnly,
             HttpServletRequest request) {
         return response(request, store.listUpdates(
-                CurrentAccount.actor(request), page, size, projectId, unreadOnly));
+                CurrentAccount.actor(request), page, size, projectId, unreadOnly,
+                eventType, riskLevel, matchedOnly));
     }
 
     @GetMapping("/unread-count")

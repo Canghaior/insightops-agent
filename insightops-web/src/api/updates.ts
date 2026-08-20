@@ -5,10 +5,15 @@ export interface ProjectUpdate {
   projectId: string
   projectName: string
   repositoryOwner: string
-  versionTag: string
+  eventType: 'GITHUB_RELEASE' | 'GITHUB_ISSUE' | 'GITHUB_PULL_REQUEST' | 'GITHUB_SECURITY_ADVISORY'
+  versionTag: string | null
   title: string
   summary: string
   sourceUrl: string
+  state: string | null
+  authorLogin: string | null
+  labels: string[]
+  importance: number
   prerelease: boolean
   occurredAt: string
   collectedAt: string
@@ -18,6 +23,7 @@ export interface ProjectUpdate {
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | null
   recommendation: 'WATCH' | 'TRY' | 'UPGRADE' | null
   intelligenceSummary: string | null
+  matchedRuleCount: number
 }
 
 export interface UpdatePage {
@@ -30,6 +36,7 @@ export interface UpdatePage {
 
 export async function listUpdates(options: {
   page?: number; size?: number; projectId?: string; unreadOnly?: boolean
+  eventType?: string; riskLevel?: string; matchedOnly?: boolean
 } = {}): Promise<UpdatePage> {
   const response = await apiClient.get<{ data: UpdatePage }>('/updates', { params: options })
   return response.data.data

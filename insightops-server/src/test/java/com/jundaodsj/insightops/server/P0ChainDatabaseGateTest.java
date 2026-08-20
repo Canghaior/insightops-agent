@@ -26,6 +26,8 @@ import com.jundaodsj.insightops.infrastructure.persistence.JdbcIntelligenceStore
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcKnowledgeStore;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeCollectionLeaseLostException;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcKnowledgeEmbeddingStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcWatchRuleStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcResearchFeedbackStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserProjectWatchStore;
 import com.jundaodsj.insightops.infrastructure.knowledge.KnowledgeDocumentChunker;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
@@ -44,6 +46,8 @@ import com.jundaodsj.insightops.tool.application.github.GitHubRelease;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseGateway;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseQuery;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseResult;
+import com.jundaodsj.insightops.tool.application.github.GitHubProjectEvent;
+import com.jundaodsj.insightops.intelligence.application.WatchRuleStore;
 import com.jundaodsj.insightops.tool.application.github.GitHubRepositoryReleaseQuery;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
@@ -97,6 +101,8 @@ class P0ChainDatabaseGateTest {
     private static JdbcIntelligenceStore intelligenceStore;
     private static JdbcKnowledgeStore knowledgeStore;
     private static JdbcKnowledgeEmbeddingStore knowledgeEmbeddingStore;
+    private static JdbcWatchRuleStore watchRuleStore;
+    private static JdbcResearchFeedbackStore feedbackStore;
 
     @BeforeAll
     static void prepareIsolatedSchema() throws Exception {
@@ -120,7 +126,7 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(17);
+        assertThat(migration.migrationsExecuted).isEqualTo(18);
 
         jdbcClient = JdbcClient.create(dataSource);
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
@@ -129,6 +135,8 @@ class P0ChainDatabaseGateTest {
         intelligenceStore = new JdbcIntelligenceStore(jdbcClient, objectMapper());
         knowledgeStore = new JdbcKnowledgeStore(jdbcClient, objectMapper());
         knowledgeEmbeddingStore = new JdbcKnowledgeEmbeddingStore(jdbcClient, objectMapper());
+        watchRuleStore = new JdbcWatchRuleStore(jdbcClient);
+        feedbackStore = new JdbcResearchFeedbackStore(jdbcClient);
         DeepSeekCostEstimator estimator = new DeepSeekCostEstimator(pricing());
         runStore = new JdbcChatRunStore(jdbcClient, estimator);
         runQuery = new JdbcAgentRunQuery(jdbcClient, objectMapper());
@@ -689,6 +697,55 @@ class P0ChainDatabaseGateTest {
         assertThat(adminProjectStore.deleteEmpty(ACTOR.workspaceId(), projectId))
                 .isEqualTo(AdminProjectStore.DeleteResult.DELETED);
         assertThat(adminProjectStore.find(ACTOR.workspaceId(), projectId)).isEmpty();
+    }
+
+    @Test
+    @Order(9)
+    void proactiveIntelligenceRulesEventsNotificationsAndFeedbackFormAClosedLoop() {
+        UUID projectId = jdbcClient.sql("""
+                select id from tracked_project
+                where workspace_id=:workspaceId and repository_name='spring-ai'
+                """).param("workspaceId", ACTOR.workspaceId()).query(UUID.class).single();
+        WatchRuleStore.WatchRule rule = watchRuleStore.create(ACTOR, new WatchRuleStore.RuleCommand(
+                "Spring AI security", projectId, List.of("security"), List.of("documentation"),
+                List.of("GITHUB_ISSUE", "GITHUB_SECURITY_ADVISORY"), 3,
+                true, true, true), Instant.now());
+        assertThat(rule.enabled()).isTrue();
+
+        var project = new ProjectUpdateStore.TrackedProject(
+                projectId, ACTOR.workspaceId(), "spring-ai", "spring-projects", "spring-ai", 6, 0);
+        GitHubProjectEvent issue = new GitHubProjectEvent(
+                "issue:999999", "GITHUB_ISSUE", "Security regression in vector store",
+                "A security regression affects vector store initialization.",
+                "https://github.com/spring-projects/spring-ai/issues/999999", "OPEN", "maintainer",
+                List.of("security", "bug"), null, 4, Instant.now(), Instant.now(),
+                "{\"number\":999999,\"state\":\"open\"}");
+        assertThat(projectUpdateStore.storeProjectEvents(project, List.of(issue), Instant.now())).isEqualTo(1);
+        assertThat(projectUpdateStore.storeProjectEvents(project, List.of(issue), Instant.now())).isZero();
+
+        ProjectUpdateStore.UpdatePage page = projectUpdateStore.listUpdates(
+                ACTOR, 0, 20, projectId, false, "GITHUB_ISSUE", null, true);
+        assertThat(page.items()).anySatisfy(item -> {
+            assertThat(item.eventType()).isEqualTo("GITHUB_ISSUE");
+            assertThat(item.matchedRuleCount()).isEqualTo(1);
+            assertThat(item.labels()).contains("security", "bug");
+        });
+        assertThat(intelligenceStore.listNotifications(ACTOR, 0, 20, false).items())
+                .anySatisfy(notification -> assertThat(notification.type()).isEqualTo("RULE_MATCH"));
+        assertThat(projectUpdateStore.searchEvents(ACTOR.workspaceId(), "", 10, List.of("GITHUB_ISSUE")))
+                .anySatisfy(event -> assertThat(event.sourceUrl()).endsWith("/issues/999999"));
+
+        UUID runId = jdbcClient.sql("""
+                select id from agent_run where owner_user_id=:userId and workspace_id=:workspaceId
+                order by created_at desc limit 1
+                """).param("userId", ACTOR.userId()).param("workspaceId", ACTOR.workspaceId())
+                .query(UUID.class).single();
+        assertThat(feedbackStore.saveAnswerFeedback(
+                ACTOR, runId, false, "MISSING_EVIDENCE", "Missing the issue evidence", Instant.now())).isTrue();
+        assertThat(feedbackStore.saveCitationFeedback(
+                ACTOR, runId, issue.sourceUrl(), true, null, Instant.now())).isTrue();
+        assertThat(jdbcClient.sql("select count(*) from research_answer_feedback where run_id=:runId")
+                .param("runId", runId).query(Long.class).single()).isEqualTo(1);
     }
 
     private static ActorContext actor(String userId) {

@@ -17,7 +17,8 @@ const unreadNotifications = ref(0)
 const navigation = [
   { path: '/', label: '概览', icon: DataAnalysis },
   { path: '/projects', label: '跟踪项目', icon: FolderOpened },
-  { path: '/updates', label: '项目更新', icon: Bell, badge: true },
+  { path: '/updates', label: '技术情报', icon: Bell, badge: true },
+  { path: '/watch-rules', label: '关注规则', icon: Operation },
   { path: '/intelligence', label: '情报分析', icon: DataAnalysis },
   { path: '/digests', label: '情报摘要', icon: Operation, noticeBadge: true },
   { path: '/chat', label: '研究问答', icon: ChatDotRound },

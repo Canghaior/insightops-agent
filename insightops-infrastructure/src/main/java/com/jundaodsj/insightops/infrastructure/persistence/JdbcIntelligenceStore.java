@@ -393,15 +393,23 @@ public class JdbcIntelligenceStore implements IntelligenceStore {
         String unread = unreadOnly ? " and read_at is null" : "";
         long total=jdbc.sql("select count(*) from user_notification where user_id=:userId and workspace_id=:workspaceId"+unread)
                 .param("userId",actor.userId()).param("workspaceId",actor.workspaceId()).query(Long.class).single();
+        String queryUnread = unreadOnly ? " and notification.read_at is null" : "";
         List<Notification> items=jdbc.sql("""
-                select id, notification_type, severity, title, body, entity_id, read_at, created_at
-                from user_notification where user_id=:userId and workspace_id=:workspaceId
-                """+unread+" order by created_at desc limit :size offset :offset")
+                select notification.id, notification.notification_type, notification.severity,
+                       notification.title, notification.body, notification.entity_id,
+                       notification.read_at, notification.created_at, snapshot.source_url
+                from user_notification notification
+                left join intelligence_event event
+                  on notification.notification_type='RULE_MATCH' and event.id=notification.entity_id
+                left join source_snapshot snapshot on snapshot.id=event.snapshot_id
+                where notification.user_id=:userId and notification.workspace_id=:workspaceId
+                """+queryUnread+" order by notification.created_at desc limit :size offset :offset")
                 .param("userId",actor.userId()).param("workspaceId",actor.workspaceId())
                 .param("size",safeSize).param("offset",safePage*safeSize)
                 .query((rs,row)->new Notification(rs.getObject("id",UUID.class),rs.getString("notification_type"),
                         rs.getString("severity"),rs.getString("title"),rs.getString("body"),
-                        rs.getObject("entity_id",UUID.class),rs.getObject("read_at")!=null,instant(rs,"created_at"))).list();
+                        rs.getObject("entity_id",UUID.class),rs.getObject("read_at")!=null,
+                        instant(rs,"created_at"),rs.getString("source_url"))).list();
         return new NotificationPage(items,safePage,safeSize,total,unreadNotifications(actor));
     }
 
@@ -423,6 +431,7 @@ public class JdbcIntelligenceStore implements IntelligenceStore {
                 select analysis.id, analysis.workspace_id, analysis.project_id, analysis.event_id,
                        project.repository_owner, project.repository_name, snapshot.version_tag,
                        event.title, event.summary, snapshot.source_url, event.occurred_at,
+                       event.event_type,
                        analysis.attempts, analysis.max_attempts, analysis.automatic
                 from intelligence_analysis analysis
                 join tracked_project project on project.id=analysis.project_id
@@ -434,7 +443,8 @@ public class JdbcIntelligenceStore implements IntelligenceStore {
                         rs.getObject("project_id",UUID.class),rs.getObject("event_id",UUID.class),
                         rs.getString("repository_owner"),rs.getString("repository_name"),rs.getString("version_tag"),
                         rs.getString("title"),rs.getString("summary"),rs.getString("source_url"),
-                        instant(rs,"occurred_at"),rs.getInt("attempts"),rs.getInt("max_attempts"),rs.getBoolean("automatic"))).single();
+                        instant(rs,"occurred_at"),rs.getInt("attempts"),rs.getInt("max_attempts"),
+                        rs.getBoolean("automatic"),rs.getString("event_type"))).single();
     }
 
     private void notifyWatchers(AnalysisTask task,String type,String severity,String title,String body,Instant now) {
@@ -451,7 +461,15 @@ public class JdbcIntelligenceStore implements IntelligenceStore {
 
     private List<AnalysisSummary> digestItems(PreferenceRow pref,Period period) {
         String projectFilter=pref.projectIds().isEmpty()?"":" and analysis.project_id in (:projectIds)";
-        JdbcClient.StatementSpec query=jdbc.sql(analysisBaseSelect(projectFilter+" and analysis.completed_at>=:start and analysis.completed_at<:end")+
+        String ruleFilter="""
+                 and (event.event_type='GITHUB_RELEASE' or exists (
+                     select 1 from event_rule_match rule_match
+                     join user_watch_rule rule on rule.id=rule_match.rule_id
+                     where rule_match.event_id=event.id and rule_match.user_id=:userId
+                       and rule.include_in_digest=true
+                 ))
+                """;
+        JdbcClient.StatementSpec query=jdbc.sql(analysisBaseSelect(projectFilter+ruleFilter+" and analysis.completed_at>=:start and analysis.completed_at<:end")+
                 " order by analysis.completed_at desc")
                 .param("userId",pref.userId()).param("workspaceId",pref.workspaceId())
                 .param("start",timestamp(period.start())).param("end",timestamp(period.end()));

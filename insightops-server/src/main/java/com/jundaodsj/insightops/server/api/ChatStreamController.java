@@ -15,6 +15,7 @@ import com.jundaodsj.insightops.model.application.StreamingChatModelGateway;
 import com.jundaodsj.insightops.server.chat.ChatStreamSessionRegistry;
 import com.jundaodsj.insightops.server.chat.KnowledgeRagService;
 import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
+import com.jundaodsj.insightops.server.chat.ProjectEventEvidenceService;
 import com.jundaodsj.insightops.server.chat.ReleaseToolService;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolErrorCode;
@@ -52,7 +53,8 @@ public class ChatStreamController {
 
     private static final String SYSTEM_PROMPT = """
             你是 InsightOps Agent，面向 Java 开发者、架构师和技术负责人回答 AI 开源项目问题。
-            当前已启用 GitHub Release 与本地官方文档知识库。不得声称查询了 Issue、PR、Roadmap 或系统未提供的来源。
+            当前已启用 GitHub Release、Issue、Pull Request、Security Advisory 与本地官方文档知识库。
+            不得声称查询了 Roadmap 或系统未提供的来源。
             如果系统提示中附有工具或知识库证据，只能基于该证据回答可验证事实，并为关键事实保留 [S#] 引用或官方 URL。
             如果没有证据，不要编造实时版本、发布日期、接口能力或来源链接；其他问题使用中文清晰、简洁地回答。
             """;
@@ -63,6 +65,7 @@ public class ChatStreamController {
     private final ChatRunStore chatRunStore;
     private final ReleaseToolService releaseToolService;
     private final KnowledgeRagService knowledgeRagService;
+    private final ProjectEventEvidenceService projectEventEvidenceService;
     private final P0ChatGuardrail guardrail;
     private final UserMemoryStore userMemoryStore;
 
@@ -74,6 +77,7 @@ public class ChatStreamController {
             ChatRunStore chatRunStore,
             ReleaseToolService releaseToolService,
             KnowledgeRagService knowledgeRagService,
+            ProjectEventEvidenceService projectEventEvidenceService,
             P0ChatGuardrail guardrail,
             UserMemoryStore userMemoryStore) {
         this.streamingGateway = streamingGateway;
@@ -82,8 +86,22 @@ public class ChatStreamController {
         this.chatRunStore = chatRunStore;
         this.releaseToolService = releaseToolService;
         this.knowledgeRagService = knowledgeRagService;
+        this.projectEventEvidenceService = projectEventEvidenceService;
         this.guardrail = guardrail;
         this.userMemoryStore = userMemoryStore;
+    }
+
+    public ChatStreamController(
+            StreamingChatModelGateway streamingGateway,
+            ChatStreamSessionRegistry sessionRegistry,
+            DeepSeekModelProperties modelProperties,
+            ChatRunStore chatRunStore,
+            ReleaseToolService releaseToolService,
+            KnowledgeRagService knowledgeRagService,
+            P0ChatGuardrail guardrail,
+            UserMemoryStore userMemoryStore) {
+        this(streamingGateway, sessionRegistry, modelProperties, chatRunStore,
+                releaseToolService, knowledgeRagService, null, guardrail, userMemoryStore);
     }
 
     public ChatStreamController(
@@ -246,6 +264,9 @@ public class ChatStreamController {
                         }
                     }
                 });
+        Optional<ProjectEventEvidenceService.EventEvidence> eventEvidence = projectEventEvidenceService == null
+                ? Optional.empty()
+                : projectEventEvidenceService.retrieve(runUuid, actor.workspaceId(), userMessage);
         if (!sessionRegistry.isActive(runId)) {
             return emitter;
         }
@@ -255,10 +276,14 @@ public class ChatStreamController {
                 .map(ReleaseToolService.ToolEvidence::systemPromptAppendix)
                 .orElse("") + ragEvidence
                 .map(KnowledgeRagService.RagEvidence::systemPromptAppendix)
+                .orElse("") + eventEvidence
+                .map(ProjectEventEvidenceService.EventEvidence::systemPromptAppendix)
                 .orElse("");
-        List<String> citations = java.util.stream.Stream.concat(
+        List<String> citations = java.util.stream.Stream.of(
                         toolEvidence.stream().flatMap(item -> item.sourceUrls().stream()),
-                        ragEvidence.stream().flatMap(item -> item.sourceUrls().stream()))
+                        ragEvidence.stream().flatMap(item -> item.sourceUrls().stream()),
+                        eventEvidence.stream().flatMap(item -> item.sourceUrls().stream()))
+                .flatMap(java.util.function.Function.identity())
                 .distinct()
                 .toList();
         List<ChatCitation> citationDetails = new java.util.ArrayList<>();
@@ -282,6 +307,7 @@ public class ChatStreamController {
                         "OFFICIAL_DOCUMENT", null));
             }
         });
+        eventEvidence.ifPresent(evidence -> citationDetails.addAll(evidence.citations()));
         try {
             guardrail.verifyTrustedSources(citations);
         }

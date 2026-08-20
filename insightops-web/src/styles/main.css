@@ -13,6 +13,16 @@
   --accent-dark: #0f342b;
 }
 
+.rule-editor { margin-bottom: 20px; }
+.rule-event-types, .rule-options { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; margin-top: 16px; }
+.rule-event-types strong { width: 100%; }
+.tag-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.tag-row span { padding: 4px 9px; border-radius: 999px; background: var(--surface-soft, #eef3f7); font-size: 12px; }
+.intelligence-filters { flex-wrap: wrap; }
+.feedback-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; color: var(--text-muted, #667085); }
+.citation-feedback { display: flex; gap: 6px; margin-top: 6px; }
+.citation-feedback-card { min-width: 0; }
+
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 75% 10%, #152c2a 0, #0d1113 35%); }
 button, textarea, input, select { font: inherit; }

@@ -51,7 +51,17 @@ public interface IntelligenceStore {
             UUID analysisId, UUID workspaceId, UUID projectId, UUID eventId,
             String repositoryOwner, String repositoryName, String versionTag,
             String releaseTitle, String releaseSummary, String sourceUrl,
-            Instant occurredAt, int attempts, int maxAttempts, boolean automatic) {
+            Instant occurredAt, int attempts, int maxAttempts, boolean automatic,
+            String eventType) {
+        public AnalysisTask(
+                UUID analysisId, UUID workspaceId, UUID projectId, UUID eventId,
+                String repositoryOwner, String repositoryName, String versionTag,
+                String releaseTitle, String releaseSummary, String sourceUrl,
+                Instant occurredAt, int attempts, int maxAttempts, boolean automatic) {
+            this(analysisId, workspaceId, projectId, eventId, repositoryOwner, repositoryName,
+                    versionTag, releaseTitle, releaseSummary, sourceUrl, occurredAt,
+                    attempts, maxAttempts, automatic, "GITHUB_RELEASE");
+        }
     }
 
     record AnalysisResult(
@@ -108,7 +118,11 @@ public interface IntelligenceStore {
 
     record Notification(
             UUID id, String type, String severity, String title, String body,
-            UUID entityId, boolean read, Instant createdAt) {
+            UUID entityId, boolean read, Instant createdAt, String sourceUrl) {
+        public Notification(UUID id, String type, String severity, String title, String body,
+                            UUID entityId, boolean read, Instant createdAt) {
+            this(id,type,severity,title,body,entityId,read,createdAt,null);
+        }
     }
 
     record NotificationPage(List<Notification> items, int page, int size, long total, long unreadCount) {

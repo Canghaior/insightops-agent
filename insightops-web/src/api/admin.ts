@@ -75,6 +75,10 @@ export interface CollectionStatus {
   nextSyncAt: string | null
   consecutiveFailures: number
   lastError: string | null
+  currentSourceType: string | null
+  heartbeatAt: string | null
+  discoveredCount: number
+  storedCount: number
 }
 
 export interface AnalysisAdminStatus {

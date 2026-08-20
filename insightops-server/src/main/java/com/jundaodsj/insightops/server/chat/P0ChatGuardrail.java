@@ -83,7 +83,8 @@ public class P0ChatGuardrail {
 
     public void verifyTrustedSources(List<String> sources) {
         for (String source : sources) {
-            if (!trustedReleaseSource(source) && !trustedDocumentationSource(source)) {
+            if (!trustedReleaseSource(source) && !trustedProjectEventSource(source)
+                    && !trustedDocumentationSource(source)) {
                 throw new GuardrailViolation("OUTPUT_SOURCE_NOT_ALLOWED");
             }
         }
@@ -115,6 +116,19 @@ public class P0ChatGuardrail {
                     && uri.getPath().matches("/[^/]+/[^/]+/releases/tag/[^/]+/?");
         }
         catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    private static boolean trustedProjectEventSource(String value) {
+        try {
+            URI uri = URI.create(value);
+            return "https".equalsIgnoreCase(uri.getScheme())
+                    && "github.com".equalsIgnoreCase(uri.getHost())
+                    && uri.getPath() != null
+                    && (uri.getPath().matches("/[^/]+/[^/]+/(issues|pull)/[0-9]+/?")
+                        || uri.getPath().matches("/[^/]+/[^/]+/security/advisories/[^/]+/?"));
+        } catch (IllegalArgumentException exception) {
             return false;
         }
     }

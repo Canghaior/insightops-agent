@@ -152,11 +152,12 @@ onMounted(load)
     </div>
 
     <template v-if="isSystemAdmin">
-      <div class="section-heading audit-heading"><div><span class="eyebrow">Worker 可观测性</span><h2>Release 采集状态</h2></div><span class="subtle">默认每 6 小时增量同步</span></div>
+      <div class="section-heading audit-heading"><div><span class="eyebrow">Worker 可观测性</span><h2>GitHub 多来源采集状态</h2></div><span class="subtle">Release · Issue · Pull Request · Security Advisory</span></div>
       <div class="collection-grid">
         <article v-for="project in collection" :key="project.projectId" class="panel collection-card">
           <header><div><strong>{{ project.projectName }}</strong><small>{{ project.repositoryOwner }}/{{ project.projectName }}</small></div><i class="status-pill" :class="project.status === 'SUCCEEDED' ? 'status-succeeded' : project.status === 'FAILED' ? 'status-failed' : 'status-running'">{{ project.status }}</i></header>
           <dl><div><dt>上次采集</dt><dd>{{ project.lastSyncAt ? new Date(project.lastSyncAt).toLocaleString() : '尚未执行' }}</dd></div><div><dt>下次计划</dt><dd>{{ project.nextSyncAt ? new Date(project.nextSyncAt).toLocaleString() : '等待关注' }}</dd></div></dl>
+          <p v-if="project.status === 'RUNNING'" class="subtle">当前来源：{{ project.currentSourceType || '准备中' }} · 已发现 {{ project.discoveredCount }} · 新增 {{ project.storedCount }}<br />心跳：{{ project.heartbeatAt ? new Date(project.heartbeatAt).toLocaleString() : '等待心跳' }}</p>
           <p v-if="project.lastError" class="stream-error">{{ project.lastError }}</p>
           <footer><span>连续失败 {{ project.consecutiveFailures }} 次</span><button class="secondary-button" @click="syncNow(project)">立即同步</button></footer>
         </article>

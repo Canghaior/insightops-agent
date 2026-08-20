@@ -2,6 +2,7 @@ package com.jundaodsj.insightops.worker;
 
 import com.jundaodsj.insightops.project.application.ProjectUpdateStore;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseGateway;
+import com.jundaodsj.insightops.tool.application.github.GitHubProjectEventGateway;
 import com.jundaodsj.insightops.tool.application.github.GitHubRepositoryReleaseQuery;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolErrorCode;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolException;
@@ -16,6 +17,7 @@ import java.time.Instant;
 public class ReleaseCollectionRunner {
     private final ProjectUpdateStore store;
     private final GitHubReleaseGateway gateway;
+    private final GitHubProjectEventGateway eventGateway;
     private final ReleaseCollectionProperties properties;
     private final Clock clock;
 
@@ -23,8 +25,9 @@ public class ReleaseCollectionRunner {
     public ReleaseCollectionRunner(
             ProjectUpdateStore store,
             GitHubReleaseGateway gateway,
+            GitHubProjectEventGateway eventGateway,
             ReleaseCollectionProperties properties) {
-        this(store, gateway, properties, Clock.systemUTC());
+        this(store, gateway, eventGateway, properties, Clock.systemUTC());
     }
 
     ReleaseCollectionRunner(
@@ -32,8 +35,18 @@ public class ReleaseCollectionRunner {
             GitHubReleaseGateway gateway,
             ReleaseCollectionProperties properties,
             Clock clock) {
+        this(store, gateway, null, properties, clock);
+    }
+
+    ReleaseCollectionRunner(
+            ProjectUpdateStore store,
+            GitHubReleaseGateway gateway,
+            GitHubProjectEventGateway eventGateway,
+            ReleaseCollectionProperties properties,
+            Clock clock) {
         this.store = store;
         this.gateway = gateway;
+        this.eventGateway = eventGateway;
         this.properties = properties;
         this.clock = clock;
     }
@@ -50,6 +63,7 @@ public class ReleaseCollectionRunner {
         int newEvents = 0;
         for (var project : projects) {
             try {
+                Duration lockDuration = Duration.ofMinutes(Math.max(1, properties.getLockMinutes()));
                 var result = gateway.listRepositoryReleases(new GitHubRepositoryReleaseQuery(
                         project.catalogProjectId(),
                         project.repository(),
@@ -58,13 +72,28 @@ public class ReleaseCollectionRunner {
                         null,
                         30,
                         false));
+                int projectEventCount = 0;
+                int storedProjectEvents = 0;
+                if (eventGateway != null) {
+                    requireLease(store.renewSyncLease(project, "GITHUB_RELEASE",
+                            result.releases().size(), 0, clock.instant(), lockDuration));
+                    requireLease(store.renewSyncLease(project, "GITHUB_ISSUE",
+                            result.releases().size(), 0, clock.instant(), lockDuration));
+                    var eventResult = eventGateway.fetch(project.owner(), project.repository(), 50);
+                    projectEventCount = eventResult.events().size();
+                    storedProjectEvents = store.storeProjectEvents(
+                            project, eventResult.events(), eventResult.fetchedAt());
+                    requireLease(store.renewSyncLease(project, "FINALIZING",
+                            result.releases().size() + projectEventCount,
+                            storedProjectEvents, clock.instant(), lockDuration));
+                }
                 ProjectUpdateStore.SyncResult stored = store.completeSuccessfulSync(
                         project, result.releases(), result.fetchedAt(),
                         result.fetchedAt().plus(Duration.ofHours(
                                 Math.max(1, project.syncIntervalHours()))));
                 succeeded++;
                 releases += stored.releaseCount();
-                newEvents += stored.newEventCount();
+                newEvents += stored.newEventCount() + storedProjectEvents;
             } catch (GitHubToolException exception) {
                 failed++;
                 Instant failedAt = clock.instant();
@@ -79,6 +108,10 @@ public class ReleaseCollectionRunner {
             }
         }
         return new CycleResult(projects.size(), succeeded, failed, releases, newEvents, startedAt, clock.instant());
+    }
+
+    private static void requireLease(boolean renewed) {
+        if (!renewed) throw new IllegalStateException("GitHub collection lease was lost");
     }
 
     private static Duration retryDelay(int previousFailures, GitHubToolErrorCode code) {

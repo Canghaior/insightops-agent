@@ -18,6 +18,7 @@ x-app-env: &app-env
   EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
   EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://ollama:11434}
   RAG_ENABLED: ${RAG_ENABLED:-true}
+  GITHUB_TOKEN: ${GITHUB_TOKEN:-}
 
 x-logging: &app-logging
   driver: json-file

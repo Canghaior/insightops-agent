@@ -17,6 +17,7 @@ import {
   type ConversationSummary,
 } from '@/api/conversations'
 import MarkdownContent from '@/components/MarkdownContent.vue'
+import { submitAnswerFeedback, submitCitationFeedback } from '@/api/feedback'
 
 const route = useRoute()
 
@@ -43,6 +44,8 @@ interface ConversationMessage {
   retrievalModel?: string | null
   sources?: string[]
   citations?: ChatCitation[]
+  feedback?: 'helpful' | 'unhelpful'
+  feedbackError?: string
 }
 
 const question = ref('')
@@ -369,9 +372,29 @@ function formatMessageTime(value: string) {
 function sourceHeading(message: ConversationMessage) {
   const sources = message.sources ?? []
   const hasRelease = sources.some((source) => source.includes('github.com/') && source.includes('/releases/tag/'))
+  const hasProjectEvent = sources.some((source) => source.includes('github.com/')
+    && (source.includes('/issues/') || source.includes('/pull/') || source.includes('/security/advisories/')))
   const hasDocs = sources.some((source) => !source.includes('github.com/'))
-  if (hasRelease && hasDocs) return '官方 Release 与知识库来源'
-  return hasRelease ? 'GitHub 官方来源' : '官方知识库来源'
+  if ((hasRelease || hasProjectEvent) && hasDocs) return 'GitHub 官方事件与知识库来源'
+  return hasRelease || hasProjectEvent ? 'GitHub 官方来源' : '官方知识库来源'
+}
+
+async function rateAnswer(message: ConversationMessage, helpful: boolean) {
+  if (!message.runId) return
+  message.feedbackError = ''
+  try {
+    const comment = helpful ? undefined : globalThis.prompt('可以补充问题原因（可选）')?.trim()
+    await submitAnswerFeedback(message.runId, helpful, helpful ? 'HELPFUL' : 'UNHELPFUL', comment)
+    message.feedback = helpful ? 'helpful' : 'unhelpful'
+  } catch { message.feedbackError = '反馈提交失败，请稍后重试。' }
+}
+
+async function rateCitation(message: ConversationMessage, citation: ChatCitation, correct: boolean) {
+  if (!message.runId) return
+  try {
+    const comment = correct ? undefined : globalThis.prompt('请说明引用问题（可选）')?.trim()
+    await submitCitationFeedback(message.runId, citation.url, correct, comment)
+  } catch { message.feedbackError = '引用反馈提交失败，请稍后重试。' }
 }
 
 onMounted(() => {
@@ -486,21 +509,27 @@ onBeforeUnmount(() => {
               <div><dt>总耗时</dt><dd>{{ message.durationMs ?? '—' }} ms</dd></div>
               <div><dt>Token</dt><dd>{{ message.usage.totalTokens ?? '—' }}</dd></div>
             </dl>
+            <div v-if="message.status === 'completed' && message.runId" class="feedback-row">
+              <span>{{ message.feedback ? '感谢反馈' : '这个回答有帮助吗？' }}</span>
+              <button class="secondary-button" :disabled="!!message.feedback" @click="rateAnswer(message, true)">有帮助</button>
+              <button class="secondary-button" :disabled="!!message.feedback" @click="rateAnswer(message, false)">需改进</button>
+              <small v-if="message.feedbackError" class="stream-error">{{ message.feedbackError }}</small>
+            </div>
             <div v-if="message.citations?.length" class="source-list">
               <strong>结构化官方引用</strong>
               <div class="citation-grid">
-                <a
+                <div
                   v-for="citation in message.citations"
                   :key="`${citation.label}-${citation.url}`"
-                  class="citation-card"
-                  :href="citation.url"
-                  target="_blank"
-                  rel="noreferrer"
+                  class="citation-feedback-card"
                 >
-                  <span>{{ citation.label }} · {{ citation.sourceType === 'GITHUB_RELEASE' ? 'Release' : citation.project }}</span>
-                  <b>{{ citation.heading || citation.title }}</b>
-                  <small v-if="citation.score != null">融合得分 {{ citation.score.toFixed(3) }}</small>
-                </a>
+                  <a class="citation-card" :href="citation.url" target="_blank" rel="noreferrer">
+                    <span>{{ citation.label }} · {{ citation.sourceType === 'GITHUB_RELEASE' ? 'Release' : citation.project }}</span>
+                    <b>{{ citation.heading || citation.title }}</b>
+                    <small v-if="citation.score != null">融合得分 {{ citation.score.toFixed(3) }}</small>
+                  </a>
+                  <div v-if="message.runId" class="citation-feedback"><button class="text-button" @click="rateCitation(message, citation, true)">引用正确</button><button class="text-button" @click="rateCitation(message, citation, false)">引用有误</button></div>
+                </div>
               </div>
             </div>
             <div v-else-if="message.sources?.length" class="source-list">

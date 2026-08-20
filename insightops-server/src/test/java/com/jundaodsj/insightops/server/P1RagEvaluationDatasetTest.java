@@ -29,7 +29,7 @@ class P1RagEvaluationDatasetTest {
                 })
                 .toList();
 
-        assertThat(records).hasSize(15);
+        assertThat(records).hasSize(50);
         Set<String> ids = new HashSet<>();
         for (JsonNode item : records) {
             assertThat(ids.add(text(item, "id"))).isTrue();
@@ -53,9 +53,12 @@ class P1RagEvaluationDatasetTest {
         Map<String, Long> coverage = records.stream().filter(item -> item.path("answerable").asBoolean())
                 .collect(Collectors.groupingBy(
                 item -> item.path("expectedProject").asText(), Collectors.counting()));
-        assertThat(coverage).containsEntry("spring-ai", 4L)
-                .containsEntry("langchain4j", 4L).containsEntry("dify", 4L);
-        assertThat(records.stream().filter(item -> !item.path("answerable").asBoolean())).hasSize(3);
+        assertThat(coverage).containsEntry("spring-ai", 14L)
+                .containsEntry("langchain4j", 14L).containsEntry("dify", 14L);
+        assertThat(records.stream().filter(item -> !item.path("answerable").asBoolean())).hasSize(8);
+        assertThat(records).extracting(item -> text(item, "category"))
+                .contains("multilingual", "version-conflict", "cross-source",
+                        "multi-turn-context", "prompt-injection");
     }
 
     private static String text(JsonNode item, String field) {

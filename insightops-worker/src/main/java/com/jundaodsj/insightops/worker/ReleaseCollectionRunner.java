@@ -61,7 +61,7 @@ public class ReleaseCollectionRunner {
                 ProjectUpdateStore.SyncResult stored = store.completeSuccessfulSync(
                         project, result.releases(), result.fetchedAt(),
                         result.fetchedAt().plus(Duration.ofHours(
-                                Math.max(1, properties.getSyncIntervalHours()))));
+                                Math.max(1, project.syncIntervalHours()))));
                 succeeded++;
                 releases += stored.releaseCount();
                 newEvents += stored.newEventCount();

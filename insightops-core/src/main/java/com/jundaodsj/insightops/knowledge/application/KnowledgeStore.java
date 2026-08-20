@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.knowledge.application;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface KnowledgeStore {
@@ -22,12 +23,37 @@ public interface KnowledgeStore {
 
     boolean requestSync(UUID workspaceId, UUID sourceId, Instant now);
 
+    SourceStatus createSource(SourceDefinition source, Instant now);
+
+    Optional<SourceStatus> updateSource(UUID workspaceId, UUID sourceId,
+                                        SourceDefinition source, Instant now);
+
+    Optional<SourceStatus> setSourceEnabled(UUID workspaceId, UUID sourceId,
+                                            boolean enabled, Instant now);
+
+    DeleteResult deleteEmptySource(UUID workspaceId, UUID sourceId);
+
     record SourceTask(
             UUID jobId, UUID sourceId, UUID workspaceId, UUID projectId,
             String projectName, String sourceKey, String name, String sourceType,
             String rootUrl, String discoveryUrl, String allowedHost,
-            String allowedPathPrefix, String trustTier, int consecutiveFailures) {
+            String allowedPathPrefix, String trustTier, int syncIntervalHours,
+            int consecutiveFailures) {
+        public SourceTask(UUID jobId, UUID sourceId, UUID workspaceId, UUID projectId,
+                          String projectName, String sourceKey, String name, String sourceType,
+                          String rootUrl, String discoveryUrl, String allowedHost,
+                          String allowedPathPrefix, String trustTier, int consecutiveFailures) {
+            this(jobId, sourceId, workspaceId, projectId, projectName, sourceKey, name,
+                    sourceType, rootUrl, discoveryUrl, allowedHost, allowedPathPrefix,
+                    trustTier, 24, consecutiveFailures);
+        }
     }
+
+    record SourceDefinition(
+            UUID sourceId, UUID workspaceId, UUID projectId, String sourceKey,
+            String name, String sourceType, String rootUrl, String discoveryUrl,
+            String allowedHost, String allowedPathPrefix, String trustTier,
+            int syncIntervalHours) { }
 
     record DocumentPage(
             String canonicalUrl, String title, String language, String versionLabel,
@@ -52,7 +78,9 @@ public interface KnowledgeStore {
 
     record SourceStatus(
             UUID sourceId, UUID projectId, String projectName, String sourceKey,
-            String name, String sourceType, String rootUrl, String trustTier,
+            String name, String sourceType, String rootUrl, String discoveryUrl,
+            String allowedHost, String allowedPathPrefix, String trustTier,
+            int syncIntervalHours,
             boolean enabled, String status, Instant lastSyncAt, Instant nextSyncAt,
             int consecutiveFailures, String lastError, long documentCount,
             long revisionCount, long chunkCount, Instant lockedUntil, JobStatus lastJob) {
@@ -64,5 +92,11 @@ public interface KnowledgeStore {
             int maxPageCount, int discoveredUrlCount, int visitedUrlCount,
             String currentUrl, Instant heartbeatAt, Instant leaseExpiresAt,
             String errorCode, String errorMessage, Instant startedAt, Instant finishedAt) {
+    }
+
+    enum DeleteResult {
+        DELETED,
+        NOT_FOUND,
+        HAS_DEPENDENCIES
     }
 }

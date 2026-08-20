@@ -5,6 +5,7 @@ import com.jundaodsj.insightops.knowledge.application.KnowledgeEmbeddingStore;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import com.jundaodsj.insightops.server.knowledge.KnowledgeEmbeddingProperties;
+import com.jundaodsj.insightops.server.knowledge.AdminKnowledgeSourceService;
 import com.jundaodsj.insightops.server.knowledge.RagEvaluationService;
 import com.jundaodsj.insightops.knowledge.application.RagEvaluationStore;
 import jakarta.validation.Valid;
@@ -15,6 +16,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,15 +37,18 @@ public class KnowledgeAdminController {
     private final KnowledgeEmbeddingStore embeddingStore;
     private final KnowledgeEmbeddingProperties embeddingProperties;
     private final RagEvaluationService evaluationService;
+    private final AdminKnowledgeSourceService sourceService;
 
     @Autowired
     public KnowledgeAdminController(KnowledgeStore store, KnowledgeEmbeddingStore embeddingStore,
                                     KnowledgeEmbeddingProperties embeddingProperties,
-                                    RagEvaluationService evaluationService) {
+                                    RagEvaluationService evaluationService,
+                                    AdminKnowledgeSourceService sourceService) {
         this.store = store;
         this.embeddingStore = embeddingStore;
         this.embeddingProperties = embeddingProperties;
         this.evaluationService = evaluationService;
+        this.sourceService = sourceService;
     }
 
     KnowledgeAdminController(KnowledgeStore store) {
@@ -49,6 +56,7 @@ public class KnowledgeAdminController {
         this.embeddingStore = null;
         this.embeddingProperties = null;
         this.evaluationService = null;
+        this.sourceService = null;
     }
 
     @GetMapping("/evaluations/latest")
@@ -101,6 +109,40 @@ public class KnowledgeAdminController {
                 store.sourceStatus(account.workspaceId()));
     }
 
+    @PostMapping("/sources")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<KnowledgeStore.SourceStatus> createSource(
+            @Valid @RequestBody SourceRequest body, HttpServletRequest request) {
+        var account = requireSystemAdmin(request);
+        return response(request, sourceService.create(account, body.projectId(), body.name(),
+                body.sourceType(), body.rootUrl(), body.discoveryUrl(),
+                body.allowedPathPrefix(), body.syncIntervalHours()));
+    }
+
+    @PutMapping("/sources/{sourceId}")
+    public ApiResponse<KnowledgeStore.SourceStatus> updateSource(
+            @PathVariable UUID sourceId, @Valid @RequestBody SourceRequest body,
+            HttpServletRequest request) {
+        var account = requireSystemAdmin(request);
+        return response(request, sourceService.update(account, sourceId, body.projectId(), body.name(),
+                body.sourceType(), body.rootUrl(), body.discoveryUrl(),
+                body.allowedPathPrefix(), body.syncIntervalHours()));
+    }
+
+    @PatchMapping("/sources/{sourceId}/status")
+    public ApiResponse<KnowledgeStore.SourceStatus> sourceStatus(
+            @PathVariable UUID sourceId, @Valid @RequestBody SourceStatusRequest body,
+            HttpServletRequest request) {
+        return response(request, sourceService.setEnabled(
+                requireSystemAdmin(request), sourceId, body.enabled()));
+    }
+
+    @DeleteMapping("/sources/{sourceId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteSource(@PathVariable UUID sourceId, HttpServletRequest request) {
+        sourceService.delete(requireSystemAdmin(request), sourceId);
+    }
+
     @PostMapping("/sources/{sourceId}/sync")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public void sync(@PathVariable UUID sourceId, HttpServletRequest request) {
@@ -125,4 +167,19 @@ public class KnowledgeAdminController {
 
     public record EvaluationRequest(@Min(0) @Max(6) Integer generationSampleSize,
                                     Boolean judgeFaithfulness) { }
+
+    public record SourceRequest(
+            @jakarta.validation.constraints.NotNull UUID projectId,
+            @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 256) String name,
+            @jakarta.validation.constraints.NotBlank String sourceType,
+            @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 1024) String rootUrl,
+            @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 1024) String discoveryUrl,
+            @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 512) String allowedPathPrefix,
+            @Min(1) @Max(720) int syncIntervalHours) { }
+
+    public record SourceStatusRequest(@jakarta.validation.constraints.NotNull Boolean enabled) { }
+
+    private static <T> ApiResponse<T> response(HttpServletRequest request, T data) {
+        return new ApiResponse<>((String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE), data);
+    }
 }

@@ -17,7 +17,10 @@ const saving = ref(false)
 const editingId = ref<string | null>(null)
 const error = ref('')
 const notice = ref('')
-const form = reactive({ repositoryOwner: '', repositoryName: '', priority: 3 })
+const form = reactive({
+  repositoryOwner: '', repositoryName: '', priority: 3,
+  syncIntervalHours: 6, chatAliases: '',
+})
 
 const editingProject = computed(() => projects.value.find(project => project.projectId === editingId.value) ?? null)
 const coordinatesLocked = computed(() => Boolean(
@@ -42,6 +45,8 @@ async function save() {
       repositoryOwner: form.repositoryOwner.trim(),
       repositoryName: form.repositoryName.trim(),
       priority: form.priority,
+      syncIntervalHours: form.syncIntervalHours,
+      chatAliases: form.chatAliases.split(',').map(value => value.trim()).filter(Boolean),
     }
     if (editingId.value) {
       await updateManagedProject(editingId.value, input)
@@ -61,6 +66,8 @@ function edit(project: ManagedProject) {
   form.repositoryOwner = project.repositoryOwner
   form.repositoryName = project.repositoryName
   form.priority = project.priority
+  form.syncIntervalHours = project.syncIntervalHours
+  form.chatAliases = project.chatAliases.join(', ')
   error.value = ''
   notice.value = ''
 }
@@ -70,6 +77,8 @@ function cancelEdit() {
   form.repositoryOwner = ''
   form.repositoryName = ''
   form.priority = 3
+  form.syncIntervalHours = 6
+  form.chatAliases = ''
 }
 
 async function toggle(project: ManagedProject) {
@@ -119,7 +128,7 @@ onMounted(load)
 <template>
   <section>
     <div class="section-heading">
-      <div><span class="eyebrow">P1.5-A · 配置化项目</span><h2>GitHub 项目管理</h2></div>
+      <div><span class="eyebrow">P1.5-B · 动态项目路由</span><h2>GitHub 项目管理</h2></div>
       <button class="secondary-button" :disabled="loading" @click="load">刷新列表</button>
     </div>
 
@@ -139,6 +148,14 @@ onMounted(load)
       <label>
         优先级
         <select v-model.number="form.priority"><option v-for="priority in 5" :key="priority" :value="priority">{{ priority }}</option></select>
+      </label>
+      <label>
+        采集周期（小时）
+        <input v-model.number="form.syncIntervalHours" type="number" min="1" max="720" required>
+      </label>
+      <label class="project-alias-field">
+        聊天别名（逗号分隔）
+        <input v-model="form.chatAliases" maxlength="500" placeholder="Spring AI, spring-ai">
       </label>
       <div class="project-form-actions">
         <button v-if="editingId" type="button" class="secondary-button" @click="cancelEdit">取消</button>
@@ -169,6 +186,8 @@ onMounted(load)
           <div><dt>知识源</dt><dd>{{ project.knowledgeSourceCount }}</dd></div>
           <div><dt>关注人数</dt><dd>{{ project.watcherCount }}</dd></div>
           <div><dt>活动任务</dt><dd>{{ project.activeJobCount }}</dd></div>
+          <div><dt>采集周期</dt><dd>{{ project.syncIntervalHours }} 小时</dd></div>
+          <div><dt>聊天别名</dt><dd>{{ project.chatAliases.join('、') || '仓库名自动识别' }}</dd></div>
           <div><dt>上次采集</dt><dd>{{ time(project.lastSyncAt) }}</dd></div>
           <div><dt>下次计划</dt><dd>{{ project.enabled ? time(project.nextSyncAt) : '已停用' }}</dd></div>
         </dl>

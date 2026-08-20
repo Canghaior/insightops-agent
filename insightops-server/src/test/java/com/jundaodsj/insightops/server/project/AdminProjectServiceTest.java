@@ -40,11 +40,14 @@ class AdminProjectServiceTest {
 
     @Test
     void ownerCanCreateARepositoryAndCoordinatesAreNormalized() {
-        var created = service.create(actor("USER", "OWNER"), " OpenAI ", " OpenAI-Java ", 2);
+        var created = service.create(actor("USER", "OWNER"), " OpenAI ", " OpenAI-Java ", 2,
+                10, List.of(" OpenAI SDK ", "openai sdk"));
 
         assertThat(created.repositoryOwner()).isEqualTo("openai");
         assertThat(created.repositoryName()).isEqualTo("openai-java");
         assertThat(created.canonicalUrl()).isEqualTo("https://github.com/openai/openai-java");
+        assertThat(created.syncIntervalHours()).isEqualTo(10);
+        assertThat(created.chatAliases()).containsExactly("openai sdk");
         assertThat(created.enabled()).isTrue();
         verify(auditStore).appendAudit(
                 org.mockito.ArgumentMatchers.any(), eq(WORKSPACE),
@@ -138,9 +141,10 @@ class AdminProjectServiceTest {
         @Override
         public ManagedProject create(
                 UUID projectId, UUID workspaceId, String owner, String repository,
-                String canonicalUrl, int priority, Instant now) {
-            ManagedProject project = managed(projectId, owner, repository, priority, true,
-                    0, 0, 0, 0, now);
+                String canonicalUrl, int priority, int syncIntervalHours,
+                List<String> chatAliases, Instant now) {
+            ManagedProject project = managed(projectId, owner, repository, priority,
+                    syncIntervalHours, chatAliases, true, 0, 0, 0, 0, now);
             projects.put(projectId, project);
             return project;
         }
@@ -148,11 +152,13 @@ class AdminProjectServiceTest {
         @Override
         public Optional<ManagedProject> update(
                 UUID workspaceId, UUID projectId, String owner, String repository,
-                String canonicalUrl, int priority, Instant now) {
+                String canonicalUrl, int priority, int syncIntervalHours,
+                List<String> chatAliases, Instant now) {
             return find(workspaceId, projectId).map(project -> {
                 ManagedProject updated = managed(projectId, owner, repository, priority,
-                        project.enabled(), project.releaseCount(), project.knowledgeSourceCount(),
-                        project.watcherCount(), project.activeJobCount(), now);
+                        syncIntervalHours, chatAliases, project.enabled(), project.releaseCount(),
+                        project.knowledgeSourceCount(), project.watcherCount(),
+                        project.activeJobCount(), now);
                 projects.put(projectId, updated);
                 return updated;
             });
@@ -163,7 +169,8 @@ class AdminProjectServiceTest {
                 UUID workspaceId, UUID projectId, boolean enabled, Instant now) {
             return find(workspaceId, projectId).map(project -> {
                 ManagedProject updated = managed(projectId, project.repositoryOwner(),
-                        project.repositoryName(), project.priority(), enabled,
+                        project.repositoryName(), project.priority(), project.syncIntervalHours(),
+                        project.chatAliases(), enabled,
                         project.releaseCount(), project.knowledgeSourceCount(),
                         project.watcherCount(), project.activeJobCount(), now);
                 projects.put(projectId, updated);
@@ -182,9 +189,17 @@ class AdminProjectServiceTest {
         private static ManagedProject managed(
                 UUID id, String owner, String repository, int priority, boolean enabled,
                 long releases, long sources, long watchers, long jobs, Instant now) {
+            return managed(id, owner, repository, priority, 6, List.of(), enabled,
+                    releases, sources, watchers, jobs, now);
+        }
+
+        private static ManagedProject managed(
+                UUID id, String owner, String repository, int priority,
+                int syncIntervalHours, List<String> chatAliases, boolean enabled,
+                long releases, long sources, long watchers, long jobs, Instant now) {
             return new ManagedProject(id, "github", owner, repository,
                     "https://github.com/" + owner + "/" + repository,
-                    priority, enabled, "NEVER", null, now, 0, null,
+                    priority, syncIntervalHours, chatAliases, enabled, "NEVER", null, now, 0, null,
                     releases, sources, watchers, jobs, now, now);
         }
     }

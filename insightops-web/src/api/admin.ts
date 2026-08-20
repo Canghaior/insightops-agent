@@ -42,6 +42,8 @@ export interface ManagedProject {
   repositoryName: string
   canonicalUrl: string
   priority: number
+  syncIntervalHours: number
+  chatAliases: string[]
   enabled: boolean
   lastSyncStatus: 'NEVER' | 'RUNNING' | 'SUCCEEDED' | 'RETRY_WAIT' | 'FAILED'
   lastSyncAt: string | null
@@ -60,6 +62,8 @@ export interface ProjectInput {
   repositoryOwner: string
   repositoryName: string
   priority: number
+  syncIntervalHours: number
+  chatAliases: string[]
 }
 
 export interface CollectionStatus {
@@ -111,7 +115,11 @@ export interface KnowledgeSourceStatus {
   name: string
   sourceType: string
   rootUrl: string
+  discoveryUrl: string
+  allowedHost: string
+  allowedPathPrefix: string
   trustTier: string
+  syncIntervalHours: number
   enabled: boolean
   status: 'NEVER' | 'RUNNING' | 'SUCCEEDED' | 'RETRY_WAIT' | 'FAILED'
   lastSyncAt: string | null
@@ -123,6 +131,16 @@ export interface KnowledgeSourceStatus {
   chunkCount: number
   lockedUntil: string | null
   lastJob: KnowledgeCollectionJob | null
+}
+
+export interface KnowledgeSourceInput {
+  projectId: string
+  name: string
+  sourceType: string
+  rootUrl: string
+  discoveryUrl: string
+  allowedPathPrefix: string
+  syncIntervalHours: number
 }
 
 export interface KnowledgeEmbeddingSourceProgress {
@@ -295,6 +313,30 @@ export async function requestIntelligenceAnalysis(eventId: string): Promise<void
 export async function listKnowledgeSources(): Promise<KnowledgeSourceStatus[]> {
   const response = await apiClient.get<{ data: KnowledgeSourceStatus[] }>('/admin/knowledge/sources')
   return response.data.data
+}
+
+export async function createKnowledgeSource(input: KnowledgeSourceInput): Promise<KnowledgeSourceStatus> {
+  const response = await apiClient.post<{ data: KnowledgeSourceStatus }>('/admin/knowledge/sources', input)
+  return response.data.data
+}
+
+export async function updateKnowledgeSource(
+  sourceId: string,
+  input: KnowledgeSourceInput,
+): Promise<KnowledgeSourceStatus> {
+  const response = await apiClient.put<{ data: KnowledgeSourceStatus }>(`/admin/knowledge/sources/${sourceId}`, input)
+  return response.data.data
+}
+
+export async function setKnowledgeSourceEnabled(sourceId: string, enabled: boolean): Promise<KnowledgeSourceStatus> {
+  const response = await apiClient.patch<{ data: KnowledgeSourceStatus }>(
+    `/admin/knowledge/sources/${sourceId}/status`, { enabled },
+  )
+  return response.data.data
+}
+
+export async function deleteKnowledgeSource(sourceId: string): Promise<void> {
+  await apiClient.delete(`/admin/knowledge/sources/${sourceId}`)
 }
 
 export async function requestKnowledgeSync(sourceId: string): Promise<void> {

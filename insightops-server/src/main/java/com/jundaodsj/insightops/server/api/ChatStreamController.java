@@ -167,6 +167,7 @@ public class ChatStreamController {
         Optional<ReleaseToolService.ToolEvidence> toolEvidence;
         try {
             toolEvidence = releaseToolService.execute(
+                    actor.workspaceId(),
                     runUuid,
                     userMessage,
                     previousUserQuestions(history),

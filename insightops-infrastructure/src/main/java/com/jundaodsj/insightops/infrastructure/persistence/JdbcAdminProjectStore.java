@@ -20,6 +20,7 @@ public class JdbcAdminProjectStore implements AdminProjectStore {
     private static final String SELECT_PROJECT = """
             select project.id, project.platform, project.repository_owner, project.repository_name,
                    project.canonical_url, project.priority, project.enabled,
+                   project.sync_interval_hours, project.chat_aliases,
                    project.last_sync_status, project.last_sync_at, project.next_sync_at,
                    project.consecutive_failures, project.last_sync_error,
                    (select count(*) from source_snapshot snapshot
@@ -72,13 +73,17 @@ public class JdbcAdminProjectStore implements AdminProjectStore {
             String repositoryName,
             String canonicalUrl,
             int priority,
+            int syncIntervalHours,
+            List<String> chatAliases,
             Instant now) {
         jdbcClient.sql("""
                 insert into tracked_project
                     (id, workspace_id, platform, repository_owner, repository_name,
-                     canonical_url, priority, enabled, next_sync_at, created_at, updated_at)
+                     canonical_url, priority, sync_interval_hours, chat_aliases,
+                     enabled, next_sync_at, created_at, updated_at)
                 values (:projectId, :workspaceId, 'github', :owner, :repository,
-                        :canonicalUrl, :priority, true, :now, :now, :now)
+                        :canonicalUrl, :priority, :syncIntervalHours, :chatAliases,
+                        true, :now, :now, :now)
                 """)
                 .param("projectId", projectId)
                 .param("workspaceId", workspaceId)
@@ -86,6 +91,8 @@ public class JdbcAdminProjectStore implements AdminProjectStore {
                 .param("repository", repositoryName)
                 .param("canonicalUrl", canonicalUrl)
                 .param("priority", priority)
+                .param("syncIntervalHours", syncIntervalHours)
+                .param("chatAliases", chatAliases.toArray(String[]::new))
                 .param("now", timestamp(now))
                 .update();
         return find(workspaceId, projectId).orElseThrow();
@@ -100,17 +107,23 @@ public class JdbcAdminProjectStore implements AdminProjectStore {
             String repositoryName,
             String canonicalUrl,
             int priority,
+            int syncIntervalHours,
+            List<String> chatAliases,
             Instant now) {
         int updated = jdbcClient.sql("""
                 update tracked_project
                 set repository_owner=:owner, repository_name=:repository,
-                    canonical_url=:canonicalUrl, priority=:priority, updated_at=:now
+                    canonical_url=:canonicalUrl, priority=:priority,
+                    sync_interval_hours=:syncIntervalHours, chat_aliases=:chatAliases,
+                    updated_at=:now
                 where workspace_id=:workspaceId and id=:projectId
                 """)
                 .param("owner", repositoryOwner)
                 .param("repository", repositoryName)
                 .param("canonicalUrl", canonicalUrl)
                 .param("priority", priority)
+                .param("syncIntervalHours", syncIntervalHours)
+                .param("chatAliases", chatAliases.toArray(String[]::new))
                 .param("now", timestamp(now))
                 .param("workspaceId", workspaceId)
                 .param("projectId", projectId)
@@ -188,6 +201,8 @@ public class JdbcAdminProjectStore implements AdminProjectStore {
                 resultSet.getString("repository_name"),
                 resultSet.getString("canonical_url"),
                 resultSet.getInt("priority"),
+                resultSet.getInt("sync_interval_hours"),
+                stringArray(resultSet, "chat_aliases"),
                 resultSet.getBoolean("enabled"),
                 resultSet.getString("last_sync_status"),
                 instant(resultSet, "last_sync_at"),
@@ -209,5 +224,10 @@ public class JdbcAdminProjectStore implements AdminProjectStore {
     private static Instant instant(ResultSet resultSet, String column) throws SQLException {
         OffsetDateTime value = resultSet.getObject(column, OffsetDateTime.class);
         return value == null ? null : value.toInstant();
+    }
+
+    private static List<String> stringArray(ResultSet resultSet, String column) throws SQLException {
+        java.sql.Array value = resultSet.getArray(column);
+        return value == null ? List.of() : List.of((String[]) value.getArray());
     }
 }

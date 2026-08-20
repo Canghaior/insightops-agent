@@ -1,18 +1,33 @@
 package com.jundaodsj.insightops.server.chat;
 
 import com.jundaodsj.insightops.project.application.P0TrackedProjectCatalog;
+import com.jundaodsj.insightops.project.application.AdminProjectStore;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseQuery;
+import com.jundaodsj.insightops.tool.application.github.GitHubRepositoryReleaseQuery;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
 public class ReleaseQuestionRouter {
+
+    private final AdminProjectStore projectStore;
+
+    public ReleaseQuestionRouter() {
+        this.projectStore = null;
+    }
+
+    @Autowired
+    public ReleaseQuestionRouter(AdminProjectStore projectStore) {
+        this.projectStore = projectStore;
+    }
 
     private static final Pattern TIME_WINDOW =
             Pattern.compile("(?:最近|近)\\s*(\\d{1,3})\\s*天", Pattern.CASE_INSENSITIVE);
@@ -49,6 +64,58 @@ public class ReleaseQuestionRouter {
                         query(normalized, inheritedProjects),
                         normalized,
                         previousNormalized));
+    }
+
+    public Optional<ResolvedReleaseQuery> routeWithProjectContext(
+            UUID workspaceId, String question, String previousUserQuestions) {
+        if (projectStore == null) return Optional.empty();
+        List<AdminProjectStore.ManagedProject> available = projectStore.list(workspaceId).stream()
+                .filter(AdminProjectStore.ManagedProject::enabled)
+                .toList();
+        String normalized = question.toLowerCase(Locale.ROOT);
+        String previousNormalized = previousUserQuestions.toLowerCase(Locale.ROOT);
+        List<AdminProjectStore.ManagedProject> matched = projects(normalized, available);
+        if (!matched.isEmpty() && requiresReleaseEvidence(normalized)) {
+            GitHubReleaseQuery query = query(normalized, matched.stream()
+                    .map(project -> project.projectId().toString()).toList());
+            return Optional.of(resolve(withInheritedTimeWindow(query, normalized, previousNormalized), matched));
+        }
+        if (!matched.isEmpty() || !requiresReleaseEvidence(normalized)) return Optional.empty();
+        List<AdminProjectStore.ManagedProject> inherited = projects(previousNormalized, available);
+        if (inherited.isEmpty()) return Optional.empty();
+        GitHubReleaseQuery query = withInheritedTimeWindow(
+                query(normalized, inherited.stream().map(project -> project.projectId().toString()).toList()),
+                normalized, previousNormalized);
+        return Optional.of(resolve(query, inherited));
+    }
+
+    private ResolvedReleaseQuery resolve(GitHubReleaseQuery query,
+                                         List<AdminProjectStore.ManagedProject> projects) {
+        List<GitHubRepositoryReleaseQuery> repositories = projects.stream()
+                .map(project -> new GitHubRepositoryReleaseQuery(
+                        project.projectId().toString(), project.repositoryName(),
+                        project.repositoryOwner(), project.repositoryName(),
+                        query.timeWindowDays(), query.maxReleasesPerProject(),
+                        query.includePrereleases()))
+                .toList();
+        return new ResolvedReleaseQuery(query, repositories);
+    }
+
+    private List<AdminProjectStore.ManagedProject> projects(
+            String question, List<AdminProjectStore.ManagedProject> available) {
+        return available.stream().filter(project -> aliases(project).stream()
+                        .anyMatch(alias -> question.contains(alias)))
+                .limit(3)
+                .toList();
+    }
+
+    private List<String> aliases(AdminProjectStore.ManagedProject project) {
+        List<String> aliases = new ArrayList<>();
+        aliases.add(project.repositoryName().toLowerCase(Locale.ROOT));
+        aliases.add((project.repositoryOwner() + "/" + project.repositoryName()).toLowerCase(Locale.ROOT));
+        aliases.add(project.repositoryName().replace('-', ' ').replace('_', ' ').toLowerCase(Locale.ROOT));
+        aliases.addAll(project.chatAliases());
+        return aliases.stream().filter(alias -> alias != null && alias.length() >= 2).distinct().toList();
     }
 
     private GitHubReleaseQuery withInheritedTimeWindow(
@@ -124,5 +191,13 @@ public class ReleaseQuestionRouter {
             }
         }
         return false;
+    }
+
+    public record ResolvedReleaseQuery(
+            GitHubReleaseQuery evidenceQuery,
+            List<GitHubRepositoryReleaseQuery> repositories) {
+        public ResolvedReleaseQuery {
+            repositories = List.copyOf(repositories);
+        }
     }
 }

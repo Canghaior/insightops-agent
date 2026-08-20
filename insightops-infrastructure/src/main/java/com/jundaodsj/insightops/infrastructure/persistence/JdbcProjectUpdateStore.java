@@ -56,7 +56,8 @@ public class JdbcProjectUpdateStore implements ProjectUpdateStore {
                 from due
                 where project.id = due.id
                 returning project.id, project.workspace_id, project.repository_name,
-                          project.repository_owner, project.consecutive_failures
+                          project.repository_owner, project.sync_interval_hours,
+                          project.consecutive_failures
                 """)
                 .param("now", timestamp(now))
                 .param("lockUntil", timestamp(now.plus(lockDuration)))
@@ -67,6 +68,7 @@ public class JdbcProjectUpdateStore implements ProjectUpdateStore {
                         resultSet.getString("repository_name"),
                         resultSet.getString("repository_owner"),
                         resultSet.getString("repository_name"),
+                        resultSet.getInt("sync_interval_hours"),
                         resultSet.getInt("consecutive_failures")))
                 .list();
     }

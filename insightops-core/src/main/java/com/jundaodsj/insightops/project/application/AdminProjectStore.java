@@ -18,6 +18,8 @@ public interface AdminProjectStore {
             String repositoryName,
             String canonicalUrl,
             int priority,
+            int syncIntervalHours,
+            List<String> chatAliases,
             Instant now);
 
     Optional<ManagedProject> update(
@@ -27,6 +29,8 @@ public interface AdminProjectStore {
             String repositoryName,
             String canonicalUrl,
             int priority,
+            int syncIntervalHours,
+            List<String> chatAliases,
             Instant now);
 
     Optional<ManagedProject> setEnabled(
@@ -50,6 +54,8 @@ public interface AdminProjectStore {
             String repositoryName,
             String canonicalUrl,
             int priority,
+            int syncIntervalHours,
+            List<String> chatAliases,
             boolean enabled,
             String lastSyncStatus,
             Instant lastSyncAt,
@@ -62,6 +68,18 @@ public interface AdminProjectStore {
             long activeJobCount,
             Instant createdAt,
             Instant updatedAt) {
+
+        public ManagedProject(UUID projectId, String platform, String repositoryOwner,
+                              String repositoryName, String canonicalUrl, int priority,
+                              boolean enabled, String lastSyncStatus, Instant lastSyncAt,
+                              Instant nextSyncAt, int consecutiveFailures, String lastSyncError,
+                              long releaseCount, long knowledgeSourceCount, long watcherCount,
+                              long activeJobCount, Instant createdAt, Instant updatedAt) {
+            this(projectId, platform, repositoryOwner, repositoryName, canonicalUrl,
+                    priority, 6, List.of(), enabled, lastSyncStatus, lastSyncAt, nextSyncAt,
+                    consecutiveFailures, lastSyncError, releaseCount, knowledgeSourceCount,
+                    watcherCount, activeJobCount, createdAt, updatedAt);
+        }
 
         public boolean hasCollectedData() {
             return releaseCount > 0 || knowledgeSourceCount > 0;

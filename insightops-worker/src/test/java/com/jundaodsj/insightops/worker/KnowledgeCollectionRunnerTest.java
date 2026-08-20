@@ -33,7 +33,7 @@ class KnowledgeCollectionRunnerTest {
             UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
             "Spring AI", "spring-ai-documentation", "Spring AI Reference", "OFFICIAL_DOCUMENTATION",
             "https://docs.spring.io/spring-ai/reference/", "https://docs.spring.io/spring-ai/reference/",
-            "docs.spring.io", "/spring-ai/reference/", "T1_PROJECT_DOMAIN", 0);
+            "docs.spring.io", "/spring-ai/reference/", "T1_PROJECT_DOMAIN", 12, 0);
     private KnowledgeCollectionRunner runner;
 
     @BeforeEach
@@ -61,7 +61,7 @@ class KnowledgeCollectionRunnerTest {
         assertThat(result.collectedPages()).isEqualTo(1);
         assertThat(result.leaseLostSources()).isZero();
         verify(store).updateCollectionProgress(eq(source), any(), eq(NOW), eq(Duration.ofMinutes(10)));
-        verify(store).completeSuccessfulSync(source, List.of(page), NOW, NOW.plus(Duration.ofHours(24)));
+        verify(store).completeSuccessfulSync(source, List.of(page), NOW, NOW.plus(Duration.ofHours(12)));
     }
 
     @Test

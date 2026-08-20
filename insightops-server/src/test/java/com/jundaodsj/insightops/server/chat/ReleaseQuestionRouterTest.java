@@ -1,8 +1,15 @@
 package com.jundaodsj.insightops.server.chat;
 
+import com.jundaodsj.insightops.project.application.AdminProjectStore;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ReleaseQuestionRouterTest {
 
@@ -67,5 +74,29 @@ class ReleaseQuestionRouterTest {
                 .containsExactly("spring-ai", "langchain4j");
         assertThat(query.orElseThrow().timeWindowDays()).isEqualTo(90);
         assertThat(query.orElseThrow().maxReleasesPerProject()).isEqualTo(30);
+    }
+
+    @Test
+    void shouldResolveEnabledWorkspaceProjectByCustomAlias() {
+        UUID workspaceId = UUID.randomUUID();
+        UUID projectId = UUID.randomUUID();
+        AdminProjectStore store = mock(AdminProjectStore.class);
+        when(store.list(workspaceId)).thenReturn(List.of(new AdminProjectStore.ManagedProject(
+                projectId, "github", "acme", "agent-platform",
+                "https://github.com/acme/agent-platform", 2, 4, List.of("nebula"),
+                true, "SUCCEEDED", Instant.EPOCH, Instant.EPOCH, 0, null,
+                1, 0, 0, 0, Instant.EPOCH, Instant.EPOCH)));
+        ReleaseQuestionRouter dynamicRouter = new ReleaseQuestionRouter(store);
+
+        var routed = dynamicRouter.routeWithProjectContext(
+                workspaceId, "Nebula 最近版本有什么变化？", "");
+
+        assertThat(routed).isPresent();
+        assertThat(routed.orElseThrow().evidenceQuery().projectIds())
+                .containsExactly(projectId.toString());
+        assertThat(routed.orElseThrow().repositories()).singleElement().satisfies(repository -> {
+            assertThat(repository.repositoryOwner()).isEqualTo("acme");
+            assertThat(repository.repositoryName()).isEqualTo("agent-platform");
+        });
     }
 }

@@ -1,19 +1,25 @@
 <script setup lang="ts">
 import axios from 'axios'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 import {
+  createKnowledgeSource,
+  deleteKnowledgeSource,
   getLatestRagEvaluation,
   getKnowledgeEmbeddingOverview,
   listKnowledgeSources,
+  listManagedProjects,
   retryKnowledgeEmbeddings,
   requestKnowledgeSync,
   runRagEvaluation,
   searchKnowledge,
+  setKnowledgeSourceEnabled,
+  updateKnowledgeSource,
   type KnowledgeCollectionJob,
   type KnowledgeEmbeddingOverview,
   type KnowledgeSearchResult,
   type KnowledgeSourceStatus,
+  type ManagedProject,
   type RagEvaluationCase,
   type RagEvaluationReport,
 } from '@/api/admin'
@@ -24,6 +30,7 @@ import {
 } from './adminKnowledgeLoadState'
 
 const sources = ref<KnowledgeSourceStatus[]>([])
+const projects = ref<ManagedProject[]>([])
 const loading = ref(false)
 const syncing = ref<string | null>(null)
 const error = ref('')
@@ -37,7 +44,18 @@ const searchResults = ref<KnowledgeSearchResult[]>([])
 const searchMeta = ref('')
 const evaluation = ref<RagEvaluationReport | null>(null)
 const evaluating = ref(false)
+const savingSource = ref(false)
+const editingSourceId = ref<string | null>(null)
+const sourceForm = reactive({
+  projectId: '', name: '', sourceType: 'OFFICIAL_DOCUMENTATION',
+  rootUrl: '', discoveryUrl: '', allowedPathPrefix: '/', syncIntervalHours: 24,
+})
 let refreshTimer: ReturnType<typeof globalThis.setInterval> | undefined
+
+const editingSource = computed(() => sources.value.find(
+  source => source.sourceId === editingSourceId.value,
+) ?? null)
+const boundaryLocked = computed(() => Boolean(editingSource.value?.documentCount))
 
 const totals = computed(() => sources.value.reduce((value, source) => ({
   documents: value.documents + source.documentCount,
@@ -54,10 +72,12 @@ async function load(silent = false) {
   if (!silent) loading.value = true
   beginKnowledgeStatusLoad(error, refreshError, silent)
   try {
-    const [sourceData, embeddingData, evaluationData] = await Promise.all([
-      listKnowledgeSources(), getKnowledgeEmbeddingOverview(), getLatestRagEvaluation(),
+    const [sourceData, projectData, embeddingData, evaluationData] = await Promise.all([
+      listKnowledgeSources(), listManagedProjects(), getKnowledgeEmbeddingOverview(), getLatestRagEvaluation(),
     ])
     sources.value = sourceData
+    projects.value = projectData
+    if (!sourceForm.projectId && projectData.length) sourceForm.projectId = projectData[0].projectId
     embeddings.value = embeddingData
     evaluation.value = evaluationData
     completeKnowledgeStatusLoad(refreshError)
@@ -67,6 +87,77 @@ async function load(silent = false) {
     failKnowledgeStatusLoad(error, refreshError, silent, detail)
   }
   finally { if (!silent) loading.value = false }
+}
+
+async function saveSource() {
+  savingSource.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const input = {
+      projectId: sourceForm.projectId,
+      name: sourceForm.name.trim(),
+      sourceType: sourceForm.sourceType,
+      rootUrl: sourceForm.rootUrl.trim(),
+      discoveryUrl: sourceForm.discoveryUrl.trim(),
+      allowedPathPrefix: sourceForm.allowedPathPrefix.trim(),
+      syncIntervalHours: sourceForm.syncIntervalHours,
+    }
+    if (editingSourceId.value) {
+      await updateKnowledgeSource(editingSourceId.value, input)
+      notice.value = `${input.name} 已更新。`
+    } else {
+      await createKnowledgeSource(input)
+      notice.value = `${input.name} 已创建并加入采集队列。`
+    }
+    cancelSourceEdit()
+    await load()
+  } catch (caught: unknown) { error.value = message(caught) }
+  finally { savingSource.value = false }
+}
+
+function editSource(source: KnowledgeSourceStatus) {
+  editingSourceId.value = source.sourceId
+  sourceForm.projectId = source.projectId
+  sourceForm.name = source.name
+  sourceForm.sourceType = source.sourceType
+  sourceForm.rootUrl = source.rootUrl
+  sourceForm.discoveryUrl = source.discoveryUrl
+  sourceForm.allowedPathPrefix = source.allowedPathPrefix
+  sourceForm.syncIntervalHours = source.syncIntervalHours
+  error.value = ''
+  notice.value = ''
+}
+
+function cancelSourceEdit() {
+  editingSourceId.value = null
+  Object.assign(sourceForm, {
+    projectId: projects.value[0]?.projectId ?? '', name: '',
+    sourceType: 'OFFICIAL_DOCUMENTATION', rootUrl: '', discoveryUrl: '',
+    allowedPathPrefix: '/', syncIntervalHours: 24,
+  })
+}
+
+async function toggleSource(source: KnowledgeSourceStatus) {
+  error.value = ''
+  notice.value = ''
+  try {
+    await setKnowledgeSourceEnabled(source.sourceId, !source.enabled)
+    notice.value = `${source.name} 已${source.enabled ? '停用' : '启用'}。`
+    await load()
+  } catch (caught: unknown) { error.value = message(caught) }
+}
+
+async function removeSource(source: KnowledgeSourceStatus) {
+  if (!globalThis.confirm(`确定删除 ${source.name}？已有文档的来源只能停用，不能删除。`)) return
+  error.value = ''
+  notice.value = ''
+  try {
+    await deleteKnowledgeSource(source.sourceId)
+    if (editingSourceId.value === source.sourceId) cancelSourceEdit()
+    notice.value = `${source.name} 已删除。`
+    await load()
+  } catch (caught: unknown) { error.value = message(caught) }
 }
 
 async function evaluateRag() {
@@ -199,7 +290,7 @@ onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer)
 <template>
   <section>
     <div class="section-heading">
-      <div><span class="eyebrow">P1.4-E · 质量评测</span><h2>知识库、Embedding 与 RAG 质量管理</h2></div>
+      <div><span class="eyebrow">P1.5-B · 可配置知识源</span><h2>知识库、Embedding 与 RAG 质量管理</h2></div>
       <button class="secondary-button" :disabled="loading" @click="load()">刷新状态</button>
     </div>
 
@@ -213,6 +304,39 @@ onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer)
       <strong>安全模式</strong>
       <p>只采集登记过的官方 HTTPS 域名与路径；切片使用本机 Ollama bge-m3 生成向量，原文和向量均保存在本机 PostgreSQL，不调用 DeepSeek。</p>
     </div>
+
+    <form class="panel knowledge-source-form" @submit.prevent="saveSource">
+      <div class="admin-form-heading">
+        <strong>{{ editingSourceId ? '编辑知识源' : '添加官方知识源' }}</strong>
+        <span>仅允许公开 HTTPS 域名；采集时仍会执行 DNS、重定向、路径和 robots.txt 安全检查。</span>
+      </div>
+      <label>所属项目
+        <select v-model="sourceForm.projectId" :disabled="boundaryLocked" required>
+          <option v-for="project in projects" :key="project.projectId" :value="project.projectId">
+            {{ project.repositoryOwner }}/{{ project.repositoryName }}
+          </option>
+        </select>
+      </label>
+      <label>来源名称<input v-model="sourceForm.name" maxlength="256" placeholder="OpenAI Java Documentation" required></label>
+      <label>来源类型
+        <select v-model="sourceForm.sourceType">
+          <option value="OFFICIAL_DOCUMENTATION">官方文档</option>
+          <option value="MIGRATION_GUIDE">迁移指南</option>
+          <option value="OFFICIAL_RELEASE_NOTES">官方发布说明</option>
+        </select>
+      </label>
+      <label>采集周期（小时）<input v-model.number="sourceForm.syncIntervalHours" type="number" min="1" max="720" required></label>
+      <label class="knowledge-url-field">根 URL<input v-model="sourceForm.rootUrl" :disabled="boundaryLocked" type="url" maxlength="1024" placeholder="https://docs.example.com/guide/" required></label>
+      <label class="knowledge-url-field">发现 URL<input v-model="sourceForm.discoveryUrl" type="url" maxlength="1024" placeholder="https://docs.example.com/sitemap.xml" required></label>
+      <label>允许路径前缀<input v-model="sourceForm.allowedPathPrefix" :disabled="boundaryLocked" maxlength="512" placeholder="/guide/" required></label>
+      <div class="project-form-actions">
+        <button v-if="editingSourceId" type="button" class="secondary-button" @click="cancelSourceEdit">取消</button>
+        <button class="send-button" :disabled="savingSource || !projects.length">
+          {{ savingSource ? '保存中…' : editingSourceId ? '保存修改' : '添加来源' }}
+        </button>
+      </div>
+      <p v-if="boundaryLocked" class="project-form-note">已有文档，所属项目、根 URL 与路径边界已锁定；仍可修改名称、发现 URL、类型和采集周期。</p>
+    </form>
 
     <p v-if="error || refreshError" class="stream-error">{{ error || refreshError }}</p>
     <p v-if="notice" class="success-notice">{{ notice }}</p>
@@ -303,6 +427,8 @@ onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer)
           <div><dt>上次采集</dt><dd>{{ time(source.lastSyncAt) }}</dd></div>
           <div><dt>下次计划</dt><dd>{{ time(source.nextSyncAt) }}</dd></div>
           <div><dt>连续失败</dt><dd>{{ source.consecutiveFailures }}</dd></div>
+          <div><dt>采集周期</dt><dd>{{ source.syncIntervalHours }} 小时</dd></div>
+          <div><dt>路径边界</dt><dd>{{ source.allowedPathPrefix }}</dd></div>
         </dl>
         <div v-if="source.lastJob" class="knowledge-job">
           <div class="knowledge-job-summary">
@@ -327,9 +453,14 @@ onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer)
         <p v-if="source.lastError" class="stream-error">{{ source.lastError }}</p>
         <footer>
           <span>{{ source.trustTier }}</span>
-          <button class="send-button" :disabled="source.status === 'RUNNING' || syncing === source.sourceId" @click="sync(source)">
-            {{ syncing === source.sourceId ? '提交中…' : '立即采集' }}
-          </button>
+          <div class="knowledge-source-actions">
+            <button class="secondary-button" :disabled="source.status === 'RUNNING'" @click="editSource(source)">编辑</button>
+            <button class="secondary-button" :disabled="source.status === 'RUNNING'" @click="toggleSource(source)">{{ source.enabled ? '停用' : '启用' }}</button>
+            <button class="danger-button" :disabled="source.documentCount > 0 || source.status === 'RUNNING'" @click="removeSource(source)">删除</button>
+            <button class="send-button" :disabled="!source.enabled || source.status === 'RUNNING' || syncing === source.sourceId" @click="sync(source)">
+              {{ syncing === source.sourceId ? '提交中…' : '立即采集' }}
+            </button>
+          </div>
         </footer>
       </article>
     </div>

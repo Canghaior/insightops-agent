@@ -118,11 +118,12 @@ a { color: inherit; text-decoration: none; }
 .admin-form-heading { grid-column: 1 / -1; display: flex; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 .admin-form-heading span { color: var(--muted); font-size: 11px; }
 .admin-create-form .send-button { height: 40px; padding: 0 16px; border: 0; border-radius: 9px; cursor: pointer; }
-.project-admin-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 14px; align-items: end; margin-bottom: 20px; }
+.project-admin-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 14px; align-items: end; margin-bottom: 20px; }
 .project-admin-form label { display: grid; gap: 7px; color: #b9c5c7; font-size: 12px; }
 .project-admin-form input, .project-admin-form select { width: 100%; padding: 11px; color: #eef4f4; border: 1px solid var(--line); border-radius: 9px; outline: none; background: #0d1315; }
 .project-admin-form input:disabled { opacity: .58; cursor: not-allowed; }
 .project-form-actions { display: flex; gap: 8px; }
+.project-alias-field { grid-column: span 2; }
 .project-form-actions .send-button { padding: 10px 15px; border: 0; border-radius: 9px; cursor: pointer; }
 .project-form-note { grid-column: 1 / -1; margin: 0; color: #efc787; font-size: 11px; }
 .project-admin-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
@@ -169,6 +170,11 @@ a { color: inherit; text-decoration: none; }
 .knowledge-summary strong { font-size: 28px; }
 .knowledge-safety-note { margin-bottom: 18px; border-color: rgba(103, 212, 180, .25); }
 .knowledge-safety-note p { margin: 8px 0 0; color: var(--muted); line-height: 1.7; }
+.knowledge-source-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: end; margin-bottom: 18px; }
+.knowledge-source-form label { display: grid; gap: 7px; color: #b9c5c7; font-size: 12px; }
+.knowledge-source-form input, .knowledge-source-form select { width: 100%; padding: 11px; color: #eef4f4; border: 1px solid var(--line); border-radius: 9px; outline: none; background: #0d1315; }
+.knowledge-source-form input:disabled, .knowledge-source-form select:disabled { opacity: .58; cursor: not-allowed; }
+.knowledge-url-field { grid-column: span 2; }
 .knowledge-source-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .knowledge-source-card header, .knowledge-source-card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .knowledge-source-card h3 { margin: 5px 0; font-size: 20px; }
@@ -180,6 +186,7 @@ a { color: inherit; text-decoration: none; }
 .knowledge-job { display: grid; gap: 8px; padding: 10px; margin-bottom: 14px; border-radius: 10px; background: rgba(0, 0, 0, .16); }
 .knowledge-job-summary { display: grid; gap: 4px; }
 .knowledge-job span, .knowledge-source-card footer > span { color: var(--muted); font-size: 11px; }
+.knowledge-source-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .knowledge-current-url { display: block; color: var(--accent); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .embedding-panel, .rag-evaluation-panel, .knowledge-search-panel { margin-bottom: 18px; }
 .embedding-panel header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
@@ -479,7 +486,8 @@ a { color: inherit; text-decoration: none; }
   .admin-create-form, .admin-user-row, .audit-list article { grid-template-columns: 1fr; }
   .project-admin-form, .project-admin-grid { grid-template-columns: 1fr; }
   .collection-grid { grid-template-columns: 1fr; }
-  .knowledge-summary, .knowledge-source-grid { grid-template-columns: 1fr; }
+  .knowledge-summary, .knowledge-source-grid, .knowledge-source-form { grid-template-columns: 1fr; }
+  .knowledge-url-field { grid-column: auto; }
   .rag-evaluation-panel > header, .evaluation-action { align-items: stretch; flex-direction: column; }
   .evaluation-metrics { grid-template-columns: 1fr 1fr; }
   .intelligence-grid, .digest-preference-form { grid-template-columns: 1fr; }

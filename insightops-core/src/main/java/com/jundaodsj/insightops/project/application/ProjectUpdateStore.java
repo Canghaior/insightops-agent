@@ -48,7 +48,12 @@ public interface ProjectUpdateStore {
             String catalogProjectId,
             String owner,
             String repository,
+            int syncIntervalHours,
             int consecutiveFailures) {
+        public TrackedProject(UUID id, UUID workspaceId, String catalogProjectId,
+                              String owner, String repository, int consecutiveFailures) {
+            this(id, workspaceId, catalogProjectId, owner, repository, 6, consecutiveFailures);
+        }
     }
 
     record SyncResult(int releaseCount, int newEventCount) {

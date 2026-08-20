@@ -41,7 +41,10 @@ import com.jundaodsj.insightops.server.chat.ReleaseQuestionRouter;
 import com.jundaodsj.insightops.server.chat.ReleaseToolService;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import com.jundaodsj.insightops.tool.application.github.GitHubRelease;
+import com.jundaodsj.insightops.tool.application.github.GitHubReleaseGateway;
+import com.jundaodsj.insightops.tool.application.github.GitHubReleaseQuery;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseResult;
+import com.jundaodsj.insightops.tool.application.github.GitHubRepositoryReleaseQuery;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -117,7 +120,7 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(16);
+        assertThat(migration.migrationsExecuted).isEqualTo(17);
 
         jdbcClient = JdbcClient.create(dataSource);
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
@@ -133,19 +136,30 @@ class P0ChainDatabaseGateTest {
         conversationManager = new JdbcConversationManager(jdbcClient);
         projectWatchStore = new JdbcUserProjectWatchStore(jdbcClient);
         releaseToolService = new ReleaseToolService(
-                new ReleaseQuestionRouter(),
-                query -> new GitHubReleaseResult(List.of(new GitHubRelease(
-                        "spring-ai",
-                        "Spring AI",
-                        "v2.0.0",
-                        "Spring AI 2.0.0",
-                        Instant.parse("2026-06-12T12:00:00Z"),
-                        "https://github.com/spring-projects/spring-ai/releases/tag/v2.0.0",
-                        false,
-                        "Automated chain gate release evidence.")), Instant.parse("2026-08-16T00:00:00Z")),
+                new ReleaseQuestionRouter(adminProjectStore),
+                new GitHubReleaseGateway() {
+                    @Override
+                    public GitHubReleaseResult listReleases(GitHubReleaseQuery query) {
+                        return releaseResult("spring-ai", "Spring AI");
+                    }
+
+                    @Override
+                    public GitHubReleaseResult listRepositoryReleases(GitHubRepositoryReleaseQuery query) {
+                        return releaseResult(query.projectId(), query.displayName());
+                    }
+                },
                 new JdbcAgentToolExecutionStore(jdbcClient),
                 new GitHubReleaseEvidenceFormatter(),
                 objectMapper());
+    }
+
+    private static GitHubReleaseResult releaseResult(String projectId, String projectName) {
+        return new GitHubReleaseResult(List.of(new GitHubRelease(
+                projectId, projectName, "v2.0.0", projectName + " 2.0.0",
+                Instant.parse("2026-06-12T12:00:00Z"),
+                "https://github.com/spring-projects/spring-ai/releases/tag/v2.0.0",
+                false, "Automated chain gate release evidence.")),
+                Instant.parse("2026-08-16T00:00:00Z"));
     }
 
     @Test
@@ -354,7 +368,8 @@ class P0ChainDatabaseGateTest {
             assertThat(step.status()).isEqualTo("SUCCEEDED");
             assertThat(step.inputPayload()).isInstanceOf(java.util.Map.class);
             java.util.Map<?, ?> payload = (java.util.Map<?, ?>) step.inputPayload();
-            assertThat(payload.get("projectIds")).isEqualTo(List.of("spring-ai"));
+            assertThat(payload.get("projectIds")).isEqualTo(List.of(
+                    "00000000-0000-0000-0000-000000000101"));
             assertThat(payload.get("maxReleasesPerProject")).isEqualTo(2);
             assertThat(payload.get("includePrereleases")).isEqualTo(false);
         });
@@ -591,6 +606,28 @@ class P0ChainDatabaseGateTest {
                 select error_code from knowledge_collection_job where id=:jobId
                 """).param("jobId", staleTask.jobId()).query(String.class).single())
                 .isEqualTo("LOCK_EXPIRED");
+
+        UUID customSourceId = UUID.randomUUID();
+        var customDefinition = new KnowledgeStore.SourceDefinition(
+                customSourceId, ACTOR.workspaceId(), firstTask.projectId(),
+                "gate-custom-" + customSourceId.toString().substring(0, 8), "Gate Docs",
+                "OFFICIAL_DOCUMENTATION", "https://docs.example.com/guide/",
+                "https://docs.example.com/sitemap.xml", "docs.example.com", "/guide/",
+                "T1_PROJECT_DOMAIN", 7);
+        var custom = knowledgeStore.createSource(customDefinition, staleRun.plusSeconds(70));
+        assertThat(custom.syncIntervalHours()).isEqualTo(7);
+        var changedDefinition = new KnowledgeStore.SourceDefinition(
+                customSourceId, ACTOR.workspaceId(), firstTask.projectId(), custom.sourceKey(),
+                "Updated Gate Docs", custom.sourceType(), custom.rootUrl(), custom.discoveryUrl(),
+                custom.allowedHost(), custom.allowedPathPrefix(), custom.trustTier(), 9);
+        assertThat(knowledgeStore.updateSource(ACTOR.workspaceId(), customSourceId,
+                changedDefinition, staleRun.plusSeconds(71))).get()
+                .extracting(KnowledgeStore.SourceStatus::syncIntervalHours).isEqualTo(9);
+        assertThat(knowledgeStore.setSourceEnabled(ACTOR.workspaceId(), customSourceId,
+                false, staleRun.plusSeconds(72))).get()
+                .extracting(KnowledgeStore.SourceStatus::enabled).isEqualTo(false);
+        assertThat(knowledgeStore.deleteEmptySource(ACTOR.workspaceId(), customSourceId))
+                .isEqualTo(KnowledgeStore.DeleteResult.DELETED);
     }
 
     @Test
@@ -600,11 +637,14 @@ class P0ChainDatabaseGateTest {
         Instant now = Instant.parse("2026-08-19T08:00:00Z");
         var created = adminProjectStore.create(
                 projectId, ACTOR.workspaceId(), "openai", "openai-java",
-                "https://github.com/openai/openai-java", 2, now);
+                "https://github.com/openai/openai-java", 2, 12,
+                List.of("openai sdk"), now);
 
         assertThat(created.repositoryName()).isEqualTo("openai-java");
         assertThat(created.enabled()).isTrue();
         assertThat(created.nextSyncAt()).isEqualTo(now);
+        assertThat(created.syncIntervalHours()).isEqualTo(12);
+        assertThat(created.chatAliases()).containsExactly("openai sdk");
         assertThat(adminProjectStore.list(ACTOR.workspaceId()))
                 .extracting(AdminProjectStore.ManagedProject::projectId)
                 .contains(projectId);
@@ -615,15 +655,19 @@ class P0ChainDatabaseGateTest {
                 .findFirst().orElseThrow();
         assertThat(claimed.owner()).isEqualTo("openai");
         assertThat(claimed.repository()).isEqualTo("openai-java");
+        assertThat(claimed.syncIntervalHours()).isEqualTo(12);
         projectUpdateStore.completeSuccessfulSync(
                 claimed, List.of(), now.plusSeconds(1), now.plus(Duration.ofHours(6)));
 
         var updated = adminProjectStore.update(
                 ACTOR.workspaceId(), projectId, "openai", "openai-agents-java",
-                "https://github.com/openai/openai-agents-java", 4, now.plusSeconds(1))
+                "https://github.com/openai/openai-agents-java", 4, 8,
+                List.of("agents sdk"), now.plusSeconds(1))
                 .orElseThrow();
         assertThat(updated.repositoryName()).isEqualTo("openai-agents-java");
         assertThat(updated.priority()).isEqualTo(4);
+        assertThat(updated.syncIntervalHours()).isEqualTo(8);
+        assertThat(updated.chatAliases()).containsExactly("agents sdk");
 
         assertThat(adminProjectStore.setEnabled(
                 ACTOR.workspaceId(), projectId, false, now.plusSeconds(2)))

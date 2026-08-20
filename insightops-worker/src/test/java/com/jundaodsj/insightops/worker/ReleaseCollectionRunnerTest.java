@@ -32,7 +32,7 @@ class ReleaseCollectionRunnerTest {
     private final GitHubReleaseGateway gateway = mock(GitHubReleaseGateway.class);
     private final ReleaseCollectionProperties properties = new ReleaseCollectionProperties();
     private final ProjectUpdateStore.TrackedProject project = new ProjectUpdateStore.TrackedProject(
-            UUID.randomUUID(), UUID.randomUUID(), "spring-ai", "spring-projects", "spring-ai", 0);
+            UUID.randomUUID(), UUID.randomUUID(), "spring-ai", "spring-projects", "spring-ai", 9, 0);
     private ReleaseCollectionRunner runner;
 
     @BeforeEach
@@ -56,7 +56,7 @@ class ReleaseCollectionRunnerTest {
 
         assertThat(result.succeededProjects()).isEqualTo(1);
         assertThat(result.newEvents()).isEqualTo(1);
-        verify(store).completeSuccessfulSync(project, List.of(release), NOW, NOW.plus(Duration.ofHours(6)));
+        verify(store).completeSuccessfulSync(project, List.of(release), NOW, NOW.plus(Duration.ofHours(9)));
         ArgumentCaptor<GitHubRepositoryReleaseQuery> query =
                 ArgumentCaptor.forClass(GitHubRepositoryReleaseQuery.class);
         verify(gateway).listRepositoryReleases(query.capture());

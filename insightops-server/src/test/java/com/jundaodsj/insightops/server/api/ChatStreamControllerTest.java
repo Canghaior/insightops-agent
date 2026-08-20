@@ -65,7 +65,7 @@ class ChatStreamControllerTest {
         RecordingChatRunStore store = new RecordingChatRunStore();
         AtomicBoolean modelCalled = new AtomicBoolean();
         ReleaseToolService tool = mock(ReleaseToolService.class);
-        when(tool.execute(any(), anyString(), anyString(), any())).thenReturn(Optional.of(
+        when(tool.execute(any(), any(), anyString(), anyString(), any())).thenReturn(Optional.of(
                 new ReleaseToolService.ToolEvidence(
                         "untrusted evidence",
                         List.of("https://example.com/fake-release"),
@@ -268,7 +268,7 @@ class ChatStreamControllerTest {
 
     private static ReleaseToolService noTool() {
         ReleaseToolService service = mock(ReleaseToolService.class);
-        when(service.execute(any(), anyString(), anyString(), any())).thenReturn(Optional.empty());
+        when(service.execute(any(), any(), anyString(), anyString(), any())).thenReturn(Optional.empty());
         return service;
     }
 

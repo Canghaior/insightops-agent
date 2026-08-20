@@ -48,6 +48,56 @@ public class ReleaseToolService {
     }
 
     public Optional<ToolEvidence> execute(
+            UUID workspaceId,
+            UUID runId,
+            String question,
+            String previousUserQuestions,
+            ToolProgressListener listener) {
+        Optional<ReleaseQuestionRouter.ResolvedReleaseQuery> routed =
+                router.routeWithProjectContext(workspaceId, question,
+                        previousUserQuestions == null ? "" : previousUserQuestions);
+        if (routed.isEmpty()) return Optional.empty();
+        var resolved = routed.orElseThrow();
+        return executeResolved(runId, resolved, listener);
+    }
+
+    private Optional<ToolEvidence> executeResolved(
+            UUID runId, ReleaseQuestionRouter.ResolvedReleaseQuery resolved,
+            ToolProgressListener listener) {
+        GitHubReleaseQuery query = resolved.evidenceQuery();
+        UUID stepId = UUID.randomUUID();
+        UUID toolCallId = UUID.randomUUID();
+        Instant startedAt = Instant.now();
+        executionStore.startTool(runId, stepId, toolCallId, 1, TOOL_NAME,
+                runId + ":" + TOOL_NAME + ":1", json(query), startedAt);
+        listener.onStarted(toolCallId, TOOL_NAME);
+        try {
+            java.util.ArrayList<com.jundaodsj.insightops.tool.application.github.GitHubRelease> releases =
+                    new java.util.ArrayList<>();
+            Instant fetchedAt = startedAt;
+            boolean truncated = false;
+            for (var repository : resolved.repositories()) {
+                GitHubReleaseResult current = gateway.listRepositoryReleases(repository);
+                releases.addAll(current.releases());
+                if (current.fetchedAt().isAfter(fetchedAt)) fetchedAt = current.fetchedAt();
+                truncated = truncated || current.truncated();
+            }
+            GitHubReleaseResult result = new GitHubReleaseResult(releases, fetchedAt, truncated);
+            long durationMs = Duration.between(startedAt, Instant.now()).toMillis();
+            executionStore.succeedTool(runId, stepId, toolCallId, json(result), durationMs, Instant.now());
+            listener.onCompleted(toolCallId, TOOL_NAME, result.releases().size());
+            return Optional.of(new ToolEvidence(evidenceFormatter.format(query, result),
+                    result.sourceUrls(), toolCallId, result.releases().size()));
+        } catch (GitHubToolException exception) {
+            fail(stepId, toolCallId, exception.code().name(), startedAt);
+            throw exception;
+        } catch (RuntimeException exception) {
+            fail(stepId, toolCallId, GitHubToolErrorCode.INTERNAL_ERROR.name(), startedAt);
+            throw new GitHubToolException(GitHubToolErrorCode.INTERNAL_ERROR, exception);
+        }
+    }
+
+    public Optional<ToolEvidence> execute(
             UUID runId,
             String question,
             String previousUserQuestions,

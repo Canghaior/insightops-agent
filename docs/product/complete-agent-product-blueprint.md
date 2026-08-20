@@ -183,13 +183,16 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 - 有数据、关注者或活动任务的项目禁止删除；无业务数据项目删除时会清理终态采集任务历史。
 - Worker 直接使用数据库中的 owner/repository 采集 Release，不再受三个 P0 固定项目目录限制。
 - 动态项目会出现在用户关注列表；项目是否采集由管理端启停状态控制，个人关注只控制用户更新流。
-- 当前配置化范围是 GitHub Release；Issue、PR、官方知识源 CRUD、自定义频率和聊天项目路由仍属于后续阶段。
+- 项目支持 1～720 小时采集周期与聊天别名；聊天 Release 工具按当前 Workspace 的已启用项目动态识别仓库，不再固定为三个 P0 项目。
+- 系统管理员可以创建、编辑、启用、停用和删除空知识源；来源 URL 由服务端实施公开 HTTPS、同域和路径边界校验。
+- 已产生文档的知识源锁定项目、根 URL 与路径边界；仍可修改名称、类型、发现 URL 和 1～720 小时采集周期。
+- 当前配置化范围是 GitHub Release 与官方知识源；Issue、PR、Security Advisory、RSS 和用户级关注关键词仍属于后续阶段。
 - 生产验收详见 `docs/testing/results/p1-configurable-projects-production-acceptance-2026-08-20.md`。
 
 ### 4.12 测试与持续集成
 
-- 后端当前共有 126 个测试，包含 8 个 PostgreSQL/pgvector 数据库门禁测试，本轮全部通过。
-- 前端当前 20 个测试全部通过。
+- 后端当前共有 132 个测试槽，包含 8 个 PostgreSQL/pgvector 数据库门禁测试，本轮全部通过。
+- 前端当前 21 个测试全部通过。
 - 前端 ESLint 通过。
 - 前端生产构建通过。
 - GitHub Actions 已配置后端验证、前端 lint/test/build 和三个镜像构建。
@@ -198,13 +201,15 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 
 ## 5. 当前部分完成的能力
 
-### 5.1 知识库来源与高级项目配置仍不可配置
+### 5.1 更多数据源与长期质量体系仍待扩展
 
 P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `docs/testing/results/p1-rag-production-acceptance-2026-08-19.md`。当前限制已经从“生产数据未完成”转为“产品配置与长期质量体系不足”：
 
 - Owner 和系统管理员已可管理 GitHub Release 项目；普通成员仍只能关注已启用项目。
-- 官方文档知识源仍固定为 Spring AI、LangChain4j 和 Dify，尚无来源 CRUD。
+- 系统管理员已可管理官方知识源，配置公开 HTTPS 采集边界、发现 URL、来源类型和采集周期。
+- 项目采集周期与聊天项目别名已可配置，Release 问答按 Workspace 动态路由。
 - 尚未支持 Issue、PR、Security Advisory、Roadmap、RSS 和用户上传资料。
+- 尚未支持用户级关注关键词、项目规则和通知过滤条件。
 - 评测集仍为 15 题，尚未扩充到 50～100 题并形成版本对比。
 - 尚未实现专用 Reranker、用户引用纠错和评测样本回流。
 
@@ -611,11 +616,12 @@ P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `do
 ### 阶段 B：从固定演示升级为可配置产品
 
 1. [x] 项目管理 CRUD（P1.5-A，GitHub Release）。
-2. 知识源管理 CRUD。
-3. 用户自定义采集频率和关注关键词。
-4. 增加 Issue、PR、Security Advisory、RSS。
-5. 增加用户反馈和引用纠错。
-6. 增加报告导出和至少一种站外通知。
+2. [x] 知识源管理 CRUD（P1.5-B，官方 HTTPS 来源）。
+3. [x] 项目/知识源自定义采集频率与聊天项目别名（P1.5-B）。
+4. 用户级关注关键词、规则和通知过滤条件。
+5. 增加 Issue、PR、Security Advisory、RSS。
+6. 增加用户反馈和引用纠错。
+7. 增加报告导出和至少一种站外通知。
 
 ### 阶段 C：升级为真正 Agent
 

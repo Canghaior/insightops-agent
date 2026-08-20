@@ -63,9 +63,13 @@ public class AdminProjectService {
             AccountWorkspaceStore.AccountRecord actor,
             String repositoryOwner,
             String repositoryName,
-            int priority) {
+            int priority,
+            int syncIntervalHours,
+            List<String> chatAliases) {
         requireManager(actor);
         RepositoryCoordinates coordinates = validate(repositoryOwner, repositoryName, priority);
+        List<String> aliases = validateAliases(chatAliases);
+        validateInterval(syncIntervalHours);
         UUID projectId = UUID.randomUUID();
         Instant now = clock.instant();
         try {
@@ -76,6 +80,8 @@ public class AdminProjectService {
                     coordinates.repository(),
                     coordinates.canonicalUrl(),
                     priority,
+                    syncIntervalHours,
+                    aliases,
                     now);
             audit(actor, "PROJECT_CREATED", created);
             return created;
@@ -84,15 +90,25 @@ public class AdminProjectService {
         }
     }
 
+    public AdminProjectStore.ManagedProject create(
+            AccountWorkspaceStore.AccountRecord actor, String repositoryOwner,
+            String repositoryName, int priority) {
+        return create(actor, repositoryOwner, repositoryName, priority, 6, List.of());
+    }
+
     @Transactional
     public AdminProjectStore.ManagedProject update(
             AccountWorkspaceStore.AccountRecord actor,
             UUID projectId,
             String repositoryOwner,
             String repositoryName,
-            int priority) {
+            int priority,
+            int syncIntervalHours,
+            List<String> chatAliases) {
         requireManager(actor);
         RepositoryCoordinates coordinates = validate(repositoryOwner, repositoryName, priority);
+        List<String> aliases = validateAliases(chatAliases);
+        validateInterval(syncIntervalHours);
         AdminProjectStore.ManagedProject existing = project(actor, projectId);
         boolean coordinatesChanged = !existing.repositoryOwner().equalsIgnoreCase(coordinates.owner())
                 || !existing.repositoryName().equalsIgnoreCase(coordinates.repository());
@@ -107,12 +123,22 @@ public class AdminProjectService {
                     coordinates.repository(),
                     coordinates.canonicalUrl(),
                     priority,
+                    syncIntervalHours,
+                    aliases,
                     clock.instant()).orElseThrow(AdminProjectService::notFound);
             audit(actor, "PROJECT_UPDATED", updated);
             return updated;
         } catch (DataIntegrityViolationException exception) {
             throw conflict("This GitHub repository is already tracked");
         }
+    }
+
+    public AdminProjectStore.ManagedProject update(
+            AccountWorkspaceStore.AccountRecord actor, UUID projectId,
+            String repositoryOwner, String repositoryName, int priority) {
+        AdminProjectStore.ManagedProject existing = project(actor, projectId);
+        return update(actor, projectId, repositoryOwner, repositoryName, priority,
+                existing.syncIntervalHours(), existing.chatAliases());
     }
 
     @Transactional
@@ -174,6 +200,8 @@ public class AdminProjectService {
                     "projectId", project.projectId(),
                     "repository", project.repositoryOwner() + "/" + project.repositoryName(),
                     "priority", project.priority(),
+                    "syncIntervalHours", project.syncIntervalHours(),
+                    "chatAliases", project.chatAliases(),
                     "enabled", project.enabled()));
             auditStore.appendAudit(UUID.randomUUID(), actor.workspaceId(), actor.userId(), null,
                     action, details, clock.instant());
@@ -192,6 +220,26 @@ public class AdminProjectService {
 
     private static ResponseStatusException badRequest(String message) {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+    }
+
+    private static void validateInterval(int interval) {
+        if (interval < 1 || interval > 720) {
+            throw badRequest("Collection interval must be between 1 and 720 hours");
+        }
+    }
+
+    private static List<String> validateAliases(List<String> input) {
+        if (input == null) return List.of();
+        if (input.size() > 20) throw badRequest("At most 20 chat aliases are allowed");
+        List<String> aliases = input.stream()
+                .map(value -> value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT))
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .toList();
+        if (aliases.stream().anyMatch(value -> value.length() < 2 || value.length() > 80)) {
+            throw badRequest("Chat aliases must contain 2-80 characters");
+        }
+        return aliases;
     }
 
     private static ResponseStatusException conflict(String message) {

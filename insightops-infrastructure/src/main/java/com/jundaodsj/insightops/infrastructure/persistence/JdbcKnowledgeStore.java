@@ -39,7 +39,7 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                        project.repository_name as project_name, source.source_key,
                        source.name, source.source_type, source.root_url, source.discovery_url,
                        source.allowed_host, source.allowed_path_prefix, source.trust_tier,
-                       source.consecutive_failures
+                       source.sync_interval_hours, source.consecutive_failures
                 from knowledge_source source
                 join tracked_project project on project.id = source.project_id
                 where source.enabled = true
@@ -296,7 +296,9 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
         return jdbc.sql("""
                 select source.id, source.project_id, project.repository_name as project_name,
                        source.source_key, source.name, source.source_type, source.root_url,
-                       source.trust_tier, source.enabled, source.status, source.last_sync_at,
+                       source.discovery_url, source.allowed_host, source.allowed_path_prefix,
+                       source.trust_tier, source.sync_interval_hours,
+                       source.enabled, source.status, source.last_sync_at,
                        source.next_sync_at, source.consecutive_failures, source.last_error,
                        source.locked_until,
                        (select count(*) from knowledge_document document
@@ -343,6 +345,122 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                 .param("workspaceId", workspaceId)
                 .param("now", timestamp(now))
                 .update() > 0;
+    }
+
+    @Override
+    @Transactional
+    public SourceStatus createSource(SourceDefinition source, Instant now) {
+        jdbc.sql("""
+                insert into knowledge_source
+                    (id, workspace_id, project_id, source_key, name, source_type,
+                     root_url, discovery_url, allowed_host, allowed_path_prefix,
+                     trust_tier, sync_interval_hours, enabled, status, next_sync_at,
+                     created_at, updated_at)
+                values (:id, :workspaceId, :projectId, :sourceKey, :name, :sourceType,
+                        :rootUrl, :discoveryUrl, :allowedHost, :allowedPathPrefix,
+                        :trustTier, :syncIntervalHours, true, 'NEVER', :now, :now, :now)
+                """)
+                .param("id", source.sourceId())
+                .param("workspaceId", source.workspaceId())
+                .param("projectId", source.projectId())
+                .param("sourceKey", source.sourceKey())
+                .param("name", source.name())
+                .param("sourceType", source.sourceType())
+                .param("rootUrl", source.rootUrl())
+                .param("discoveryUrl", source.discoveryUrl())
+                .param("allowedHost", source.allowedHost())
+                .param("allowedPathPrefix", source.allowedPathPrefix())
+                .param("trustTier", source.trustTier())
+                .param("syncIntervalHours", source.syncIntervalHours())
+                .param("now", timestamp(now))
+                .update();
+        return findSourceStatus(source.workspaceId(), source.sourceId()).orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public Optional<SourceStatus> updateSource(UUID workspaceId, UUID sourceId,
+                                               SourceDefinition source, Instant now) {
+        int updated = jdbc.sql("""
+                update knowledge_source
+                set project_id=:projectId, name=:name, source_type=:sourceType,
+                    root_url=:rootUrl, discovery_url=:discoveryUrl,
+                    allowed_host=:allowedHost, allowed_path_prefix=:allowedPathPrefix,
+                    trust_tier=:trustTier, sync_interval_hours=:syncIntervalHours,
+                    updated_at=:now
+                where id=:sourceId and workspace_id=:workspaceId and status <> 'RUNNING'
+                """)
+                .param("projectId", source.projectId())
+                .param("name", source.name())
+                .param("sourceType", source.sourceType())
+                .param("rootUrl", source.rootUrl())
+                .param("discoveryUrl", source.discoveryUrl())
+                .param("allowedHost", source.allowedHost())
+                .param("allowedPathPrefix", source.allowedPathPrefix())
+                .param("trustTier", source.trustTier())
+                .param("syncIntervalHours", source.syncIntervalHours())
+                .param("now", timestamp(now))
+                .param("sourceId", sourceId)
+                .param("workspaceId", workspaceId)
+                .update();
+        return updated == 1 ? findSourceStatus(workspaceId, sourceId) : Optional.empty();
+    }
+
+    @Override
+    @Transactional
+    public Optional<SourceStatus> setSourceEnabled(UUID workspaceId, UUID sourceId,
+                                                   boolean enabled, Instant now) {
+        int updated = jdbc.sql("""
+                update knowledge_source
+                set enabled=:enabled,
+                    next_sync_at=case when :enabled then :now else next_sync_at end,
+                    status=case when :enabled and last_sync_at is null then 'RETRY_WAIT'
+                                else status end,
+                    locked_until=case when :enabled then locked_until else null end,
+                    lock_token=case when :enabled then lock_token else null end,
+                    updated_at=:now
+                where id=:sourceId and workspace_id=:workspaceId and status <> 'RUNNING'
+                """)
+                .param("enabled", enabled)
+                .param("now", timestamp(now))
+                .param("sourceId", sourceId)
+                .param("workspaceId", workspaceId)
+                .update();
+        return updated == 1 ? findSourceStatus(workspaceId, sourceId) : Optional.empty();
+    }
+
+    @Override
+    @Transactional
+    public DeleteResult deleteEmptySource(UUID workspaceId, UUID sourceId) {
+        Optional<UUID> locked = jdbc.sql("""
+                select id from knowledge_source
+                where id=:sourceId and workspace_id=:workspaceId
+                for update
+                """)
+                .param("sourceId", sourceId)
+                .param("workspaceId", workspaceId)
+                .query(UUID.class)
+                .optional();
+        if (locked.isEmpty()) return DeleteResult.NOT_FOUND;
+        boolean dependent = jdbc.sql("""
+                select exists(select 1 from knowledge_document where source_id=:sourceId)
+                    or exists(select 1 from knowledge_collection_job
+                              where source_id=:sourceId and status='RUNNING')
+                """)
+                .param("sourceId", sourceId)
+                .query(Boolean.class)
+                .single();
+        if (dependent) return DeleteResult.HAS_DEPENDENCIES;
+        jdbc.sql("delete from knowledge_source where id=:sourceId")
+                .param("sourceId", sourceId)
+                .update();
+        return DeleteResult.DELETED;
+    }
+
+    private Optional<SourceStatus> findSourceStatus(UUID workspaceId, UUID sourceId) {
+        return sourceStatus(workspaceId).stream()
+                .filter(source -> source.sourceId().equals(sourceId))
+                .findFirst();
     }
 
     private Optional<DocumentState> findDocument(UUID sourceId, String canonicalUrl) {
@@ -435,7 +553,8 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                 rs.getString("project_name"), rs.getString("source_key"), rs.getString("name"),
                 rs.getString("source_type"), rs.getString("root_url"), rs.getString("discovery_url"),
                 rs.getString("allowed_host"), rs.getString("allowed_path_prefix"),
-                rs.getString("trust_tier"), rs.getInt("consecutive_failures"));
+                rs.getString("trust_tier"), rs.getInt("sync_interval_hours"),
+                rs.getInt("consecutive_failures"));
     }
 
     private SourceStatus sourceStatus(ResultSet rs, int rowNum) throws SQLException {
@@ -450,7 +569,9 @@ public class JdbcKnowledgeStore implements KnowledgeStore {
                 rs.getString("error_message"), instant(rs, "started_at"), instant(rs, "finished_at"));
         return new SourceStatus(rs.getObject("id", UUID.class), rs.getObject("project_id", UUID.class),
                 rs.getString("project_name"), rs.getString("source_key"), rs.getString("name"),
-                rs.getString("source_type"), rs.getString("root_url"), rs.getString("trust_tier"),
+                rs.getString("source_type"), rs.getString("root_url"), rs.getString("discovery_url"),
+                rs.getString("allowed_host"), rs.getString("allowed_path_prefix"),
+                rs.getString("trust_tier"), rs.getInt("sync_interval_hours"),
                 rs.getBoolean("enabled"), rs.getString("status"), instant(rs, "last_sync_at"),
                 instant(rs, "next_sync_at"), rs.getInt("consecutive_failures"),
                 rs.getString("last_error"), rs.getLong("document_count"),

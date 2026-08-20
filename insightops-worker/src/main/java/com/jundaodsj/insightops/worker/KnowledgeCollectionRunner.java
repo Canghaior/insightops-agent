@@ -48,7 +48,7 @@ public class KnowledgeCollectionRunner {
                         store.updateCollectionProgress(source, progress, clock.instant(), lockDuration));
                 Instant completedAt = clock.instant();
                 var result = store.completeSuccessfulSync(source, documents, completedAt,
-                        completedAt.plus(Duration.ofHours(Math.max(1, properties.getSyncIntervalHours()))));
+                        completedAt.plus(Duration.ofHours(Math.max(1, source.syncIntervalHours()))));
                 succeeded++;
                 pages += result.pageCount();
                 chunks += result.chunkCount();

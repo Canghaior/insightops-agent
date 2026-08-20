@@ -50,7 +50,9 @@ public class AdminProjectController {
                 CurrentAccount.account(request),
                 body.repositoryOwner(),
                 body.repositoryName(),
-                body.priority()));
+                body.priority(),
+                body.syncIntervalHoursOrDefault(),
+                body.chatAliasesOrEmpty()));
     }
 
     @PutMapping("/{projectId}")
@@ -63,7 +65,9 @@ public class AdminProjectController {
                 projectId,
                 body.repositoryOwner(),
                 body.repositoryName(),
-                body.priority()));
+                body.priority(),
+                body.syncIntervalHoursOrDefault(),
+                body.chatAliasesOrEmpty()));
     }
 
     @PatchMapping("/{projectId}/status")
@@ -88,7 +92,17 @@ public class AdminProjectController {
     public record ProjectRequest(
             @NotBlank @Size(max = 39) String repositoryOwner,
             @NotBlank @Size(max = 100) String repositoryName,
-            @Min(1) @Max(5) int priority) {
+            @Min(1) @Max(5) int priority,
+            @Min(1) @Max(720) Integer syncIntervalHours,
+            @Size(max = 20) List<@NotBlank @Size(max = 80) String> chatAliases) {
+
+        int syncIntervalHoursOrDefault() {
+            return syncIntervalHours == null ? 6 : syncIntervalHours;
+        }
+
+        List<String> chatAliasesOrEmpty() {
+            return chatAliases == null ? List.of() : chatAliases;
+        }
     }
 
     public record StatusRequest(@NotNull Boolean enabled) {

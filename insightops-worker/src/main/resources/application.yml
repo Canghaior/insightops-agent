@@ -52,6 +52,16 @@ insightops:
     poll-delay-ms: ${INTELLIGENCE_ANALYSIS_POLL_DELAY_MS:30000}
     digest-initial-delay-ms: ${INTELLIGENCE_DIGEST_INITIAL_DELAY_MS:15000}
     digest-poll-delay-ms: ${INTELLIGENCE_DIGEST_POLL_DELAY_MS:300000}
+  delivery:
+    enabled: ${REPORT_DELIVERY_ENABLED:true}
+    batch-size: ${REPORT_DELIVERY_BATCH_SIZE:5}
+    lease-minutes: ${REPORT_DELIVERY_LEASE_MINUTES:2}
+    max-retries: ${REPORT_DELIVERY_MAX_RETRIES:2}
+    request-timeout-seconds: ${REPORT_DELIVERY_TIMEOUT_SECONDS:20}
+    initial-delay-ms: ${REPORT_DELIVERY_INITIAL_DELAY_MS:20000}
+    poll-delay-ms: ${REPORT_DELIVERY_POLL_DELAY_MS:30000}
+    public-base-url: ${APP_PUBLIC_URL:https://insightops.canghaior.com}
+    encryption-key: ${DELIVERY_ENCRYPTION_KEY:${DB_PASSWORD:insightops_dev}}
   knowledge:
     embedding:
       enabled: ${EMBEDDING_ENABLED:false}

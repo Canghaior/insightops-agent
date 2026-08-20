@@ -34,6 +34,8 @@ spring:
           max-retries: ${MODEL_MAX_RETRIES:2}
 
 insightops:
+  report:
+    pdf-font-path: ${REPORT_PDF_FONT_PATH:}
   knowledge:
     embedding:
       enabled: ${EMBEDDING_ENABLED:false}
@@ -66,6 +68,10 @@ insightops:
       username: ${AUTH_BOOTSTRAP_USERNAME:alpha-owner}
       display-name: ${AUTH_BOOTSTRAP_DISPLAY_NAME:Alpha Owner}
       password: ${AUTH_BOOTSTRAP_PASSWORD:}
+  delivery:
+    public-base-url: ${APP_PUBLIC_URL:https://insightops.canghaior.com}
+    request-timeout-seconds: ${REPORT_DELIVERY_TIMEOUT_SECONDS:20}
+    encryption-key: ${DELIVERY_ENCRYPTION_KEY:${DB_PASSWORD:insightops_dev}}
   tool:
     github:
       base-url: ${GITHUB_API_BASE_URL:https://api.github.com}

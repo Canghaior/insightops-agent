@@ -148,6 +148,13 @@ POST /api/v1/admin/knowledge/evaluations
 POST /api/v1/knowledge/search
 GET  /api/v1/runs?page=0&size=20&status=SUCCEEDED
 GET  /api/v1/runs/{runId}
+GET/POST /api/v1/reports
+GET  /api/v1/reports/{reportId}/export.md
+GET  /api/v1/reports/{reportId}/export.pdf
+GET/POST /api/v1/delivery-channels
+POST /api/v1/reports/{reportId}/deliveries
+GET  /api/v1/report-deliveries
+POST /api/v1/report-deliveries/{deliveryId}/retry
 ```
 
 首次请求不传 `sessionId`，服务端创建当前登录用户的会话并在 `started` 事件返回该 ID；后续请求传回该 `sessionId` 即可继续同一会话。会话列表来自 PostgreSQL，可跨标签页和设备恢复，并支持改名、归档、恢复和删除。删除会话时保留 Agent Run 审计记录。长期记忆由用户显式新增、启停、修改和删除，只用于个性化表达，不作为版本事实证据。

@@ -13,6 +13,7 @@ const router = createRouter({
     { path: '/intelligence', name: 'intelligence', component: () => import('@/views/IntelligenceView.vue') },
     { path: '/intelligence/:analysisId', name: 'intelligence-detail', component: () => import('@/views/IntelligenceView.vue') },
     { path: '/digests', name: 'digests', component: () => import('@/views/DigestsView.vue') },
+    { path: '/reports', name: 'reports', component: () => import('@/views/ReportsView.vue') },
     { path: '/chat', name: 'chat', component: () => import('@/views/ChatView.vue') },
     { path: '/memory', name: 'memory', component: () => import('@/views/MemoryView.vue') },
     { path: '/runs', name: 'runs', component: () => import('@/views/RunsView.vue') },

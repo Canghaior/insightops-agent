@@ -21,6 +21,7 @@ const navigation = [
   { path: '/watch-rules', label: '关注规则', icon: Operation },
   { path: '/intelligence', label: '情报分析', icon: DataAnalysis },
   { path: '/digests', label: '情报摘要', icon: Operation, noticeBadge: true },
+  { path: '/reports', label: '报告交付', icon: DataAnalysis },
   { path: '/chat', label: '研究问答', icon: ChatDotRound },
   { path: '/memory', label: '长期记忆', icon: User },
   { path: '/runs', label: '执行记录', icon: Operation },

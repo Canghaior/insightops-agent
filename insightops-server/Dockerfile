@@ -18,7 +18,7 @@ RUN ./mvnw --batch-mode --no-transfer-progress \
     -pl insightops-server -am clean package -DskipTests
 
 FROM eclipse-temurin:21-jre-jammy
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+RUN apt-get update && apt-get install -y --no-install-recommends curl fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system insightops \
     && useradd --system --gid insightops --home-dir /app --shell /usr/sbin/nologin insightops

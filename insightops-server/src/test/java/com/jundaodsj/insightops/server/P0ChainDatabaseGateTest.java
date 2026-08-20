@@ -29,10 +29,13 @@ import com.jundaodsj.insightops.infrastructure.persistence.JdbcKnowledgeEmbeddin
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcWatchRuleStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcResearchFeedbackStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcQualityReviewStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcReportDeliveryStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserProjectWatchStore;
+import com.jundaodsj.insightops.infrastructure.delivery.DeliverySecretCipher;
 import com.jundaodsj.insightops.infrastructure.knowledge.KnowledgeDocumentChunker;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
 import com.jundaodsj.insightops.knowledge.application.QualityReviewStore;
+import com.jundaodsj.insightops.report.application.ReportDeliveryStore;
 import com.jundaodsj.insightops.model.application.ChatStreamEvent;
 import com.jundaodsj.insightops.model.application.ChatStreamSession;
 import com.jundaodsj.insightops.model.application.ModelUsage;
@@ -106,6 +109,7 @@ class P0ChainDatabaseGateTest {
     private static JdbcWatchRuleStore watchRuleStore;
     private static JdbcResearchFeedbackStore feedbackStore;
     private static JdbcQualityReviewStore qualityReviewStore;
+    private static JdbcReportDeliveryStore reportDeliveryStore;
 
     @BeforeAll
     static void prepareIsolatedSchema() throws Exception {
@@ -129,7 +133,7 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(19);
+        assertThat(migration.migrationsExecuted).isEqualTo(20);
 
         jdbcClient = JdbcClient.create(dataSource);
         adminAccountStore = new JdbcAdminAccountStore(jdbcClient);
@@ -141,6 +145,8 @@ class P0ChainDatabaseGateTest {
         watchRuleStore = new JdbcWatchRuleStore(jdbcClient);
         feedbackStore = new JdbcResearchFeedbackStore(jdbcClient);
         qualityReviewStore = new JdbcQualityReviewStore(jdbcClient, objectMapper());
+        reportDeliveryStore = new JdbcReportDeliveryStore(
+                jdbcClient, objectMapper(), new DeliverySecretCipher("chain-gate-delivery-secret"));
         DeepSeekCostEstimator estimator = new DeepSeekCostEstimator(pricing());
         runStore = new JdbcChatRunStore(jdbcClient, estimator);
         runQuery = new JdbcAgentRunQuery(jdbcClient, objectMapper());
@@ -834,6 +840,84 @@ class P0ChainDatabaseGateTest {
                     assertThat(selection.cases()).hasSize(1);
                     assertThat(selection.cases().getFirst().mustHitTerms()).contains("vector store");
                 });
+    }
+
+    @Test
+    @Order(11)
+    void reportsExportsAndWebhookDeliveryRemainScopedIdempotentAndAuditable() {
+        Instant now = Instant.parse("2026-08-20T02:00:00Z");
+        var query = new ReportDeliveryStore.ReportQuery(
+                "P1.8 production report", Instant.parse("2026-08-01T00:00:00Z"),
+                Instant.parse("2026-09-01T00:00:00Z"), List.of(),
+                List.of("GITHUB_RELEASE"), 50);
+        var selected = reportDeliveryStore.selectReportItems(ACTOR, query);
+        assertThat(selected).isNotEmpty();
+
+        UUID reportId = UUID.randomUUID();
+        var report = reportDeliveryStore.createReport(
+                ACTOR, reportId, query, selected, "# P1.8 production report\n\nSnapshot body.", now);
+        assertThat(report.itemCount()).isEqualTo(selected.size());
+        assertThat(report.highRiskCount()).isGreaterThanOrEqualTo(1);
+        assertThat(reportDeliveryStore.listReports(ACTOR, 0, 20).items())
+                .extracting(ReportDeliveryStore.ReportRecord::id).contains(reportId);
+
+        UUID otherUser = UUID.randomUUID();
+        createTestUser(otherUser, "report-isolated", "Report Isolated");
+        ActorContext otherActor = new ActorContext(otherUser, ACTOR.workspaceId());
+        assertThat(reportDeliveryStore.findReport(otherActor, reportId)).isEmpty();
+
+        String endpoint = "https://hooks.example.com/secret-delivery-token";
+        UUID channelId = UUID.randomUUID();
+        var channel = reportDeliveryStore.createChannel(
+                ACTOR, channelId, "Release webhook", endpoint, true, now.plusSeconds(1));
+        assertThat(channel.endpointMasked()).isEqualTo("https://hooks.example.com/***");
+        assertThat(channel.endpointMasked()).doesNotContain("secret-delivery-token");
+        assertThatThrownBy(() -> reportDeliveryStore.createChannel(
+                ACTOR, UUID.randomUUID(), "release WEBHOOK", endpoint, true, now.plusSeconds(2)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("already exists");
+
+        var delivery = reportDeliveryStore.enqueueDelivery(
+                ACTOR, reportId, channelId, now.plusSeconds(3)).orElseThrow();
+        var duplicate = reportDeliveryStore.enqueueDelivery(
+                ACTOR, reportId, channelId, now.plusSeconds(4)).orElseThrow();
+        assertThat(duplicate.id()).isEqualTo(delivery.id());
+        assertThat(reportDeliveryStore.listDeliveries(otherActor, 0, 20, null).items()).isEmpty();
+        assertThat(reportDeliveryStore.retryDelivery(otherActor, delivery.id(), now.plusSeconds(5))).isEmpty();
+
+        var firstTask = reportDeliveryStore.claimDueDeliveries(
+                now.plusSeconds(5), Duration.ofMinutes(5), 10).getFirst();
+        assertThat(firstTask.endpointUrl()).isEqualTo(endpoint);
+        assertThat(firstTask.attempts()).isEqualTo(1);
+        Instant retryAt = now.plus(Duration.ofMinutes(5));
+        reportDeliveryStore.failDelivery(
+                firstTask.deliveryId(), firstTask.leaseToken(), "HTTP_503", "upstream unavailable",
+                503, 42, now.plusSeconds(6), retryAt, false);
+        assertThat(reportDeliveryStore.listDeliveries(ACTOR, 0, 20, reportId).items().getFirst())
+                .satisfies(item -> {
+                    assertThat(item.status()).isEqualTo("RETRY_WAIT");
+                    assertThat(item.responseCode()).isEqualTo(503);
+                    assertThat(item.lastError()).contains("upstream unavailable");
+                });
+
+        assertThat(reportDeliveryStore.claimDueDeliveries(
+                retryAt.minusSeconds(1), Duration.ofMinutes(5), 10)).isEmpty();
+        var retryTask = reportDeliveryStore.claimDueDeliveries(
+                retryAt, Duration.ofMinutes(5), 10).getFirst();
+        assertThat(retryTask.attempts()).isEqualTo(2);
+        reportDeliveryStore.completeDelivery(
+                retryTask.deliveryId(), retryTask.leaseToken(), 204, 31, retryAt.plusSeconds(1));
+        assertThat(reportDeliveryStore.listDeliveries(ACTOR, 0, 20, reportId).items().getFirst())
+                .satisfies(item -> {
+                    assertThat(item.status()).isEqualTo("SUCCEEDED");
+                    assertThat(item.responseCode()).isEqualTo(204);
+                    assertThat(item.durationMs()).isEqualTo(31L);
+                });
+
+        assertThat(reportDeliveryStore.deleteChannel(ACTOR, channelId, retryAt.plusSeconds(2))).isTrue();
+        assertThat(reportDeliveryStore.listChannels(ACTOR)).isEmpty();
+        assertThat(reportDeliveryStore.listDeliveries(ACTOR, 0, 20, reportId).items())
+                .singleElement().extracting(ReportDeliveryStore.DeliveryRecord::status).isEqualTo("SUCCEEDED");
     }
 
     private static ActorContext actor(String userId) {

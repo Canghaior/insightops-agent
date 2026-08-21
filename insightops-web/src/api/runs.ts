@@ -31,6 +31,18 @@ export interface RunStep {
   finishedAt: string | null
 }
 
+export interface RunToolAttempt {
+  id: string
+  attemptNo: number
+  status: string
+  errorCode: string | null
+  retryable: boolean
+  retryDelayMs: number
+  durationMs: number | null
+  startedAt: string
+  finishedAt: string | null
+}
+
 export interface RunToolCall {
   id: string
   stepId: string | null
@@ -42,6 +54,7 @@ export interface RunToolCall {
   durationMs: number | null
   createdAt: string
   finishedAt: string | null
+  attempts: RunToolAttempt[]
 }
 
 export interface RunDetail extends RunSummary {

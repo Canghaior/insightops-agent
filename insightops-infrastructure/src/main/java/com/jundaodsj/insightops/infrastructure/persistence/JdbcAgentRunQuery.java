@@ -102,6 +102,25 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                 .param("runId", runId)
                 .query((resultSet, rowNum) -> step(resultSet))
                 .list();
+        java.util.Map<UUID, List<RunToolAttempt>> attemptsByToolCall =
+                new java.util.LinkedHashMap<>();
+        List<AttemptRow> attemptRows = jdbcClient.sql("""
+                        select a.id, a.tool_call_id, a.attempt_no, a.status, a.error_code,
+                               a.retryable, a.retry_delay_ms, a.duration_ms,
+                               a.started_at, a.finished_at
+                        from tool_call_attempt a
+                        join tool_call t on t.id = a.tool_call_id
+                        where t.run_id = :runId
+                        order by t.created_at, a.attempt_no
+                        """)
+                .param("runId", runId)
+                .query((resultSet, rowNum) -> attemptRow(resultSet))
+                .list();
+        for (AttemptRow attempt : attemptRows) {
+            attemptsByToolCall.computeIfAbsent(
+                    attempt.toolCallId(), ignored -> new java.util.ArrayList<>())
+                    .add(attempt.attempt());
+        }
         List<RunToolCall> toolCalls = jdbcClient.sql("""
                         select id, step_id, tool_name, status,
                                request_payload::text as request_payload,
@@ -112,7 +131,7 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                         order by created_at
                         """)
                 .param("runId", runId)
-                .query((resultSet, rowNum) -> toolCall(resultSet))
+                .query((resultSet, rowNum) -> toolCall(resultSet, attemptsByToolCall))
                 .list();
         RunRow value = row.orElseThrow();
         return Optional.of(new RunDetail(
@@ -180,9 +199,13 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                 instant(resultSet, "finished_at"));
     }
 
-    private RunToolCall toolCall(ResultSet resultSet) throws SQLException {
+    private RunToolCall toolCall(
+            ResultSet resultSet,
+            java.util.Map<UUID, List<RunToolAttempt>> attemptsByToolCall)
+            throws SQLException {
+        UUID toolCallId = resultSet.getObject("id", UUID.class);
         return new RunToolCall(
-                resultSet.getObject("id", UUID.class),
+                toolCallId,
                 resultSet.getObject("step_id", UUID.class),
                 resultSet.getString("tool_name"),
                 resultSet.getString("status"),
@@ -191,7 +214,23 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                 resultSet.getString("error_message"),
                 nullableLong(resultSet, "duration_ms"),
                 instant(resultSet, "created_at"),
-                instant(resultSet, "finished_at"));
+                instant(resultSet, "finished_at"),
+                List.copyOf(attemptsByToolCall.getOrDefault(toolCallId, List.of())));
+    }
+
+    private AttemptRow attemptRow(ResultSet resultSet) throws SQLException {
+        return new AttemptRow(
+                resultSet.getObject("tool_call_id", UUID.class),
+                new RunToolAttempt(
+                        resultSet.getObject("id", UUID.class),
+                        resultSet.getInt("attempt_no"),
+                        resultSet.getString("status"),
+                        resultSet.getString("error_code"),
+                        resultSet.getBoolean("retryable"),
+                        resultSet.getLong("retry_delay_ms"),
+                        nullableLong(resultSet, "duration_ms"),
+                        instant(resultSet, "started_at"),
+                        instant(resultSet, "finished_at")));
     }
 
     private Object jsonValue(String json) {
@@ -239,6 +278,9 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
     private static java.time.Instant instant(ResultSet resultSet, String column) throws SQLException {
         OffsetDateTime value = resultSet.getObject(column, OffsetDateTime.class);
         return value == null ? null : value.toInstant();
+    }
+
+    private record AttemptRow(UUID toolCallId, RunToolAttempt attempt) {
     }
 
     private record RunRow(

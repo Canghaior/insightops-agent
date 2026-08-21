@@ -13,11 +13,14 @@ import com.jundaodsj.insightops.model.application.AgentPlanningModelGateway.Plan
 import com.jundaodsj.insightops.model.application.AgentPlanningModelGateway.ToolExchange;
 import com.jundaodsj.insightops.model.application.ModelUsage;
 import com.jundaodsj.insightops.project.application.AdminProjectStore;
+import com.jundaodsj.insightops.server.tool.AgentRunExecutionBudget;
+import com.jundaodsj.insightops.server.tool.AgentToolResilienceProperties;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolDefinition;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolRegistry;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -58,6 +61,7 @@ public class AgentLoopService {
     private final AgentLoopAuditStore auditStore;
     private final AdminProjectStore projectStore;
     private final DeepSeekModelProperties modelProperties;
+    private final AgentToolResilienceProperties resilienceProperties;
     private final ObjectMapper objectMapper;
 
     public AgentLoopService(
@@ -67,7 +71,8 @@ public class AgentLoopService {
             AgentLoopAuditStore auditStore,
             AdminProjectStore projectStore,
             DeepSeekModelProperties modelProperties,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            AgentToolResilienceProperties resilienceProperties) {
         this.planningGateway = planningGateway;
         this.dispatcher = dispatcher;
         this.registry = registry;
@@ -75,6 +80,7 @@ public class AgentLoopService {
         this.projectStore = projectStore;
         this.modelProperties = modelProperties;
         this.objectMapper = objectMapper;
+        this.resilienceProperties = resilienceProperties;
     }
 
     public LoopResult run(
@@ -93,8 +99,18 @@ public class AgentLoopService {
         int stepNo = 0;
         int executedRounds = 0;
         int maxRounds = Math.max(1, Math.min(12, modelProperties.maxToolRounds()));
+        int configuredRunTimeout = Math.max(
+                1, resilienceProperties.getRunTimeoutSeconds());
+        int modelRunTimeout = Math.max(1, modelProperties.requestTimeoutSeconds());
+        AgentRunExecutionBudget budget = new AgentRunExecutionBudget(
+                Duration.ofSeconds(Math.min(configuredRunTimeout, modelRunTimeout)),
+                Math.max(1, resilienceProperties.getMaxTotalAttempts()),
+                Duration.ofSeconds(Math.max(
+                        1, resilienceProperties.getMaxToolDurationSeconds())));
+
 
         for (int round = 1; round <= maxRounds; round++) {
+            ensureBudget(budget);
             ensureActive(active);
             int planStep = ++stepNo;
             Instant planStartedAt = Instant.now();
@@ -146,8 +162,9 @@ public class AgentLoopService {
                 AgentToolDispatcher.ExecutionResult toolResult = dispatcher.execute(
                         new AgentToolDispatcher.ExecutionContext(
                                 request.runId(), request.workspaceId(), request.userId(),
-                                request.systemAdmin(), request.accessLevel(), toolStep, round, 1),
-                        call.name(), arguments, listener);
+                                request.systemAdmin(), request.accessLevel(),
+                                toolStep, round, 1, budget),
+                        call.name(), arguments, listener, active);
                 ensureActive(active);
                 executedRounds++;
                 String modelObservation = modelObservation(toolResult);
@@ -157,6 +174,13 @@ public class AgentLoopService {
                 appendEvidence(toolResult, evidence, sourceUrls, citations, citationSequences);
             }
             catch (AgentToolDispatcher.DispatchException exception) {
+                if ("TOOL_CANCELLED".equals(exception.errorCode())) {
+                    throw new AgentLoopException("CANCELLED", exception);
+                }
+                if ("TOOL_RUN_BUDGET_EXHAUSTED".equals(exception.errorCode())) {
+                    throw new AgentLoopException(
+                            "AGENT_RUN_BUDGET_EXHAUSTED", exception);
+                }
                 String response = errorObservation(exception.errorCode());
                 exchanges.add(new ToolExchange(call, response));
                 auditObservation(request.runId(), ++stepNo, round, call,
@@ -347,6 +371,13 @@ public class AgentLoopService {
     private static String limited(String value, int limit) {
         if (value == null) return "";
         return value.length() <= limit ? value : value.substring(0, limit);
+    }
+
+    private static void ensureBudget(AgentRunExecutionBudget budget) {
+        if (budget.remaining().isZero()
+                || budget.toolDurationRemaining().isZero()) {
+            throw new AgentLoopException("AGENT_RUN_BUDGET_EXHAUSTED");
+        }
     }
 
     private static void ensureActive(BooleanSupplier active) {

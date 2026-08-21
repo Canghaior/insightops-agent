@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 
 @Service
 public class AgentToolDispatcher {
@@ -35,6 +36,8 @@ public class AgentToolDispatcher {
 
     private final AgentToolRegistry registry;
     private final RegisteredToolExecutionService toolExecution;
+    private final ResilientAgentToolExecutor resilientExecutor;
+    private final com.jundaodsj.insightops.server.tool.AgentToolOperationalMetrics metrics;
     private final AdminProjectStore projectStore;
     private final GitHubReleaseGateway releaseGateway;
     private final GitHubReleaseEvidenceFormatter releaseFormatter;
@@ -47,6 +50,8 @@ public class AgentToolDispatcher {
             AgentToolRegistry registry,
             RegisteredToolExecutionService toolExecution,
             AdminProjectStore projectStore,
+            ResilientAgentToolExecutor resilientExecutor,
+            com.jundaodsj.insightops.server.tool.AgentToolOperationalMetrics metrics,
             GitHubReleaseGateway releaseGateway,
             GitHubReleaseEvidenceFormatter releaseFormatter,
             KnowledgeSearchService knowledgeSearch,
@@ -57,6 +62,8 @@ public class AgentToolDispatcher {
         this.toolExecution = toolExecution;
         this.projectStore = projectStore;
         this.releaseGateway = releaseGateway;
+        this.resilientExecutor = resilientExecutor;
+        this.metrics = metrics;
         this.releaseFormatter = releaseFormatter;
         this.knowledgeSearch = knowledgeSearch;
         this.answerabilityPolicy = answerabilityPolicy;
@@ -69,28 +76,80 @@ public class AgentToolDispatcher {
             String toolName,
             Map<String, Object> arguments,
             ProgressListener listener) {
+        return execute(context, toolName, arguments, listener, () -> true);
+    }
+
+    public ExecutionResult execute(
+            ExecutionContext context,
+            String toolName,
+            Map<String, Object> arguments,
+            ProgressListener listener,
+            BooleanSupplier active) {
+        RegisteredToolExecutionService.Session session;
         try {
             registry.requireEnabled(toolName);
-            return switch (toolName) {
-                case AgentToolNames.GITHUB_RELEASE_LIST -> release(context, arguments, listener);
-                case AgentToolNames.KNOWLEDGE_HYBRID_SEARCH -> knowledge(context, arguments, listener);
-                case AgentToolNames.PROJECT_INTELLIGENCE_EVENT_SEARCH ->
-                        events(context, arguments, listener);
-                default -> throw new DispatchException("TOOL_NOT_ALLOWED");
-            };
+            session = start(context, arguments, toolName);
         }
         catch (AgentToolRegistry.ToolRegistryException exception) {
             throw new DispatchException("TOOL_" + exception.code().name(), exception);
         }
+
+        listener.onStarted(session.toolCallId(), session.toolName(), context.round());
+        Instant startedAt = Instant.now();
+        try {
+            ExecutionResult result = resilientExecutor.execute(
+                    session, context.budget(), active, listener, context.round(),
+                    () -> switch (toolName) {
+                        case AgentToolNames.GITHUB_RELEASE_LIST ->
+                                release(context, arguments, session);
+                        case AgentToolNames.KNOWLEDGE_HYBRID_SEARCH ->
+                                knowledge(context, arguments, session);
+                        case AgentToolNames.PROJECT_INTELLIGENCE_EVENT_SEARCH ->
+                                events(context, arguments, session);
+                        default -> throw new DispatchException("TOOL_NOT_ALLOWED");
+                    });
+            session.succeed(result.observation());
+            listener.onCompleted(
+                    session.toolCallId(), session.toolName(), context.round(),
+                    result.resultCount(), result.resultModel());
+            recordMetrics(toolName, "succeeded", startedAt);
+            return result;
+        }
+        catch (DispatchException exception) {
+            session.failIfRunning(exception.errorCode(), exception.terminalStatus());
+            listener.onFailed(
+                    session.toolCallId(), session.toolName(), context.round(),
+                    exception.errorCode());
+            recordMetrics(toolName, exception.terminalStatus().toLowerCase(Locale.ROOT), startedAt);
+            throw exception;
+        }
+        catch (RegisteredToolExecutionService.ToolExecutionException exception) {
+            String errorCode = "TOOL_" + exception.code().name();
+            session.failIfRunning(errorCode);
+            listener.onFailed(
+                    session.toolCallId(), session.toolName(), context.round(), errorCode);
+            recordMetrics(toolName, "failed", startedAt);
+            throw new DispatchException(errorCode, exception);
+        }
+        catch (RuntimeException exception) {
+            session.failIfRunning("TOOL_INTERNAL_ERROR");
+            listener.onFailed(
+                    session.toolCallId(), session.toolName(), context.round(),
+                    "TOOL_INTERNAL_ERROR");
+            recordMetrics(toolName, "failed", startedAt);
+            throw new DispatchException("TOOL_INTERNAL_ERROR", exception);
+        }
+    }
+
+    private void recordMetrics(String toolName, String outcome, Instant startedAt) {
+        metrics.logicalCall(toolName, outcome);
+        metrics.duration(toolName, java.time.Duration.between(startedAt, Instant.now()));
     }
 
     private ExecutionResult release(
             ExecutionContext context,
             Map<String, Object> arguments,
-            ProgressListener listener) {
-        RegisteredToolExecutionService.Session session = start(context, arguments,
-                AgentToolNames.GITHUB_RELEASE_LIST);
-        listener.onStarted(session.toolCallId(), session.toolName(), context.round());
+            RegisteredToolExecutionService.Session session) {
         try {
             List<String> requestedProjects = strings(arguments, "projectIds");
             Integer timeWindowDays = optionalInteger(arguments, "timeWindowDays");
@@ -120,9 +179,6 @@ public class AgentToolDispatcher {
                     "releases", result.releases(),
                     "fetchedAt", result.fetchedAt().toString(),
                     "truncated", result.truncated());
-            session.succeed(payload);
-            listener.onCompleted(session.toolCallId(), session.toolName(), context.round(),
-                    result.releases().size(), null);
             List<ChatCitation> citations = new ArrayList<>();
             for (int index = 0; index < result.releases().size(); index++) {
                 GitHubRelease item = result.releases().get(index);
@@ -136,32 +192,14 @@ public class AgentToolDispatcher {
                     List.copyOf(citations), result.releases().size(), null);
         }
         catch (GitHubToolException exception) {
-            session.failIfRunning(exception.code().name());
-            listener.onFailed(session.toolCallId(), session.toolName(), context.round(),
-                    "TOOL_" + exception.code().name());
             throw new DispatchException("TOOL_" + exception.code().name(), exception);
-        }
-        catch (DispatchException exception) {
-            session.failIfRunning(exception.errorCode());
-            listener.onFailed(session.toolCallId(), session.toolName(), context.round(),
-                    exception.errorCode());
-            throw exception;
-        }
-        catch (RuntimeException exception) {
-            session.failIfRunning("TOOL_INTERNAL_ERROR");
-            listener.onFailed(session.toolCallId(), session.toolName(), context.round(),
-                    "TOOL_INTERNAL_ERROR");
-            throw new DispatchException("TOOL_INTERNAL_ERROR", exception);
         }
     }
 
     private ExecutionResult knowledge(
             ExecutionContext context,
             Map<String, Object> arguments,
-            ProgressListener listener) {
-        RegisteredToolExecutionService.Session session = start(context, arguments,
-                AgentToolNames.KNOWLEDGE_HYBRID_SEARCH);
-        listener.onStarted(session.toolCallId(), session.toolName(), context.round());
+            RegisteredToolExecutionService.Session session) {
         try {
             String query = string(arguments, "query");
             int candidateLimit = integer(arguments, "candidateLimit");
@@ -173,24 +211,18 @@ public class AgentToolDispatcher {
             List<KnowledgeEmbeddingStore.SearchResult> selected = answerable
                     ? select(response.results()) : List.of();
             KnowledgeEvidence evidence = knowledgeEvidence(response, selected, answerable);
-            session.succeed(evidence.payload());
-            listener.onCompleted(session.toolCallId(), session.toolName(), context.round(),
-                    selected.size(), response.model());
             return new ExecutionResult(
                     session.toolCallId(), session.toolName(), evidence.payload(),
                     evidence.prompt(), evidence.urls(), evidence.citations(),
                     selected.size(), response.model());
         }
         catch (KnowledgeSearchService.EmbeddingUnavailableException exception) {
-            session.failIfRunning("EMBEDDING_UNAVAILABLE");
-            listener.onFailed(session.toolCallId(), session.toolName(), context.round(),
-                    "EMBEDDING_UNAVAILABLE");
             throw new DispatchException("EMBEDDING_UNAVAILABLE", exception);
         }
+        catch (DispatchException exception) {
+            throw exception;
+        }
         catch (RuntimeException exception) {
-            session.failIfRunning("RETRIEVAL_ERROR");
-            listener.onFailed(session.toolCallId(), session.toolName(), context.round(),
-                    "RETRIEVAL_ERROR");
             throw new DispatchException("RETRIEVAL_ERROR", exception);
         }
     }
@@ -198,10 +230,7 @@ public class AgentToolDispatcher {
     private ExecutionResult events(
             ExecutionContext context,
             Map<String, Object> arguments,
-            ProgressListener listener) {
-        RegisteredToolExecutionService.Session session = start(context, arguments,
-                AgentToolNames.PROJECT_INTELLIGENCE_EVENT_SEARCH);
-        listener.onStarted(session.toolCallId(), session.toolName(), context.round());
+            RegisteredToolExecutionService.Session session) {
         try {
             List<String> eventTypes = strings(arguments, "eventTypes");
             if (eventTypes.isEmpty() || !EVENT_TYPES.containsAll(eventTypes)) {
@@ -237,23 +266,14 @@ public class AgentToolDispatcher {
             List<String> sources = List.copyOf(urls);
             Map<String, Object> payload = Map.of(
                     "resultCount", results.size(), "sources", sources);
-            session.succeed(payload);
-            listener.onCompleted(session.toolCallId(), session.toolName(), context.round(),
-                    results.size(), null);
             return new ExecutionResult(
                     session.toolCallId(), session.toolName(), payload, prompt.toString(),
                     sources, List.copyOf(citations), results.size(), null);
         }
         catch (DispatchException exception) {
-            session.failIfRunning(exception.errorCode());
-            listener.onFailed(session.toolCallId(), session.toolName(), context.round(),
-                    exception.errorCode());
             throw exception;
         }
         catch (RuntimeException exception) {
-            session.failIfRunning("EVENT_RETRIEVAL_ERROR");
-            listener.onFailed(session.toolCallId(), session.toolName(), context.round(),
-                    "EVENT_RETRIEVAL_ERROR");
             throw new DispatchException("EVENT_RETRIEVAL_ERROR", exception);
         }
     }
@@ -434,7 +454,28 @@ public class AgentToolDispatcher {
             AgentToolDefinition.AccessLevel accessLevel,
             int stepNo,
             int round,
-            int invocationNo) {
+            int invocationNo,
+            com.jundaodsj.insightops.server.tool.AgentRunExecutionBudget budget) {
+
+        public ExecutionContext(
+                UUID runId,
+                UUID workspaceId,
+                UUID userId,
+                boolean systemAdmin,
+                AgentToolDefinition.AccessLevel accessLevel,
+                int stepNo,
+                int round,
+                int invocationNo) {
+            this(runId, workspaceId, userId, systemAdmin, accessLevel,
+                    stepNo, round, invocationNo,
+                    new com.jundaodsj.insightops.server.tool.AgentRunExecutionBudget(
+                            java.time.Duration.ofSeconds(90), 8,
+                            java.time.Duration.ofSeconds(60)));
+        }
+
+        public ExecutionContext {
+            java.util.Objects.requireNonNull(budget, "budget");
+        }
     }
 
     public record ExecutionResult(
@@ -453,23 +494,46 @@ public class AgentToolDispatcher {
         void onCompleted(
                 UUID toolCallId, String toolName, int round, int resultCount, String model);
         void onFailed(UUID toolCallId, String toolName, int round, String errorCode);
+
+        default void onRetrying(
+                UUID toolCallId,
+                String toolName,
+                int round,
+                int nextAttempt,
+                long delayMs,
+                String errorCode) {
+        }
     }
 
     public static final class DispatchException extends RuntimeException {
         private final String errorCode;
+        private final String terminalStatus;
 
         public DispatchException(String errorCode) {
-            super(errorCode);
-            this.errorCode = errorCode;
+            this(errorCode, "FAILED", null);
         }
 
         public DispatchException(String errorCode, Throwable cause) {
+            this(errorCode, "FAILED", cause);
+        }
+
+        public DispatchException(String errorCode, String terminalStatus) {
+            this(errorCode, terminalStatus, null);
+        }
+
+        public DispatchException(
+                String errorCode, String terminalStatus, Throwable cause) {
             super(errorCode, cause);
             this.errorCode = errorCode;
+            this.terminalStatus = terminalStatus;
         }
 
         public String errorCode() {
             return errorCode;
+        }
+
+        public String terminalStatus() {
+            return terminalStatus;
         }
     }
 

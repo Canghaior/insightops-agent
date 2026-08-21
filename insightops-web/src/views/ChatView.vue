@@ -30,6 +30,7 @@ interface ToolExecution {
   resultCount?: number | null
   model?: string | null
   errorCode?: string | null
+  progress?: string | null
 }
 
 interface ConversationMessage {
@@ -155,6 +156,19 @@ function handleEvent(event: ChatStreamEvent) {
     assistant.toolRunning = true
     return
   }
+  if (event.type === 'tool_retrying') {
+    assistant.toolExecutions ??= []
+    const id = event.toolCallId ?? `tool-${event.sequence}`
+    let execution = assistant.toolExecutions.find((item) => item.id === id)
+    if (!execution) {
+      execution = { id, name: event.toolName ?? 'unknown_tool', status: 'running' }
+      assistant.toolExecutions.push(execution)
+    }
+    execution.status = 'running'
+    execution.errorCode = event.errorCode
+    execution.progress = event.content ?? '临时失败，正在重试'
+    return
+  }
   if (event.type === 'tool_completed' || event.type === 'tool_failed') {
     assistant.toolExecutions ??= []
     const id = event.toolCallId ?? `tool-${event.sequence}`
@@ -164,6 +178,7 @@ function handleEvent(event: ChatStreamEvent) {
       assistant.toolExecutions.push(execution)
     }
     execution.status = event.type === 'tool_failed' ? 'failed' : 'succeeded'
+    execution.progress = undefined
     execution.errorCode = event.errorCode
     execution.resultCount = event.retrievalCount ?? event.releaseCount
     execution.model = event.retrievalModel
@@ -406,7 +421,7 @@ function toolExecutionLabel(execution: ToolExecution) {
 }
 
 function toolExecutionResult(execution: ToolExecution) {
-  if (execution.status === 'running') return '执行中'
+  if (execution.status === 'running') return execution.progress ?? '执行中'
   if (execution.status === 'failed') return `安全降级 · ${execution.errorCode ?? '工具不可用'}`
   const count = execution.resultCount ?? 0
   return execution.model ? `已获取 ${count} 条 · ${execution.model}` : `已获取 ${count} 条结果`

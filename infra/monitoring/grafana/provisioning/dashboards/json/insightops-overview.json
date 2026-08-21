@@ -25,6 +25,29 @@
         {"expr": "sum by (job) (hikaricp_connections_active)", "legendFormat": "active {{job}}"},
         {"expr": "sum by (job) (hikaricp_connections_pending)", "legendFormat": "pending {{job}}"}
       ]
+    },
+    {
+      "type": "timeseries", "title": "Agent tool outcomes", "id": 5,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [{"expr": "sum by (tool, outcome) (rate(insightops_agent_tool_calls_total[5m]))", "legendFormat": "{{tool}} · {{outcome}}"}]
+    },
+    {
+      "type": "timeseries", "title": "Agent tool p95 latency", "id": 6,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le, tool) (rate(insightops_agent_tool_duration_seconds_bucket[5m])))", "legendFormat": "{{tool}}"}]
+    },
+    {
+      "type": "timeseries", "title": "Agent retries and timeouts", "id": 7,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "targets": [
+        {"expr": "sum by (tool) (rate(insightops_agent_tool_retries_total[5m]))", "legendFormat": "retry · {{tool}}"},
+        {"expr": "sum by (tool) (rate(insightops_agent_tool_timeouts_total[5m]))", "legendFormat": "timeout · {{tool}}"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Agent upstream circuit state", "id": 8,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "targets": [{"expr": "max by (group) (insightops_agent_tool_circuit_state)", "legendFormat": "{{group}} (0 closed / 1 half / 2 open)"}]
     }
   ],
   "refresh": "15s",

@@ -29,4 +29,31 @@ public interface AgentToolExecutionStore {
             String errorCode,
             long durationMs,
             Instant finishedAt);
+
+    default void finishTool(
+            UUID stepId,
+            UUID toolCallId,
+            String status,
+            String errorCode,
+            long durationMs,
+            Instant finishedAt) {
+        failTool(stepId, toolCallId, errorCode, durationMs, finishedAt);
+    }
+
+    default void startAttempt(
+            UUID attemptId,
+            UUID toolCallId,
+            int attemptNo,
+            Instant startedAt) {
+    }
+
+    default void finishAttempt(
+            UUID attemptId,
+            String status,
+            String errorCode,
+            boolean retryable,
+            long retryDelayMs,
+            long durationMs,
+            Instant finishedAt) {
+    }
 }

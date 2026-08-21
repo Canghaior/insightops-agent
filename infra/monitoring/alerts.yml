@@ -31,3 +31,21 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "InsightOps HTTP 5xx rate is above 5%"
+      - alert: AgentToolRetryRateHigh
+        expr: sum(rate(insightops_agent_tool_retries_total[10m])) / clamp_min(sum(rate(insightops_agent_tool_attempts_total[10m])), 0.001) > 0.20
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Agent tool retry rate is above 20%"
+      - alert: AgentToolTimeoutBurst
+        expr: sum(increase(insightops_agent_tool_timeouts_total[10m])) > 5
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "More than five Agent tool timeouts occurred in ten minutes"
+      - alert: AgentToolCircuitOpen
+        expr: max(insightops_agent_tool_circuit_state) >= 2
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "An Agent tool upstream circuit has remained open"

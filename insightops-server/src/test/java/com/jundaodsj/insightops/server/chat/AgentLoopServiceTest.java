@@ -7,6 +7,7 @@ import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
 import com.jundaodsj.insightops.model.application.AgentPlanningModelGateway;
 import com.jundaodsj.insightops.model.application.ModelUsage;
 import com.jundaodsj.insightops.project.application.AdminProjectStore;
+import com.jundaodsj.insightops.server.tool.AgentToolResilienceProperties;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolDefinition;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolRegistry;
 import org.junit.jupiter.api.Test;
@@ -41,7 +42,7 @@ class AgentLoopServiceTest {
                 .thenReturn(plan("", List.of(call), new ModelUsage(10, 3, 13, null, null)))
                 .thenReturn(plan("FINISH", List.of(), new ModelUsage(6, 2, 8, null, null)));
         UUID toolCallId = UUID.randomUUID();
-        when(dispatcher.execute(any(), anyString(), any(), any())).thenReturn(
+        when(dispatcher.execute(any(), anyString(), any(), any(), any())).thenReturn(
                 new AgentToolDispatcher.ExecutionResult(
                         toolCallId, "test_search", Map.of("answer", "official"),
                         "\n[S1] official evidence\n", List.of("https://example.com/official"),
@@ -65,7 +66,7 @@ class AgentLoopServiceTest {
         assertThat(plans.getAllValues().get(1).exchanges()).hasSize(1);
         assertThat(plans.getAllValues().get(1).exchanges().getFirst().responseJson())
                 .contains("official");
-        verify(dispatcher).execute(any(), anyString(), any(), any());
+        verify(dispatcher).execute(any(), anyString(), any(), any(), any());
         verify(audit, times(3)).recordStep(
                 any(), any(), anyInt(), anyString(), anyString(), anyString(), anyString(), any(), any());
     }
@@ -82,7 +83,7 @@ class AgentLoopServiceTest {
                         "call-1", "test_search", "{\"query\":\"one\"}")), ModelUsage.unknown()))
                 .thenReturn(plan("", List.of(new AgentPlanningModelGateway.PlannedToolCall(
                         "call-2", "test_search", "{\"query\":\"two\"}")), ModelUsage.unknown()));
-        when(dispatcher.execute(any(), anyString(), any(), any())).thenAnswer(invocation -> {
+        when(dispatcher.execute(any(), anyString(), any(), any(), any())).thenAnswer(invocation -> {
             AgentToolDispatcher.ExecutionContext context = invocation.getArgument(0);
             return new AgentToolDispatcher.ExecutionResult(
                     UUID.randomUUID(), "test_search", Map.of("round", context.round()),
@@ -96,7 +97,7 @@ class AgentLoopServiceTest {
         assertThat(result.limitReached()).isTrue();
         assertThat(result.systemPromptAppendix()).contains("安全轮次上限");
         verify(planning, times(2)).plan(any());
-        verify(dispatcher, times(2)).execute(any(), anyString(), any(), any());
+        verify(dispatcher, times(2)).execute(any(), anyString(), any(), any(), any());
     }
 
     @Test
@@ -114,7 +115,7 @@ class AgentLoopServiceTest {
                 .thenReturn(plan("", List.of(first, second), ModelUsage.unknown()))
                 .thenReturn(plan("", List.of(first, second), ModelUsage.unknown()))
                 .thenReturn(plan("FINISH", List.of(), ModelUsage.unknown()));
-        when(dispatcher.execute(any(), anyString(), any(), any())).thenAnswer(invocation -> {
+        when(dispatcher.execute(any(), anyString(), any(), any(), any())).thenAnswer(invocation -> {
             String toolName = invocation.getArgument(1);
             return new AgentToolDispatcher.ExecutionResult(
                     UUID.randomUUID(), toolName, Map.of("answer", toolName),
@@ -127,7 +128,7 @@ class AgentLoopServiceTest {
         assertThat(result.toolRounds()).isEqualTo(2);
         assertThat(result.limitReached()).isFalse();
         ArgumentCaptor<String> toolNames = ArgumentCaptor.forClass(String.class);
-        verify(dispatcher, times(2)).execute(any(), toolNames.capture(), any(), any());
+        verify(dispatcher, times(2)).execute(any(), toolNames.capture(), any(), any(), any());
         assertThat(toolNames.getAllValues()).containsExactly("test_search", "second_search");
         ArgumentCaptor<AgentPlanningModelGateway.AgentPlanRequest> plans =
                 ArgumentCaptor.forClass(AgentPlanningModelGateway.AgentPlanRequest.class);
@@ -148,7 +149,8 @@ class AgentLoopServiceTest {
                 new DeepSeekModelProperties(
                         true, "https://api.deepseek.com", "deepseek-v4-flash", false,
                         0.2, 4096, maxRounds, 90, 2, false),
-                new ObjectMapper());
+                new ObjectMapper(),
+                new AgentToolResilienceProperties());
     }
 
     private static AgentToolDefinition tool() {

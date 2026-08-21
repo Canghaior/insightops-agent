@@ -140,7 +140,7 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(24);
+        assertThat(migration.migrationsExecuted).isEqualTo(25);
 
         jdbcClient = JdbcClient.create(dataSource);
         assertThat(jdbcClient.sql("select count(*) from tracked_project")
@@ -414,6 +414,24 @@ class P0ChainDatabaseGateTest {
             assertThat(tool.status()).isEqualTo("SUCCEEDED");
             assertThat(tool.resultPayload().toString()).contains("v2.0.0");
         });
+        JdbcAgentToolExecutionStore attemptStore =
+                new JdbcAgentToolExecutionStore(jdbcClient);
+        UUID attemptId = UUID.randomUUID();
+        UUID toolCallId = detail.toolCalls().getFirst().id();
+        Instant attemptStartedAt = Instant.parse("2026-08-16T00:00:00Z");
+        attemptStore.startAttempt(attemptId, toolCallId, 1, attemptStartedAt);
+        attemptStore.finishAttempt(
+                attemptId, "SUCCEEDED", null, false, 0, 300,
+                attemptStartedAt.plusMillis(300));
+        AgentRunQuery.RunDetail detailWithAttempts =
+                runQuery.findRun(ACTOR, summary.id()).orElseThrow();
+        assertThat(detailWithAttempts.toolCalls().getFirst().attempts())
+                .singleElement()
+                .satisfies(attempt -> {
+                    assertThat(attempt.attemptNo()).isEqualTo(1);
+                    assertThat(attempt.status()).isEqualTo("SUCCEEDED");
+                    assertThat(attempt.durationMs()).isEqualTo(300);
+                });
         assertThat(detail.toString()).doesNotContain("DEEPSEEK_API_KEY", "Authorization", "sk-");
         assertThat(runStore.recentMessages(ACTOR, detail.sessionId(), 12))
                 .extracting(ChatRunStore.StoredMessage::role)

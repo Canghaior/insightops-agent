@@ -8,6 +8,7 @@ import com.jundaodsj.insightops.tool.application.registry.AgentToolDefinition;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolRegistry;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -130,6 +131,30 @@ public class RegisteredToolExecutionService {
         public AgentToolDefinition definition() {
             return definition;
         }
+        public Attempt startAttempt(int attemptNo) {
+            positive(attemptNo, "attemptNo");
+            UUID attemptId = UUID.randomUUID();
+            Instant attemptStartedAt = Instant.now();
+            executionStore.startAttempt(
+                    attemptId, toolCallId, attemptNo, attemptStartedAt);
+            return new Attempt(attemptId, attemptNo, attemptStartedAt);
+        }
+
+        public void finishAttempt(
+                Attempt attempt,
+                String status,
+                String errorCode,
+                boolean retryable,
+                long retryDelayMs) {
+            Objects.requireNonNull(attempt, "attempt");
+            Instant attemptFinishedAt = Instant.now();
+            executionStore.finishAttempt(
+                    attempt.id(), status, errorCode, retryable,
+                    Math.max(0, retryDelayMs),
+                    Math.max(0, Duration.between(
+                            attempt.startedAt(), attemptFinishedAt).toMillis()),
+                    attemptFinishedAt);
+        }
 
         public void succeed(Object result) {
             String payload = json(result);
@@ -159,16 +184,23 @@ public class RegisteredToolExecutionService {
         }
 
         public boolean failIfRunning(String errorCode) {
+            return failIfRunning(errorCode, "FAILED");
+        }
+
+        public boolean failIfRunning(String errorCode, String status) {
             if (errorCode == null || errorCode.isBlank()) {
                 throw new IllegalArgumentException("errorCode must not be blank");
+            }
+            if (!List.of("FAILED", "TIMED_OUT", "CANCELLED").contains(status)) {
+                throw new IllegalArgumentException("unsupported terminal status: " + status);
             }
             if (!finished.compareAndSet(false, true)) {
                 return false;
             }
             Instant finishedAt = Instant.now();
             try {
-                executionStore.failTool(
-                        stepId, toolCallId, errorCode.strip(),
+                executionStore.finishTool(
+                        stepId, toolCallId, status, errorCode.strip(),
                         durationMs(finishedAt), finishedAt);
                 return true;
             } catch (RuntimeException exception) {
@@ -186,6 +218,9 @@ public class RegisteredToolExecutionService {
         private long durationMs(Instant finishedAt) {
             return Math.max(0, Duration.between(startedAt, finishedAt).toMillis());
         }
+    }
+
+    public record Attempt(UUID id, int number, Instant startedAt) {
     }
 
     public enum ErrorCode {

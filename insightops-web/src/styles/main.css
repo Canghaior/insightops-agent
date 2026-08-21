@@ -531,6 +531,12 @@ a { color: inherit; text-decoration: none; }
 .tool-call-card > div strong { margin-right: auto; color: #bfe5d9; font-size: 11px; }
 .tool-call-card > div span { color: var(--muted); font-size: 10px; }
 .tool-call-card > p { color: #ffaaaa; font-size: 10px; }
+.tool-attempts { display: grid; gap: 7px; padding: 9px; border-radius: 8px; background: rgba(7, 17, 14, .58); }
+.tool-attempts > span { color: #8ea09f; font-size: 10px; letter-spacing: .04em; }
+.tool-attempts > div { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--muted); font-size: 9px; }
+.tool-attempts b { color: #bfe5d9; }
+.tool-attempts code { color: #ffb0b0; }
+.tool-attempts small { margin-left: auto; color: #d8bd7b; }
 .detail-sources { display: grid; gap: 8px; }
 .detail-sources a { color: #7bd9be; font-size: 11px; overflow-wrap: anywhere; }
 .detail-sources a:hover { text-decoration: underline; }

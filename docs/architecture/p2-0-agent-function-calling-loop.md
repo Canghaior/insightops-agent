@@ -6,7 +6,7 @@
 
 P2.0-B 将聊天主链路从固定顺序工具编排升级为受控的 `Plan -> Act -> Observe` 多轮 Agent。DeepSeek 通过原生 Function Calling 在 P2.0-A Registry 暴露的三类只读工具中自主选择；InsightOps 自有 Executor 负责权限、Schema、审计和真实执行，模型不能绕过服务端直接调用实现。
 
-当前是“有边界的真实 Agent”：能够根据 Observation 继续调用不同工具或停止，但尚不包含 P2.0-C 的强制超时、统一重试和熔断，也不包含写入型工具、人工审批或 MCP 动态工具。
+当前是“有边界的真实 Agent”：能够根据 Observation 继续调用不同工具或停止；P2.0-C 已补齐强制超时、取消、资源预算、统一重试、熔断和尝试级审计。写入型工具、人工审批、补偿与 MCP 动态工具留给下一阶段。
 
 ## 执行链路
 
@@ -51,14 +51,15 @@ Registry 仍是唯一工具合同来源；被禁用或超出角色权限的工�
 ## 审计与前端进度
 
 - 每轮 Planner 决策写入现有 `agent_step`，类型为 `PLAN`。
-- 工具调用继续写入 `agent_step` 和 `agent_tool_call`，保留 P2.0-A 幂等键。
+- 工具调用继续写入 `agent_step` 和 `tool_call`，保留 P2.0-A 幂等键。
+- 每次真实尝试写入 `tool_call_attempt`，记录序号、状态、标准错误码、是否可重试、退避和耗时。
 - 工具结果或安全失败写入 `OBSERVATION`。
 - Token 用量汇总 Planner 所有轮次和最终流式回答后写入 Run。
 - 聊天 SSE 支持多个 `tool_started`、`tool_completed` 和 `tool_failed` 事件。
 - 聊天界面按 Tool Call ID 展示每次调用的执行中、成功或安全降级状态。
 - 执行记录页面可以查看 PLAN、TOOL、OBSERVATION 时间线及结构化审计数据。
 
-本阶段复用已有表结构，不增加 Flyway 迁移。
+P2.0-B 复用已有表结构；P2.0-C 通过 Flyway V25 增加尝试级审计，并允许工具调用终态为 `TIMED_OUT` 或 `CANCELLED`。
 
 ## 安全策略
 
@@ -71,10 +72,12 @@ Registry 仍是唯一工具合同来源；被禁用或超出角色权限的工�
 - 客户端取消或断开后，在进入下一轮或接受工具结果前终止执行。
 - DeepSeek 关闭时规划网关、多轮服务与聊天流式入口一同关闭，避免可选配置导致启动失败。
 
-## 留给 P2.0-C
+## P2.0-C 与下一阶段
 
-- 按 Registry timeout 强制中断真实工具调用；
-- 按错误类型统一重试与退避；
-- 上游服务熔断、半开探测和指标；
-- 跨工具依赖、补偿和更细粒度资源预算；
-- 写入型工具审批与 MCP 动态接入。
+P2.0-C1/C2/C3 已实现 Registry timeout 硬截止、断连取消、Run 级时间/尝试/工具耗时预算、按标准错误码重试、指数退避、上游分组熔断、半开探测、尝试级审计、SSE 重试进度和 Prometheus/Grafana 运维面板。详细设计见 `docs/architecture/p2-0-agent-tool-resilience.md`。
+
+下一阶段保留：
+
+- 写入型工具的人机审批、幂等副作用和失败补偿；
+- 跨工具依赖图与更细粒度的 Token/成本预算；
+- MCP 动态工具接入与租户级工具策略。

@@ -130,6 +130,87 @@ public class JdbcAgentToolExecutionStore implements AgentToolExecutionStore {
                 .param("finishedAt", timestamp(finishedAt))
                 .update();
     }
+    @Override
+    @Transactional
+    public void finishTool(
+            UUID stepId,
+            UUID toolCallId,
+            String status,
+            String errorCode,
+            long durationMs,
+            Instant finishedAt) {
+        jdbcClient.sql("""
+                        update tool_call
+                        set status = :status,
+                            error_message = :errorCode,
+                            duration_ms = :durationMs,
+                            finished_at = :finishedAt
+                        where id = :id and status = 'RUNNING'
+                        """)
+                .param("id", toolCallId)
+                .param("status", status)
+                .param("errorCode", errorCode)
+                .param("durationMs", durationMs)
+                .param("finishedAt", timestamp(finishedAt))
+                .update();
+        jdbcClient.sql("""
+                        update agent_step
+                        set status = :status, finished_at = :finishedAt
+                        where id = :id and status = 'RUNNING'
+                        """)
+                .param("id", stepId)
+                .param("status", status)
+                .param("finishedAt", timestamp(finishedAt))
+                .update();
+    }
+
+    @Override
+    public void startAttempt(
+            UUID attemptId,
+            UUID toolCallId,
+            int attemptNo,
+            Instant startedAt) {
+        jdbcClient.sql("""
+                        insert into tool_call_attempt
+                            (id, tool_call_id, attempt_no, status, started_at, created_at)
+                        values
+                            (:id, :toolCallId, :attemptNo, 'RUNNING', :startedAt, :startedAt)
+                        """)
+                .param("id", attemptId)
+                .param("toolCallId", toolCallId)
+                .param("attemptNo", attemptNo)
+                .param("startedAt", timestamp(startedAt))
+                .update();
+    }
+
+    @Override
+    public void finishAttempt(
+            UUID attemptId,
+            String status,
+            String errorCode,
+            boolean retryable,
+            long retryDelayMs,
+            long durationMs,
+            Instant finishedAt) {
+        jdbcClient.sql("""
+                        update tool_call_attempt
+                        set status = :status,
+                            error_code = :errorCode,
+                            retryable = :retryable,
+                            retry_delay_ms = :retryDelayMs,
+                            duration_ms = :durationMs,
+                            finished_at = :finishedAt
+                        where id = :id and status = 'RUNNING'
+                        """)
+                .param("id", attemptId)
+                .param("status", status)
+                .param("errorCode", errorCode)
+                .param("retryable", retryable)
+                .param("retryDelayMs", retryDelayMs)
+                .param("durationMs", durationMs)
+                .param("finishedAt", timestamp(finishedAt))
+                .update();
+    }
 
     private static OffsetDateTime timestamp(Instant instant) {
         return OffsetDateTime.ofInstant(instant, ZoneOffset.UTC);

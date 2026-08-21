@@ -19,7 +19,7 @@ export interface ChatCitation {
 }
 
 export interface ChatStreamEvent {
-  type: 'started' | 'tool_started' | 'tool_completed' | 'tool_failed' | 'delta' | 'completed' | 'cancelled' | 'error'
+  type: 'started' | 'tool_started' | 'tool_retrying' | 'tool_completed' | 'tool_failed' | 'delta' | 'completed' | 'cancelled' | 'error'
   runId: string
   sessionId: string
   sequence: number
@@ -44,6 +44,7 @@ export interface ChatStreamEvent {
 const eventTypes = new Set<ChatStreamEvent['type']>([
   'started',
   'tool_started',
+  'tool_retrying',
   'tool_completed',
   'tool_failed',
   'delta',

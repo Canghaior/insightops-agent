@@ -2,7 +2,7 @@
 
 日期：2026-08-21
 范围：本地代码、数据库链路门禁、前端生产构建、三类生产镜像
-结论：本地代码、数据库与前端回归通过；初始版本 `9ae6ba855ac05b02de6744492455ba2352801ca3` 已部署且容器健康，生产真实问答暴露多 Tool Call 拒绝问题；本次顺序化热修复待 CI 与生产复验。
+结论：通过。顺序化热修复 `cd297a6bc408ace94025974aabea5d4892449945` 已完成 CI、生产部署和真实多工具问答复验，P2.0-B 生产验收关闭。
 
 ## 验收内容
 
@@ -35,7 +35,7 @@ vue-tsc + Vite production build passed
 
 docker compose --env-file .env.prod.example -f infra/compose.prod.yml build server worker web
 初始版本 9ae6ba8: server / worker / web built
-热修复复跑: Docker Hub auth token endpoint timeout，构建开始前中止；部署前必须由 GitHub CI 重新构建三镜像
+热修复由 GitHub Actions CI #54（Run 32481502882）完成：backend / frontend / server / worker / web 全部通过
 ```
 
 ## 新增专项测试
@@ -45,6 +45,14 @@ docker compose --env-file .env.prod.example -f infra/compose.prod.yml build serv
 - `AgentLoopServiceTest`：规划、执行、观察、停止、证据/引用和 Token 汇总；最大轮次上限；多 Tool Call 跨轮顺序化。
 - `agentStream.p2b.test.ts`：标准化 `tool_failed` 事件与错误信息不泄漏。
 
-## 部署边界
+## 生产验收
 
-初始版本 `9ae6ba855ac05b02de6744492455ba2352801ca3` 已在生产健康启动；真实 DeepSeek 问答运行 `d76fea48-289a-4691-884a-8b6eb8883f39` 以 `MODEL_MULTIPLE_TOOL_CALLS` 失败。本次修复将多个候选工具跨轮顺序化，但在 GitHub CI 三镜像通过、生产重新部署以及同一问法复验成功之前，不关闭 P2.0-B 生产验收。
+- 生产地址：`https://insightops.canghaior.com`
+- 部署版本：`cd297a6bc408ace94025974aabea5d4892449945`
+- 容器：server / worker / web 均为 healthy。
+- 初始失败 Run：`d76fea48-289a-4691-884a-8b6eb8883f39`，失败码 `MODEL_MULTIPLE_TOOL_CALLS`。
+- 修复后成功 Run：`e76fcec8`（页面短 ID）。
+- 同一真实问题先执行 GitHub Release 工具，获取 10 条结果；下一轮执行知识库混合检索，获取 6 条证据；最终回答成功生成并展示 Release 与文档来源。
+- 多个候选 Tool Call 已按模型顺序跨轮执行，没有并行越过 Executor、Registry、权限或审计边界。
+
+以上结果确认 P2.0-B 的 Function Calling、多轮 Observation、跨工具证据累计和最终回答已形成生产闭环。强制超时、重试、熔断及尝试级审计进入 P2.0-C。

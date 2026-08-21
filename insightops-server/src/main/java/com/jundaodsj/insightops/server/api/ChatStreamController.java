@@ -247,6 +247,20 @@ public class ChatStreamController {
                                     cancelDisconnectedRun(runUuid, runId, answer);
                                 }
                             }
+                            @Override
+                            public void onRetrying(
+                                    UUID toolCallId,
+                                    String toolName,
+                                    int round,
+                                    int nextAttempt,
+                                    long delayMs,
+                                    String errorCode) {
+                                if (!send(emitter, ChatSseEvent.toolRetrying(
+                                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                                        toolCallId, toolName, nextAttempt, delayMs, errorCode))) {
+                                    cancelDisconnectedRun(runUuid, runId, answer);
+                                }
+                            }
                         },
                         () -> sessionRegistry.isActive(runId));
             }
@@ -708,6 +722,23 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "tool_started", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
+                    toolName, toolCallId, null, null, null, List.of(), List.of());
+        }
+        static ChatSseEvent toolRetrying(
+                String runId,
+                UUID sessionId,
+                long sequence,
+                String traceId,
+                UUID toolCallId,
+                String toolName,
+                int nextAttempt,
+                long delayMs,
+                String errorCode) {
+            String content = "第 " + nextAttempt + " 次尝试将在 "
+                    + delayMs + " ms 后开始";
+            return new ChatSseEvent(
+                    "tool_retrying", runId, sessionId, sequence, Instant.now(), traceId,
+                    content, null, null, null, null, null, errorCode,
                     toolName, toolCallId, null, null, null, List.of(), List.of());
         }
 

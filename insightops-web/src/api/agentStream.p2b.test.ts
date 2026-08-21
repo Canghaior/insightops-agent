@@ -22,4 +22,25 @@ describe('P2.0-B tool loop events', () => {
     })
     expect(JSON.stringify(event)).not.toContain('Authorization')
   })
+
+  it('accepts a retry notification without exposing tool arguments', () => {
+    const event = parseSseEnvelope(JSON.stringify({
+      type: 'tool_retrying',
+      runId: 'run-p2c',
+      sequence: 5,
+      toolCallId: 'tool-call-2',
+      toolName: 'github_releases',
+      round: 1,
+      content: '第 2 次尝试将在 250 ms 后开始',
+      errorCode: 'TOOL_TRANSIENT_REMOTE',
+    }))
+
+    expect(event).toMatchObject({
+      type: 'tool_retrying',
+      toolName: 'github_releases',
+      content: '第 2 次尝试将在 250 ms 后开始',
+      errorCode: 'TOOL_TRANSIENT_REMOTE',
+    })
+    expect(JSON.stringify(event)).not.toContain('arguments')
+  })
 })

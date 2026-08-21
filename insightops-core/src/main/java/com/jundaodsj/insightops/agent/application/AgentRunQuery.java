@@ -88,6 +88,19 @@ public interface AgentRunQuery {
             String errorMessage,
             Long durationMs,
             Instant createdAt,
+            Instant finishedAt,
+            List<RunToolAttempt> attempts) {
+    }
+
+    record RunToolAttempt(
+            UUID id,
+            int attemptNo,
+            String status,
+            String errorCode,
+            boolean retryable,
+            long retryDelayMs,
+            Long durationMs,
+            Instant startedAt,
             Instant finishedAt) {
     }
 }

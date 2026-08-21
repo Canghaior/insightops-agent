@@ -234,6 +234,16 @@ onMounted(loadRuns)
               <div v-for="tool in toolsFor(step.id)" :key="tool.id" class="tool-call-card">
                 <div><strong>{{ tool.toolName }}</strong><i class="status-pill" :class="`status-${tool.status.toLowerCase()}`">{{ tool.status }}</i><span>{{ formatDuration(tool.durationMs) }}</span></div>
                 <p v-if="tool.errorMessage">{{ tool.errorMessage }}</p>
+                <div v-if="tool.attempts?.length" class="tool-attempts">
+                  <span>执行尝试 · {{ tool.attempts.length }}</span>
+                  <div v-for="attempt in tool.attempts" :key="attempt.id">
+                    <b>#{{ attempt.attemptNo }}</b>
+                    <i class="status-pill" :class="`status-${attempt.status.toLowerCase()}`">{{ attempt.status }}</i>
+                    <span>{{ formatDuration(attempt.durationMs) }}</span>
+                    <code v-if="attempt.errorCode">{{ attempt.errorCode }}</code>
+                    <small v-if="attempt.retryDelayMs">等待 {{ attempt.retryDelayMs }} ms 后重试</small>
+                  </div>
+                </div>
                 <details><summary>工具请求</summary><pre>{{ pretty(tool.requestPayload) }}</pre></details>
                 <details><summary>工具结果</summary><pre>{{ pretty(tool.resultPayload) }}</pre></details>
               </div>

@@ -83,6 +83,20 @@ insightops:
     request-timeout-seconds: ${REPORT_DELIVERY_TIMEOUT_SECONDS:20}
     encryption-key: ${DELIVERY_ENCRYPTION_KEY:${DB_PASSWORD:insightops_dev}}
   tool:
+    resilience:
+      enabled: ${AGENT_TOOL_RESILIENCE_ENABLED:true}
+      max-attempts: ${AGENT_TOOL_MAX_ATTEMPTS:3}
+      max-total-attempts: ${AGENT_RUN_MAX_TOOL_ATTEMPTS:8}
+      run-timeout-seconds: ${AGENT_RUN_TIMEOUT_SECONDS:90}
+      max-tool-duration-seconds: ${AGENT_RUN_MAX_TOOL_DURATION_SECONDS:60}
+      initial-backoff-ms: ${AGENT_TOOL_RETRY_INITIAL_DELAY_MS:250}
+      max-backoff-ms: ${AGENT_TOOL_RETRY_MAX_DELAY_MS:2000}
+      poll-interval-ms: ${AGENT_TOOL_POLL_INTERVAL_MS:100}
+      circuit-window-size: ${AGENT_TOOL_CIRCUIT_WINDOW_SIZE:10}
+      circuit-minimum-calls: ${AGENT_TOOL_CIRCUIT_MINIMUM_CALLS:5}
+      circuit-failure-rate-percent: ${AGENT_TOOL_CIRCUIT_FAILURE_RATE_PERCENT:50}
+      circuit-open-seconds: ${AGENT_TOOL_CIRCUIT_OPEN_SECONDS:30}
+      circuit-half-open-permits: ${AGENT_TOOL_CIRCUIT_HALF_OPEN_PERMITS:2}
     github:
       base-url: ${GITHUB_API_BASE_URL:https://api.github.com}
       token: ${GITHUB_TOKEN:}

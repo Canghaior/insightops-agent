@@ -126,7 +126,7 @@ class AgentRunControllerTest {
                             UUID.randomUUID(), stepId, "github_release_list", "SUCCEEDED",
                             java.util.Map.of("project", "spring-ai"), java.util.Map.of("count", 1),
                             null, 300L, Instant.parse("2026-08-16T00:00:00Z"),
-                            Instant.parse("2026-08-16T00:00:00.300Z"))));
+                            Instant.parse("2026-08-16T00:00:00.300Z"), List.of())));
         }
     }
 }

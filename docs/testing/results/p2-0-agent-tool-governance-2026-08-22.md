@@ -45,4 +45,16 @@
 
 ## 生产验收
 
-生产提交、CI、部署 Run、健康检查和静态资源证据将在本次发布完成后写入本节。
+- 功能提交：`1e419dc282bb98e048206e56aab8a9b6dd226e94`；Spring 构造器修复：`892f9097bf42ff84050c688455da00f9ad920722`。
+- 首轮 CI Run `32511322913` 成功；首轮 Deploy Run `32511621610` 在 Spring 启动时发现 MCP 服务双构造器未显式选择，工作流自动回滚到上一健康镜像，生产服务未中断。
+- 修复后 CI Run `32512128727` 的 backend、frontend 和三份镜像 Job 全部成功。
+- 最终 Deploy production Run `32512407579` 成功；`Validate deployment secrets`、`Configure SSH`、`Deploy and verify` 全部通过，部署完整 SHA `892f9097bf42ff84050c688455da00f9ad920722`。
+- 生产 Flyway 已验证 26 项迁移，Schema 为 V26；最终 Server、Worker、Web 及依赖服务通过部署健康检查。
+- 公网首页、`/approvals` 和 `/admin/agent-tools` 均返回 HTTP 200；`/api/v1/system/status` 返回 Server `UP`、DeepSeek `deepseek-v4-flash` ready。
+- 生产 Chunk `ApprovalsView-0WHZmn7E.js` 包含补偿动作，`AdminAgentToolsView-DWNrJp7_.js` 包含 MCP 连接 API，`ChatView-DwcmPowA.js` 包含 `tool_approval_required`，确认 P2.0-D 前端已发布。
+- 未登录访问审批 API 和 MCP 管理 API 均返回 HTTP 401 / `UNAUTHENTICATED`，没有意外公开管理能力。
+- 应用内浏览器自动化运行时在初始化阶段不可用，因此未在生产创建合成记忆数据；审批全生命周期、并发冲突保护、重复批准/补偿和拒绝流程已由真实 PostgreSQL 门禁完成。
+
+## 结论
+
+P2.0-D 的代码、数据库迁移、自动化门禁、失败回滚验证、修复后 CI、生产部署和公网即时验收均已完成。首个审批型写工具与受控只读 MCP 首期能力可以关闭；认证型/会话型 MCP、更多写工具策略和更细粒度成本预算进入后续阶段。

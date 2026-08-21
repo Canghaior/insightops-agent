@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.tool.application.McpConnectionStore;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -31,6 +32,7 @@ public class McpReadToolService {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
+    @Autowired
     public McpReadToolService(McpConnectionStore connectionStore, ObjectMapper objectMapper) {
         this(connectionStore, objectMapper, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))

@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.server.tool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.tool.application.McpConnectionStore;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -10,6 +11,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -67,6 +69,14 @@ class McpReadToolServiceTest {
                 .isInstanceOf(McpReadToolService.McpToolException.class)
                 .extracting(error -> ((McpReadToolService.McpToolException) error).code())
                 .isEqualTo("MCP_RESPONSE_TOO_LARGE");
+    }
+
+    @Test
+    void shouldDeclareSpringInjectionConstructor() {
+        var constructor = Arrays.stream(McpReadToolService.class.getDeclaredConstructors())
+                .filter(candidate -> candidate.getParameterCount() == 2)
+                .findFirst().orElseThrow();
+        assertThat(constructor.isAnnotationPresent(Autowired.class)).isTrue();
     }
 
     @Test

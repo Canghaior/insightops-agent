@@ -12,6 +12,7 @@ import com.jundaodsj.insightops.model.application.ChatStreamListener;
 import com.jundaodsj.insightops.model.application.ModelCallException;
 import com.jundaodsj.insightops.model.application.ModelUsage;
 import com.jundaodsj.insightops.model.application.StreamingChatModelGateway;
+import com.jundaodsj.insightops.server.chat.AgentLoopService;
 import com.jundaodsj.insightops.server.chat.ChatStreamSessionRegistry;
 import com.jundaodsj.insightops.server.chat.KnowledgeRagService;
 import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
@@ -20,6 +21,7 @@ import com.jundaodsj.insightops.server.chat.ReleaseToolService;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolErrorCode;
 import com.jundaodsj.insightops.tool.application.github.GitHubToolException;
+import com.jundaodsj.insightops.tool.application.registry.AgentToolDefinition;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -66,6 +68,7 @@ public class ChatStreamController {
     private final ReleaseToolService releaseToolService;
     private final KnowledgeRagService knowledgeRagService;
     private final ProjectEventEvidenceService projectEventEvidenceService;
+    private final AgentLoopService agentLoopService;
     private final P0ChatGuardrail guardrail;
     private final UserMemoryStore userMemoryStore;
 
@@ -78,6 +81,7 @@ public class ChatStreamController {
             ReleaseToolService releaseToolService,
             KnowledgeRagService knowledgeRagService,
             ProjectEventEvidenceService projectEventEvidenceService,
+            AgentLoopService agentLoopService,
             P0ChatGuardrail guardrail,
             UserMemoryStore userMemoryStore) {
         this.streamingGateway = streamingGateway;
@@ -87,8 +91,24 @@ public class ChatStreamController {
         this.releaseToolService = releaseToolService;
         this.knowledgeRagService = knowledgeRagService;
         this.projectEventEvidenceService = projectEventEvidenceService;
+        this.agentLoopService = agentLoopService;
         this.guardrail = guardrail;
         this.userMemoryStore = userMemoryStore;
+    }
+
+    public ChatStreamController(
+            StreamingChatModelGateway streamingGateway,
+            ChatStreamSessionRegistry sessionRegistry,
+            DeepSeekModelProperties modelProperties,
+            ChatRunStore chatRunStore,
+            ReleaseToolService releaseToolService,
+            KnowledgeRagService knowledgeRagService,
+            ProjectEventEvidenceService projectEventEvidenceService,
+            P0ChatGuardrail guardrail,
+            UserMemoryStore userMemoryStore) {
+        this(streamingGateway, sessionRegistry, modelProperties, chatRunStore,
+                releaseToolService, knowledgeRagService, projectEventEvidenceService,
+                null, guardrail, userMemoryStore);
     }
 
     public ChatStreamController(
@@ -183,141 +203,208 @@ public class ChatStreamController {
             return emitter;
         }
 
-        Optional<ReleaseToolService.ToolEvidence> toolEvidence;
-        try {
-            toolEvidence = releaseToolService.execute(
-                    actor.workspaceId(),
-                    runUuid,
-                    userMessage,
-                    previousUserQuestions(history),
-                    new ReleaseToolService.ToolProgressListener() {
+        Optional<ReleaseToolService.ToolEvidence> toolEvidence = Optional.empty();
+        Optional<KnowledgeRagService.RagEvidence> ragEvidence = Optional.empty();
+        Optional<ProjectEventEvidenceService.EventEvidence> eventEvidence = Optional.empty();
+        AgentLoopService.LoopResult loopResult = null;
+        if (agentLoopService != null) {
+            try {
+                loopResult = agentLoopService.run(
+                        new AgentLoopService.LoopRequest(
+                                runUuid, actor.workspaceId(), actor.userId(),
+                                "SYSTEM_ADMIN".equals(account.systemRole()),
+                                toolAccess(account.systemRole(), account.role()),
+                                guardrail.contextualUserPrompt(history, userMessage)),
+                        new com.jundaodsj.insightops.server.chat.AgentToolDispatcher.ProgressListener() {
+                            @Override
+                            public void onStarted(UUID toolCallId, String toolName, int round) {
+                                if (!send(emitter, ChatSseEvent.toolStarted(
+                                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                                        toolCallId, toolName))) {
+                                    cancelDisconnectedRun(runUuid, runId, answer);
+                                }
+                            }
+
+                            @Override
+                            public void onCompleted(UUID toolCallId, String toolName, int round,
+                                                    int resultCount, String model) {
+                                boolean sent = KnowledgeRagService.TOOL_NAME.equals(toolName)
+                                        ? send(emitter, ChatSseEvent.retrievalCompleted(
+                                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                                        toolCallId, toolName, resultCount, model))
+                                        : send(emitter, ChatSseEvent.toolCompleted(
+                                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                                        toolCallId, toolName, resultCount));
+                                if (!sent) cancelDisconnectedRun(runUuid, runId, answer);
+                            }
+
+                            @Override
+                            public void onFailed(UUID toolCallId, String toolName, int round,
+                                                 String errorCode) {
+                                if (!send(emitter, ChatSseEvent.toolFailed(
+                                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                                        toolCallId, toolName, errorCode))) {
+                                    cancelDisconnectedRun(runUuid, runId, answer);
+                                }
+                            }
+                        },
+                        () -> sessionRegistry.isActive(runId));
+            }
+            catch (ModelCallException exception) {
+                failRunSafely(runUuid, answer, exception.code().name());
+                send(emitter, ChatSseEvent.error(
+                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                        exception.code().name()));
+                sessionRegistry.complete(runId);
+                emitter.complete();
+                return emitter;
+            }
+            catch (AgentLoopService.AgentLoopException exception) {
+                if (!sessionRegistry.isActive(runId)) return emitter;
+                failRunSafely(runUuid, answer, exception.errorCode());
+                send(emitter, ChatSseEvent.error(
+                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                        exception.errorCode()));
+                sessionRegistry.complete(runId);
+                emitter.complete();
+                return emitter;
+            }
+        }
+        else {
+            try {
+                toolEvidence = releaseToolService.execute(
+                        actor.workspaceId(), runUuid, userMessage, previousUserQuestions(history),
+                        new ReleaseToolService.ToolProgressListener() {
+                            @Override
+                            public void onStarted(UUID toolCallId, String toolName) {
+                                if (!send(emitter, ChatSseEvent.toolStarted(
+                                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                                        toolCallId, toolName))) {
+                                    cancelDisconnectedRun(runUuid, runId, answer);
+                                }
+                            }
+
+                            @Override
+                            public void onCompleted(UUID toolCallId, String toolName,
+                                                    int releaseCount) {
+                                if (!send(emitter, ChatSseEvent.toolCompleted(
+                                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                                        toolCallId, toolName, releaseCount))) {
+                                    cancelDisconnectedRun(runUuid, runId, answer);
+                                }
+                            }
+                        });
+            }
+            catch (GitHubToolException exception) {
+                String errorCode = toolErrorCode(exception.code());
+                failRunSafely(runUuid, answer, errorCode);
+                send(emitter, ChatSseEvent.error(
+                        runId, sessionId, sequence.incrementAndGet(), traceId, errorCode));
+                sessionRegistry.complete(runId);
+                emitter.complete();
+                return emitter;
+            }
+            if (!sessionRegistry.isActive(runId)) return emitter;
+
+            ragEvidence = knowledgeRagService == null ? Optional.empty()
+                    : knowledgeRagService.retrieve(
+                    runUuid, actor.workspaceId(), actor.userId(),
+                    "SYSTEM_ADMIN".equals(account.systemRole()),
+                    retrievalQuery(history, userMessage),
+                    new KnowledgeRagService.ToolProgressListener() {
                         @Override
                         public void onStarted(UUID toolCallId, String toolName) {
                             if (!send(emitter, ChatSseEvent.toolStarted(
-                                    runId,
-                                    sessionId,
-                                    sequence.incrementAndGet(),
-                                    traceId,
-                                    toolCallId,
-                                    toolName))) {
+                                    runId, sessionId, sequence.incrementAndGet(), traceId,
+                                    toolCallId, toolName))) {
                                 cancelDisconnectedRun(runUuid, runId, answer);
                             }
                         }
 
                         @Override
-                        public void onCompleted(
-                                UUID toolCallId,
-                                String toolName,
-                                int releaseCount) {
-                            if (!send(emitter, ChatSseEvent.toolCompleted(
-                                    runId,
-                                    sessionId,
-                                    sequence.incrementAndGet(),
-                                    traceId,
-                                    toolCallId,
-                                    toolName,
-                                    releaseCount))) {
+                        public void onCompleted(UUID toolCallId, String toolName,
+                                                int resultCount, String model) {
+                            if (!send(emitter, ChatSseEvent.retrievalCompleted(
+                                    runId, sessionId, sequence.incrementAndGet(), traceId,
+                                    toolCallId, toolName, resultCount, model))) {
                                 cancelDisconnectedRun(runUuid, runId, answer);
                             }
                         }
                     });
+            eventEvidence = projectEventEvidenceService == null ? Optional.empty()
+                    : projectEventEvidenceService.retrieve(
+                    runUuid, actor.workspaceId(), userMessage);
         }
-        catch (GitHubToolException exception) {
-            String errorCode = toolErrorCode(exception.code());
-            failRunSafely(runUuid, answer, errorCode);
-            send(emitter, ChatSseEvent.error(
-                    runId,
-                    sessionId,
-                    sequence.incrementAndGet(),
-                    traceId,
-                    errorCode));
-            sessionRegistry.complete(runId);
-            emitter.complete();
-            return emitter;
-        }
-        if (!sessionRegistry.isActive(runId)) {
-            return emitter;
-        }
+        if (!sessionRegistry.isActive(runId)) return emitter;
 
-        Optional<KnowledgeRagService.RagEvidence> ragEvidence = knowledgeRagService == null
-                ? Optional.empty()
-                : knowledgeRagService.retrieve(
-                runUuid,
-                actor.workspaceId(),
-                actor.userId(),
-                "SYSTEM_ADMIN".equals(account.systemRole()),
-                retrievalQuery(history, userMessage),
-                new KnowledgeRagService.ToolProgressListener() {
-                    @Override
-                    public void onStarted(UUID toolCallId, String toolName) {
-                        if (!send(emitter, ChatSseEvent.toolStarted(
-                                runId, sessionId, sequence.incrementAndGet(), traceId,
-                                toolCallId, toolName))) {
-                            cancelDisconnectedRun(runUuid, runId, answer);
-                        }
-                    }
-
-                    @Override
-                    public void onCompleted(UUID toolCallId, String toolName,
-                                            int resultCount, String model) {
-                        if (!send(emitter, ChatSseEvent.retrievalCompleted(
-                                runId, sessionId, sequence.incrementAndGet(), traceId,
-                                toolCallId, toolName, resultCount, model))) {
-                            cancelDisconnectedRun(runUuid, runId, answer);
-                        }
-                    }
-                });
-        Optional<ProjectEventEvidenceService.EventEvidence> eventEvidence = projectEventEvidenceService == null
-                ? Optional.empty()
-                : projectEventEvidenceService.retrieve(runUuid, actor.workspaceId(), userMessage);
-        if (!sessionRegistry.isActive(runId)) {
-            return emitter;
+        String evidenceAppendix = loopResult == null
+                ? toolEvidence.map(ReleaseToolService.ToolEvidence::systemPromptAppendix).orElse("")
+                + ragEvidence.map(KnowledgeRagService.RagEvidence::systemPromptAppendix).orElse("")
+                + eventEvidence.map(ProjectEventEvidenceService.EventEvidence::systemPromptAppendix)
+                .orElse("")
+                : loopResult.systemPromptAppendix();
+        List<String> citations = loopResult == null
+                ? java.util.stream.Stream.of(
+                toolEvidence.stream().flatMap(item -> item.sourceUrls().stream()),
+                ragEvidence.stream().flatMap(item -> item.sourceUrls().stream()),
+                eventEvidence.stream().flatMap(item -> item.sourceUrls().stream()))
+                .flatMap(java.util.function.Function.identity()).distinct().toList()
+                : loopResult.sourceUrls();
+        List<ChatCitation> citationDetails = new java.util.ArrayList<>();
+        if (loopResult != null) {
+            citationDetails.addAll(loopResult.citations());
         }
+        else {
+            toolEvidence.ifPresent(evidenceItem -> {
+                for (int index = 0; index < evidenceItem.sourceUrls().size(); index++) {
+                    String url = evidenceItem.sourceUrls().get(index);
+                    citationDetails.add(new ChatCitation(
+                            "R" + (index + 1), "GitHub Release", url, null, null,
+                            "GITHUB_RELEASE", null));
+                }
+            });
+            ragEvidence.ifPresent(evidenceItem -> {
+                if (!evidenceItem.citations().isEmpty()) {
+                    citationDetails.addAll(evidenceItem.citations());
+                    return;
+                }
+                for (int index = 0; index < evidenceItem.sourceUrls().size(); index++) {
+                    String url = evidenceItem.sourceUrls().get(index);
+                    citationDetails.add(new ChatCitation(
+                            "S" + (index + 1), "官方项目文档", url, null, null,
+                            "OFFICIAL_DOCUMENT", null));
+                }
+            });
+            eventEvidence.ifPresent(evidenceItem -> citationDetails.addAll(evidenceItem.citations()));
+        }
+        final ModelUsage planningUsage = loopResult == null
+                ? ModelUsage.unknown() : loopResult.planningUsage();
 
         String systemPrompt = SYSTEM_PROMPT + guardrail.systemPolicy()
-                + userMemoryStore.prompt(actor, 20) + toolEvidence
-                .map(ReleaseToolService.ToolEvidence::systemPromptAppendix)
-                .orElse("") + ragEvidence
-                .map(KnowledgeRagService.RagEvidence::systemPromptAppendix)
-                .orElse("") + eventEvidence
-                .map(ProjectEventEvidenceService.EventEvidence::systemPromptAppendix)
-                .orElse("");
-        List<String> citations = java.util.stream.Stream.of(
-                        toolEvidence.stream().flatMap(item -> item.sourceUrls().stream()),
-                        ragEvidence.stream().flatMap(item -> item.sourceUrls().stream()),
-                        eventEvidence.stream().flatMap(item -> item.sourceUrls().stream()))
-                .flatMap(java.util.function.Function.identity())
-                .distinct()
-                .toList();
-        List<ChatCitation> citationDetails = new java.util.ArrayList<>();
-        toolEvidence.ifPresent(evidence -> {
-            for (int index = 0; index < evidence.sourceUrls().size(); index++) {
-                String url = evidence.sourceUrls().get(index);
-                citationDetails.add(new ChatCitation(
-                        "R" + (index + 1), "GitHub Release", url, null, null,
-                        "GITHUB_RELEASE", null));
-            }
-        });
-        ragEvidence.ifPresent(evidence -> {
-            if (!evidence.citations().isEmpty()) {
-                citationDetails.addAll(evidence.citations());
-                return;
-            }
-            for (int index = 0; index < evidence.sourceUrls().size(); index++) {
-                String url = evidence.sourceUrls().get(index);
-                citationDetails.add(new ChatCitation(
-                        "S" + (index + 1), "官方项目文档", url, null, null,
-                        "OFFICIAL_DOCUMENT", null));
-            }
-        });
-        eventEvidence.ifPresent(evidence -> citationDetails.addAll(evidence.citations()));
+                + userMemoryStore.prompt(actor, 20) + evidenceAppendix;
         try {
-            toolEvidence.ifPresent(evidence ->
-                    guardrail.verifyTrustedReleaseSources(evidence.sourceUrls()));
-            ragEvidence.ifPresent(evidence ->
-                    guardrail.verifyTrustedKnowledgeSources(evidence.sourceUrls()));
-            eventEvidence.ifPresent(evidence ->
-                    guardrail.verifyTrustedProjectEventSources(evidence.sourceUrls()));
+            if (loopResult == null) {
+                toolEvidence.ifPresent(evidenceItem ->
+                        guardrail.verifyTrustedReleaseSources(evidenceItem.sourceUrls()));
+                ragEvidence.ifPresent(evidenceItem ->
+                        guardrail.verifyTrustedKnowledgeSources(evidenceItem.sourceUrls()));
+                eventEvidence.ifPresent(evidenceItem ->
+                        guardrail.verifyTrustedProjectEventSources(evidenceItem.sourceUrls()));
+            }
+            else {
+                guardrail.verifyTrustedReleaseSources(citationDetails.stream()
+                        .filter(item -> "GITHUB_RELEASE".equals(item.sourceType()))
+                        .map(ChatCitation::url).toList());
+                guardrail.verifyTrustedProjectEventSources(citationDetails.stream()
+                        .filter(item -> item.sourceType() != null
+                                && item.sourceType().startsWith("GITHUB_")
+                                && !"GITHUB_RELEASE".equals(item.sourceType()))
+                        .map(ChatCitation::url).toList());
+                guardrail.verifyTrustedKnowledgeSources(citationDetails.stream()
+                        .filter(item -> item.sourceType() == null
+                                || !item.sourceType().startsWith("GITHUB_"))
+                        .map(ChatCitation::url).toList());
+            }
         }
         catch (P0ChatGuardrail.GuardrailViolation exception) {
             failRunSafely(runUuid, answer, exception.code());
@@ -354,13 +441,17 @@ public class ChatStreamController {
                                 }
                                 return;
                             }
+                            ModelUsage totalUsage = planningUsage.plus(event.usage());
+                            ChatStreamEvent completedEvent = ChatStreamEvent.completed(
+                                    event.provider(), event.model(), totalUsage,
+                                    event.duration(), event.timeToFirstToken());
                             try {
                                 chatRunStore.succeedRunWithCitations(
                                         runUuid,
                                         answer.toString(),
-                                        event.provider(),
-                                        event.model(),
-                                        event.usage(),
+                                        completedEvent.provider(),
+                                        completedEvent.model(),
+                                        completedEvent.usage(),
                                         citationDetails,
                                         Instant.now());
                             }
@@ -382,7 +473,7 @@ public class ChatStreamController {
                                     sessionId,
                                     sequence.incrementAndGet(),
                                     traceId,
-                                    event,
+                                    completedEvent,
                                     citations,
                                     citationDetails));
                             sessionRegistry.complete(runId);
@@ -416,6 +507,17 @@ public class ChatStreamController {
             emitter.complete();
         }
         return emitter;
+    }
+
+    private static AgentToolDefinition.AccessLevel toolAccess(
+            String systemRole, String workspaceRole) {
+        if ("SYSTEM_ADMIN".equals(systemRole)) {
+            return AgentToolDefinition.AccessLevel.SYSTEM_ADMIN;
+        }
+        if ("OWNER".equals(workspaceRole)) {
+            return AgentToolDefinition.AccessLevel.WORKSPACE_OWNER;
+        }
+        return AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER;
     }
 
     private static String previousUserQuestions(List<ChatRunStore.StoredMessage> history) {
@@ -621,6 +723,20 @@ public class ChatStreamController {
                     "tool_completed", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
                     toolName, toolCallId, releaseCount, null, null, List.of(), List.of());
+        }
+
+        static ChatSseEvent toolFailed(
+                String runId,
+                UUID sessionId,
+                long sequence,
+                String traceId,
+                UUID toolCallId,
+                String toolName,
+                String errorCode) {
+            return new ChatSseEvent(
+                    "tool_failed", runId, sessionId, sequence, Instant.now(), traceId,
+                    null, null, null, null, null, null, errorCode,
+                    toolName, toolCallId, null, null, null, List.of(), List.of());
         }
 
         static ChatSseEvent retrievalCompleted(

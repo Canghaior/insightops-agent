@@ -14,12 +14,12 @@ export interface ChatCitation {
   url: string
   project: string | null
   heading: string | null
-  sourceType: 'OFFICIAL_DOCUMENT' | 'GITHUB_RELEASE' | 'USER_UPLOAD'
+  sourceType: 'OFFICIAL_DOCUMENT' | 'GITHUB_RELEASE' | 'GITHUB_ISSUE' | 'GITHUB_PULL_REQUEST' | 'GITHUB_SECURITY_ADVISORY' | 'USER_UPLOAD'
   score: number | null
 }
 
 export interface ChatStreamEvent {
-  type: 'started' | 'tool_started' | 'tool_completed' | 'delta' | 'completed' | 'cancelled' | 'error'
+  type: 'started' | 'tool_started' | 'tool_completed' | 'tool_failed' | 'delta' | 'completed' | 'cancelled' | 'error'
   runId: string
   sessionId: string
   sequence: number
@@ -45,6 +45,7 @@ const eventTypes = new Set<ChatStreamEvent['type']>([
   'started',
   'tool_started',
   'tool_completed',
+  'tool_failed',
   'delta',
   'completed',
   'cancelled',

@@ -23,6 +23,15 @@ const route = useRoute()
 
 type StreamStatus = 'idle' | 'connecting' | 'streaming' | 'completed' | 'cancelled' | 'error'
 
+interface ToolExecution {
+  id: string
+  name: string
+  status: 'running' | 'succeeded' | 'failed'
+  resultCount?: number | null
+  model?: string | null
+  errorCode?: string | null
+}
+
 interface ConversationMessage {
   id: string
   role: ChatHistoryMessage['role']
@@ -36,6 +45,7 @@ interface ConversationMessage {
   durationMs?: number | null
   timeToFirstTokenMs?: number | null
   errorMessage?: string
+  toolExecutions?: ToolExecution[]
   toolName?: string
   toolRunning?: boolean
   releaseCount?: number | null
@@ -87,8 +97,9 @@ const errorLabels: Record<string, string> = {
 }
 
 function statusLabel(message: ConversationMessage) {
+  if (message.toolExecutions?.some((item) => item.status === 'running')) return 'Agent 正在执行工具'
   if (message.ragRunning) return '正在检索官方知识库'
-  if (message.toolRunning) return '正在查询 GitHub Releases'
+  if (message.toolRunning) return '正在执行工具'
   return ({
     idle: '历史回答',
     connecting: '正在连接 DeepSeek',
@@ -130,6 +141,12 @@ function handleEvent(event: ChatStreamEvent) {
     return
   }
   if (event.type === 'tool_started') {
+    assistant.toolExecutions ??= []
+    assistant.toolExecutions.push({
+      id: event.toolCallId ?? `tool-${event.sequence}`,
+      name: event.toolName ?? 'unknown_tool',
+      status: 'running',
+    })
     if (event.toolName === 'knowledge_vector_search' || event.toolName === 'knowledge_hybrid_search') {
       assistant.ragRunning = true
       return
@@ -138,7 +155,18 @@ function handleEvent(event: ChatStreamEvent) {
     assistant.toolRunning = true
     return
   }
-  if (event.type === 'tool_completed') {
+  if (event.type === 'tool_completed' || event.type === 'tool_failed') {
+    assistant.toolExecutions ??= []
+    const id = event.toolCallId ?? `tool-${event.sequence}`
+    let execution = assistant.toolExecutions.find((item) => item.id === id)
+    if (!execution) {
+      execution = { id, name: event.toolName ?? 'unknown_tool', status: 'running' }
+      assistant.toolExecutions.push(execution)
+    }
+    execution.status = event.type === 'tool_failed' ? 'failed' : 'succeeded'
+    execution.errorCode = event.errorCode
+    execution.resultCount = event.retrievalCount ?? event.releaseCount
+    execution.model = event.retrievalModel
     if (event.toolName === 'knowledge_vector_search' || event.toolName === 'knowledge_hybrid_search') {
       assistant.ragRunning = false
       assistant.retrievalCount = event.retrievalCount
@@ -299,6 +327,7 @@ async function sendQuestion() {
       usage: null,
       sources: [],
       citations: [],
+      toolExecutions: [],
     },
   )
   question.value = ''
@@ -367,6 +396,20 @@ function formatMessageTime(value: string) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value))
+}
+
+function toolExecutionLabel(execution: ToolExecution) {
+  if (execution.name === 'github_release_list') return 'GitHub Release'
+  if (execution.name === 'knowledge_hybrid_search') return '知识库混合检索'
+  if (execution.name === 'project_intelligence_event_search') return '项目情报事件'
+  return execution.name
+}
+
+function toolExecutionResult(execution: ToolExecution) {
+  if (execution.status === 'running') return '执行中'
+  if (execution.status === 'failed') return `安全降级 · ${execution.errorCode ?? '工具不可用'}`
+  const count = execution.resultCount ?? 0
+  return execution.model ? `已获取 ${count} 条 · ${execution.model}` : `已获取 ${count} 条结果`
 }
 
 function sourceHeading(message: ConversationMessage) {
@@ -481,17 +524,14 @@ onBeforeUnmount(() => {
               <code v-if="message.runId">Run {{ message.runId.slice(0, 8) }}</code>
             </header>
 
-            <div v-if="message.toolName" class="tool-summary" :class="{ 'is-running': message.toolRunning }">
-              <span>工具 · {{ message.toolName }}</span>
-              <strong>{{ message.toolRunning ? '执行中' : `已获取 ${message.releaseCount ?? 0} 条 Release` }}</strong>
-            </div>
-            <div v-if="message.ragRunning || message.retrievalCount != null" class="tool-summary" :class="{ 'is-running': message.ragRunning }">
-              <span>RAG · knowledge_hybrid_search</span>
-              <strong>{{ message.ragRunning
-                ? '正在生成查询向量并检索'
-                : message.retrievalModel === 'unavailable'
-                  ? '本地检索不可用，已安全降级'
-                  : `已选取 ${message.retrievalCount ?? 0} 条证据 · ${message.retrievalModel ?? 'bge-m3'}` }}</strong>
+            <div
+              v-for="execution in message.toolExecutions"
+              :key="execution.id"
+              class="tool-summary"
+              :class="{ 'is-running': execution.status === 'running', 'is-failed': execution.status === 'failed' }"
+            >
+              <span>Agent 工具 · {{ toolExecutionLabel(execution) }}</span>
+              <strong>{{ toolExecutionResult(execution) }}</strong>
             </div>
 
             <p v-if="message.errorMessage" class="stream-error">{{ message.errorMessage }}</p>
@@ -571,12 +611,14 @@ onBeforeUnmount(() => {
 
     <aside class="evidence-panel">
       <span class="eyebrow">本步能力</span>
-      <h3>流式 RAG、可追溯、可回看</h3>
+      <h3>多轮 Agent、可追溯、可回看</h3>
       <ul>
         <li>发送后立即清空输入框</li>
         <li>多轮问题与回答连续展示</li>
         <li>刷新后从数据库恢复会话</li>
         <li>复用最近 12 条消息理解追问</li>
+        <li>DeepSeek Function Calling 动态选择只读工具</li>
+        <li>Plan-Act-Observe 多轮执行与安全轮次上限</li>
         <li>bge-m3 + PostgreSQL 全文混合检索</li>
         <li>RRF 融合排序与结构化引用卡片</li>
         <li>DeepSeek 基于证据生成并附官方来源</li>

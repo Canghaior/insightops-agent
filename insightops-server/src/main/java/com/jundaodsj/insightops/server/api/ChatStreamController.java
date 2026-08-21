@@ -171,6 +171,7 @@ public class ChatStreamController {
 
         sessionRegistry.register(runId, () -> {
             try {
+                if (agentLoopService != null) agentLoopService.releaseCost(runUuid, "CANCELLED");
                 chatRunStore.cancelRun(runUuid, answer.toString(), Instant.now());
             }
             catch (RuntimeException exception) {
@@ -214,7 +215,8 @@ public class ChatStreamController {
                                 runUuid, actor.workspaceId(), actor.userId(),
                                 "SYSTEM_ADMIN".equals(account.systemRole()),
                                 toolAccess(account.systemRole(), account.role()),
-                                guardrail.contextualUserPrompt(history, userMessage)),
+                                guardrail.contextualUserPrompt(history, userMessage),
+                                body.resumeCheckpointId()),
                         new com.jundaodsj.insightops.server.chat.AgentToolDispatcher.ProgressListener() {
                             @Override
                             public void onStarted(UUID toolCallId, String toolName, int round) {
@@ -273,6 +275,47 @@ public class ChatStreamController {
                                     cancelDisconnectedRun(runUuid, runId, answer);
                                 }
                             }
+
+                            @Override
+                            public void onPlanCreated(
+                                    UUID planId, int version, int maxNodes, int maxParallelism) {
+                                if (!send(emitter, ChatSseEvent.planCreated(
+                                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                                        planId, version, maxNodes, maxParallelism))) {
+                                    cancelDisconnectedRun(runUuid, runId, answer);
+                                }
+                            }
+
+                            @Override
+                            public void onPlanNodeState(
+                                    UUID nodeId, String toolName, int round, String status,
+                                    List<UUID> dependencyIds, String errorCode) {
+                                if (!send(emitter, ChatSseEvent.planNodeState(
+                                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                                        nodeId, toolName, round, status, dependencyIds, errorCode))) {
+                                    cancelDisconnectedRun(runUuid, runId, answer);
+                                }
+                            }
+
+                            @Override
+                            public void onBudgetUpdated(
+                                    com.jundaodsj.insightops.agent.application.AgentOrchestrationStore.BudgetSnapshot budget) {
+                                if (!send(emitter, ChatSseEvent.budget(
+                                        "budget_updated", runId, sessionId,
+                                        sequence.incrementAndGet(), traceId, budget))) {
+                                    cancelDisconnectedRun(runUuid, runId, answer);
+                                }
+                            }
+
+                            @Override
+                            public void onBudgetExhausted(
+                                    com.jundaodsj.insightops.agent.application.AgentOrchestrationStore.BudgetSnapshot budget) {
+                                if (!send(emitter, ChatSseEvent.budget(
+                                        "budget_exhausted", runId, sessionId,
+                                        sequence.incrementAndGet(), traceId, budget))) {
+                                    cancelDisconnectedRun(runUuid, runId, answer);
+                                }
+                            }
                         },
                         () -> sessionRegistry.isActive(runId));
             }
@@ -281,6 +324,15 @@ public class ChatStreamController {
                 send(emitter, ChatSseEvent.error(
                         runId, sessionId, sequence.incrementAndGet(), traceId,
                         exception.code().name()));
+                sessionRegistry.complete(runId);
+                emitter.complete();
+                return emitter;
+            }
+            catch (AgentLoopService.AgentLoopPausedException exception) {
+                chatRunStore.pauseRun(runUuid, answer.toString(), Instant.now());
+                send(emitter, ChatSseEvent.planPaused(
+                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                        exception.checkpointId()));
                 sessionRegistry.complete(runId);
                 emitter.complete();
                 return emitter;
@@ -480,6 +532,7 @@ public class ChatStreamController {
                                         completedEvent.usage(),
                                         citationDetails,
                                         Instant.now());
+                                settleCostSafely(runUuid, totalUsage);
                             }
                             catch (RuntimeException exception) {
                                 LOGGER.error("Failed to persist successful run {}", runId, exception);
@@ -588,6 +641,7 @@ public class ChatStreamController {
             return;
         }
         try {
+            if (agentLoopService != null) agentLoopService.releaseCost(runUuid, "CLIENT_DISCONNECTED");
             chatRunStore.cancelRun(runUuid, answer.toString(), Instant.now());
         }
         catch (RuntimeException exception) {
@@ -596,11 +650,20 @@ public class ChatStreamController {
     }
 
     private void failRunSafely(UUID runId, StringBuffer answer, String failureCode) {
+        if (agentLoopService != null) agentLoopService.releaseCost(runId, failureCode);
         try {
             chatRunStore.failRun(runId, answer.toString(), failureCode, Instant.now());
         }
         catch (RuntimeException exception) {
             LOGGER.error("Failed to persist failed run {}", runId, exception);
+        }
+    }
+
+    private void settleCostSafely(UUID runId, ModelUsage usage) {
+        if (agentLoopService == null) return;
+        try { agentLoopService.settleCost(runId, usage); }
+        catch (RuntimeException exception) {
+            LOGGER.error("Failed to settle Agent cost for run {}", runId, exception);
         }
     }
 
@@ -645,10 +708,15 @@ public class ChatStreamController {
             @NotBlank(message = "message must not be blank")
             @Size(max = 4000, message = "message must not exceed 4000 characters")
             String message,
-            UUID sessionId) {
+            UUID sessionId,
+            UUID resumeCheckpointId) {
 
         public ChatStreamRequest(String message) {
-            this(message, null);
+            this(message, null, null);
+        }
+
+        public ChatStreamRequest(String message, UUID sessionId) {
+            this(message, sessionId, null);
         }
     }
 
@@ -675,13 +743,14 @@ public class ChatStreamController {
             Integer retrievalCount,
             String retrievalModel,
             List<String> sources,
-            List<ChatCitation> citations) {
+            List<ChatCitation> citations,
+            OrchestrationSsePayload orchestration) {
 
         static ChatSseEvent started(String runId, UUID sessionId, long sequence, String traceId) {
             return new ChatSseEvent(
                     "started", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    null, null, null, null, null, List.of(), List.of());
+                    null, null, null, null, null, List.of(), List.of(), null);
         }
 
         static ChatSseEvent delta(
@@ -689,7 +758,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "delta", runId, sessionId, sequence, Instant.now(), traceId,
                     content, null, null, null, null, null, null,
-                    null, null, null, null, null, List.of(), List.of());
+                    null, null, null, null, null, List.of(), List.of(), null);
         }
 
         static ChatSseEvent completed(
@@ -705,7 +774,18 @@ public class ChatStreamController {
                     null, event.provider(), event.model(), event.usage(),
                     event.duration().toMillis(),
                     event.timeToFirstToken() == null ? null : event.timeToFirstToken().toMillis(),
-                    null, null, null, null, null, null, sources, citations);
+                    null, null, null, null, null, null, sources, citations, null);
+        }
+
+        static ChatSseEvent planPaused(
+                String runId, UUID sessionId, long sequence, String traceId, UUID checkpointId) {
+            return new ChatSseEvent(
+                    "plan_paused", runId, sessionId, sequence, Instant.now(), traceId,
+                    checkpointId.toString(), null, null, null, null, null, null,
+                    null, null, null, null, null, List.of(), List.of(),
+                    new OrchestrationSsePayload(
+                            null, null, "PAUSED", null, null, null, null,
+                            null, null, null, null, List.of(), null, null));
         }
 
         static ChatSseEvent cancelled(
@@ -713,7 +793,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "cancelled", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    null, null, null, null, null, List.of(), List.of());
+                    null, null, null, null, null, List.of(), List.of(), null);
         }
 
         static ChatSseEvent error(
@@ -721,7 +801,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "error", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, errorCode,
-                    null, null, null, null, null, List.of(), List.of());
+                    null, null, null, null, null, List.of(), List.of(), null);
         }
 
         static ChatSseEvent toolStarted(
@@ -734,7 +814,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "tool_started", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    toolName, toolCallId, null, null, null, List.of(), List.of());
+                    toolName, toolCallId, null, null, null, List.of(), List.of(), null);
         }
         static ChatSseEvent toolRetrying(
                 String runId,
@@ -751,7 +831,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "tool_retrying", runId, sessionId, sequence, Instant.now(), traceId,
                     content, null, null, null, null, null, errorCode,
-                    toolName, toolCallId, null, null, null, List.of(), List.of());
+                    toolName, toolCallId, null, null, null, List.of(), List.of(), null);
         }
 
         static ChatSseEvent approvalRequired(
@@ -770,7 +850,7 @@ public class ChatStreamController {
                     "tool_approval_required", runId, sessionId, sequence,
                     Instant.now(), traceId, content, null, null, null,
                     null, null, null, toolName, toolCallId,
-                    null, null, null, List.of(), List.of());
+                    null, null, null, List.of(), List.of(), null);
         }
 
         static ChatSseEvent toolCompleted(
@@ -784,7 +864,7 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "tool_completed", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    toolName, toolCallId, releaseCount, null, null, List.of(), List.of());
+                    toolName, toolCallId, releaseCount, null, null, List.of(), List.of(), null);
         }
 
         static ChatSseEvent toolFailed(
@@ -798,7 +878,66 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "tool_failed", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, errorCode,
-                    toolName, toolCallId, null, null, null, List.of(), List.of());
+                    toolName, toolCallId, null, null, null, List.of(), List.of(), null);
+        }
+
+        static ChatSseEvent planCreated(
+                String runId,
+                UUID sessionId,
+                long sequence,
+                String traceId,
+                UUID planId,
+                int version,
+                int maxNodes,
+                int maxParallelism) {
+            return new ChatSseEvent(
+                    "plan_created", runId, sessionId, sequence, Instant.now(), traceId,
+                    null, null, null, null, null, null, null,
+                    null, null, null, null, null, List.of(), List.of(),
+                    new OrchestrationSsePayload(
+                            planId.toString(), null, "ACTIVE", version, null,
+                            maxNodes, maxParallelism, null, null, null, null,
+                            List.of(), null, null));
+        }
+
+        static ChatSseEvent planNodeState(
+                String runId,
+                UUID sessionId,
+                long sequence,
+                String traceId,
+                UUID nodeId,
+                String toolName,
+                int round,
+                String status,
+                List<UUID> dependencyIds,
+                String errorCode) {
+            return new ChatSseEvent(
+                    "plan_node_state", runId, sessionId, sequence, Instant.now(), traceId,
+                    null, null, null, null, null, null, errorCode,
+                    toolName, null, null, null, null, List.of(), List.of(),
+                    new OrchestrationSsePayload(
+                            null, nodeId.toString(), status, null, round,
+                            null, null, null, null, null, null,
+                            dependencyIds.stream().map(UUID::toString).toList(),
+                            errorCode, null));
+        }
+
+        static ChatSseEvent budget(
+                String type,
+                String runId,
+                UUID sessionId,
+                long sequence,
+                String traceId,
+                com.jundaodsj.insightops.agent.application.AgentOrchestrationStore.BudgetSnapshot budget) {
+            return new ChatSseEvent(
+                    type, runId, sessionId, sequence, Instant.now(), traceId,
+                    null, null, null, null, null, null, null,
+                    null, null, null, null, null, List.of(), List.of(),
+                    new OrchestrationSsePayload(
+                            null, null, budget.status(), null, null,
+                            null, null, budget.usedNodes(), budget.usedToolAttempts(),
+                            budget.usedModelTokens(), budget.estimatedCostCny(),
+                            List.of(), null, budget.exhaustionReason()));
         }
 
         static ChatSseEvent retrievalCompleted(
@@ -813,7 +952,24 @@ public class ChatStreamController {
             return new ChatSseEvent(
                     "tool_completed", runId, sessionId, sequence, Instant.now(), traceId,
                     null, null, null, null, null, null, null,
-                    toolName, toolCallId, null, resultCount, model, List.of(), List.of());
+                    toolName, toolCallId, null, resultCount, model, List.of(), List.of(), null);
         }
+    }
+
+    public record OrchestrationSsePayload(
+            String planId,
+            String nodeId,
+            String status,
+            Integer version,
+            Integer round,
+            Integer maxNodes,
+            Integer maxParallelism,
+            Integer usedNodes,
+            Integer usedToolAttempts,
+            Long usedModelTokens,
+            java.math.BigDecimal estimatedCostCny,
+            List<String> dependencyIds,
+            String errorCode,
+            String exhaustionReason) {
     }
 }

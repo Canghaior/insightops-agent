@@ -73,6 +73,7 @@ async function signOut() {
         <RouterLink to="/admin/users"><el-icon><UserFilled /></el-icon><span>用户管理</span></RouterLink>
         <RouterLink to="/admin/projects"><el-icon><FolderOpened /></el-icon><span>项目管理</span></RouterLink>
         <RouterLink to="/admin/agent-tools"><el-icon><Operation /></el-icon><span>Agent 工具</span></RouterLink>
+        <RouterLink to="/admin/agent-cost"><el-icon><DataAnalysis /></el-icon><span>成本治理</span></RouterLink>
         <RouterLink v-if="isSystemAdmin" to="/admin/knowledge"><el-icon><FolderOpened /></el-icon><span>知识库采集</span></RouterLink>
         <RouterLink v-if="isSystemAdmin" to="/admin/quality"><el-icon><DataAnalysis /></el-icon><span>质量复核</span></RouterLink>
       </nav>

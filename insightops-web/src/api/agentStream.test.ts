@@ -72,4 +72,30 @@ describe('createSseParser', () => {
     expect(JSON.stringify(event)).not.toContain('Authorization')
     expect(JSON.stringify(event)).not.toContain('sk-')
   })
+  it('parses structured plan node and budget events', () => {
+    const node = parseSseEnvelope(JSON.stringify({
+      type: 'plan_node_state', runId: 'run-4', sequence: 3,
+      toolName: 'knowledge_hybrid_search',
+      orchestration: {
+        nodeId: 'node-1', round: 1, status: 'RUNNING', dependencyIds: [],
+      },
+    }))
+    const budget = parseSseEnvelope(JSON.stringify({
+      type: 'budget_exhausted', runId: 'run-4', sequence: 4,
+      orchestration: {
+        status: 'EXHAUSTED', usedNodes: 12, usedModelTokens: 9000,
+        estimatedCostCny: 0.12, exhaustionReason: 'MAX_NODES', dependencyIds: [],
+      },
+    }))
+
+    expect(node.orchestration).toMatchObject({ nodeId: 'node-1', status: 'RUNNING' })
+    expect(budget.orchestration).toMatchObject({
+      usedNodes: 12, exhaustionReason: 'MAX_NODES',
+    })
+
+    const paused = parseSseEnvelope(JSON.stringify({
+      type: 'plan_paused', runId: 'run-4', sequence: 5, content: 'checkpoint-1',
+    }))
+    expect(paused).toMatchObject({ type: 'plan_paused', content: 'checkpoint-1' })
+  })
 })

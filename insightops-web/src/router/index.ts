@@ -51,6 +51,12 @@ const router = createRouter({
       component: () => import('@/views/AdminAgentToolsView.vue'),
       meta: { manager: true },
     },
+    {
+      path: '/admin/agent-cost',
+      name: 'admin-agent-cost',
+      component: () => import('@/views/AdminAgentCostView.vue'),
+      meta: { manager: true },
+    },
   ],
 })
 

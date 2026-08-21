@@ -427,6 +427,21 @@ a { color: inherit; text-decoration: none; }
 .stream-metrics dt { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .stream-metrics dd { margin: 5px 0 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
 .trace-line { color: #748387; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; margin: 14px 0 0; overflow-wrap: anywhere; }
+.orchestration-panel { margin-top: 18px; padding: 14px; border: 1px solid rgba(103, 212, 180, .2); border-radius: 12px; background: rgba(9, 15, 17, .58); }
+.orchestration-panel > header { display: flex; justify-content: space-between; gap: 14px; color: var(--muted); font-size: 11px; }
+.orchestration-panel > header strong { color: var(--accent); font-weight: 600; }
+.orchestration-budget { display: grid; gap: 7px; margin: 12px 0; color: var(--muted); font-size: 10px; }
+.orchestration-budget > div { height: 5px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.07); }
+.orchestration-budget i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #4fb794, #8cddb1); transition: width .25s ease; }
+.plan-layer { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.06); }
+.plan-layer + .plan-layer { margin-top: 9px; }
+.plan-layer > b { width: 52px; color: var(--muted); font-size: 10px; font-weight: 500; }
+.plan-node { padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; background: rgba(255,255,255,.025); }
+.plan-node.is-running, .plan-node.is-pending { border-color: rgba(103, 212, 180, .35); color: var(--accent); }
+.plan-node.is-succeeded { border-color: rgba(93, 220, 154, .32); color: #8cddb1; }
+.plan-node.is-failed, .plan-node.is-cancelled { border-color: rgba(255, 111, 111, .34); color: #ff9d9d; }
+.plan-node.is-skipped, .plan-node.is-waiting_approval { border-color: rgba(245, 184, 85, .32); color: #eec276; }
+.budget-warning { margin: 10px 0 0; color: #eec276; font-size: 10px; }
 .tool-summary { display: flex; justify-content: space-between; gap: 16px; margin-top: 18px; padding: 11px 13px; border: 1px solid rgba(103, 212, 180, .18); border-radius: 10px; background: rgba(103, 212, 180, .06); color: var(--muted); font-size: 11px; }
 .tool-summary strong { color: #8cddb1; font-weight: 600; }
 .tool-summary.is-running strong { color: var(--accent); }
@@ -602,3 +617,35 @@ a { color: inherit; text-decoration: none; }
   .quality-form-grid, .version-grid, .version-builder { grid-template-columns: 1fr; }
   .candidate-checklist { grid-column: auto; }
 }
+
+/* P2.1-B/C conditional recovery and workspace cost governance */
+.status-paused, .status-release { color: #e8bc78; background: rgba(150, 104, 38, .1); }
+.status-reserve { color: #77cce0; background: rgba(58, 139, 159, .1); }
+.status-settle { color: #75d7ad; background: rgba(53, 142, 103, .1); }
+.status-reject { color: #ff9090; background: rgba(168, 54, 54, .1); }
+.checkpoint-notice, .checkpoint-resume-banner { margin: 12px 0 0; padding: 11px 13px; color: #bfe5d9; border: 1px solid rgba(103, 212, 180, .25); border-radius: 10px; background: rgba(103, 212, 180, .06); font-size: 11px; }
+.checkpoint-resume-banner { display: flex; align-items: center; gap: 12px; margin: 14px 0; }
+.checkpoint-resume-banner span { color: var(--muted); }
+.checkpoint-resume-banner .text-button { margin-left: auto; }
+.stream-status.is-paused { color: #e8bc78; }
+.cost-governance-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.cost-governance-summary article { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.cost-governance-summary span, .cost-governance-summary small { display: block; color: var(--muted); font-size: 10px; }
+.cost-governance-summary strong { display: block; margin: 8px 0 4px; font-size: 21px; }
+.cost-governance-summary .el-progress { margin-top: 12px; }
+.cost-governance-grid { display: grid; grid-template-columns: minmax(340px, .8fr) minmax(460px, 1.2fr); gap: 16px; }
+.cost-governance-grid .form-panel { margin: 0; }
+.cost-policy-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
+.cost-policy-form label { display: grid; gap: 6px; color: var(--muted); font-size: 10px; }
+.cost-policy-form input:not([type='checkbox']) { width: 100%; color: #dce5e6; border: 1px solid var(--line); border-radius: 8px; background: #0d1416; padding: 10px; }
+.cost-policy-form input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--accent); }
+.cost-policy-form .primary-button { grid-column: 1 / -1; }
+.cost-ledger-panel { padding: 20px; }
+.cost-ledger-row { display: grid; grid-template-columns: 70px minmax(0, 1fr) 150px; gap: 12px; align-items: center; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.cost-ledger-row div { min-width: 0; }
+.cost-ledger-row strong, .cost-ledger-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cost-ledger-row small { margin-top: 5px; color: var(--muted); font-size: 9px; }
+.cost-ledger-row > span { color: #b9c7c8; text-align: right; font-size: 10px; line-height: 1.6; }
+.success-banner { margin-bottom: 14px; padding: 12px 14px; color: #86e3bd; border: 1px solid rgba(103, 212, 180, .25); border-radius: 10px; background: rgba(103, 212, 180, .07); }
+@media (max-width: 1100px) { .cost-governance-summary { grid-template-columns: repeat(2, 1fr); } .cost-governance-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .cost-governance-summary, .cost-policy-form { grid-template-columns: 1fr; } .checkpoint-resume-banner { align-items: flex-start; flex-direction: column; } .checkpoint-resume-banner .text-button { margin-left: 0; } .cost-ledger-row { grid-template-columns: 1fr; } .cost-ledger-row > span { text-align: left; } }

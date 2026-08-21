@@ -2,6 +2,10 @@ package com.jundaodsj.insightops.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentRunQuery;
+import com.jundaodsj.insightops.agent.application.AgentOrchestrationStore;
+import com.jundaodsj.insightops.agent.application.AgentCheckpointStore;
+import com.jundaodsj.insightops.agent.application.AgentConditionalGraphStore;
+import com.jundaodsj.insightops.agent.application.AgentCostGovernanceStore;
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
 import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.identity.application.ActorContext;
@@ -14,6 +18,11 @@ import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekPricingProperties;
 import com.jundaodsj.insightops.infrastructure.model.DeepSeekCostEstimator;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentRunQuery;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentOrchestrationStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentCheckpointQuery;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentCheckpointStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentConditionalGraphStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentCostGovernanceStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAdminAccountStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAdminProjectStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAccountWorkspaceStore;
@@ -82,6 +91,7 @@ import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -143,7 +153,7 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(26);
+        assertThat(migration.migrationsExecuted).isEqualTo(29);
 
         jdbcClient = JdbcClient.create(dataSource);
         assertThat(jdbcClient.sql("select count(*) from tracked_project")
@@ -1141,6 +1151,181 @@ class P0ChainDatabaseGateTest {
                 memory -> memory.key().equals("p2d-rejected-memory"));
     }
 
+    @Test
+    @Order(15)
+    void orchestrationGraphAndBudgetAreDurableAndQueryable() {
+        JdbcAgentOrchestrationStore orchestration =
+                new JdbcAgentOrchestrationStore(jdbcClient);
+        Instant now = Instant.parse("2026-08-22T03:00:00Z");
+        UUID runId = UUID.randomUUID();
+        runStore.startRun(ACTOR, runId, null, "p21a-graph-" + runId,
+                "并行检索 Release 和官方文档", now);
+        AgentOrchestrationStore.RunLimits limits =
+                new AgentOrchestrationStore.RunLimits(
+                        12, 3, 8, 16_000, new BigDecimal("0.500000"));
+        AgentOrchestrationStore.PlanHandle plan =
+                orchestration.startRun(runId, limits, now);
+
+        AgentOrchestrationStore.NodeDraft release =
+                new AgentOrchestrationStore.NodeDraft(
+                        UUID.randomUUID(), "call-release", 1, "github_release_list",
+                        "READ_ONLY", true, "{\"limit\":10}");
+        AgentOrchestrationStore.NodeDraft knowledge =
+                new AgentOrchestrationStore.NodeDraft(
+                        UUID.randomUUID(), "call-knowledge", 2, "knowledge_hybrid_search",
+                        "READ_ONLY", true, "{\"query\":\"ChatClient\"}");
+        orchestration.appendLayer(
+                plan.planId(), runId, 1, List.of(release, knowledge), List.of(), now);
+        AgentOrchestrationStore.NodeDraft synthesis =
+                new AgentOrchestrationStore.NodeDraft(
+                        UUID.randomUUID(), "call-events", 1,
+                        "project_intelligence_event_search", "READ_ONLY", true,
+                        "{\"eventTypes\":[\"GITHUB_ISSUE\"]}");
+        orchestration.appendLayer(
+                plan.planId(), runId, 2, List.of(synthesis),
+                List.of(release.id(), knowledge.id()), now.plusSeconds(1));
+        orchestration.updateNode(
+                release.id(), "SUCCEEDED", null, null, now.plusSeconds(2));
+        orchestration.updateNode(
+                knowledge.id(), "SUCCEEDED", null, null, now.plusSeconds(2));
+        orchestration.updateNode(
+                synthesis.id(), "SKIPPED", null, "MAX_MODEL_TOKENS", now.plusSeconds(3));
+        orchestration.updateBudget(runId,
+                new AgentOrchestrationStore.BudgetSnapshot(
+                        3, 2, 4_200, new BigDecimal("0.012300"),
+                        "EXHAUSTED", "MAX_MODEL_TOKENS"), now.plusSeconds(3));
+        orchestration.finishPlan(plan.planId(), "LIMIT_REACHED", now.plusSeconds(3));
+
+        AgentRunQuery.RunDetail detail = runQuery.findRun(ACTOR, runId).orElseThrow();
+        assertThat(detail.plan()).isNotNull();
+        assertThat(detail.plan().nodes()).hasSize(3);
+        assertThat(detail.plan().nodes().get(2).dependencyIds())
+                .containsExactly(release.id(), knowledge.id());
+        assertThat(detail.budget()).isNotNull();
+        assertThat(detail.budget().status()).isEqualTo("EXHAUSTED");
+        assertThat(detail.budget().exhaustionReason()).isEqualTo("MAX_MODEL_TOKENS");
+        assertThat(detail.budget().estimatedCostCny()).isEqualByComparingTo("0.012300");
+    }
+
+    @Test
+    @Order(16)
+    void conditionalGraphPauseCheckpointAndResumeAreDurable() {
+        JdbcAgentOrchestrationStore orchestration = new JdbcAgentOrchestrationStore(jdbcClient);
+        JdbcAgentConditionalGraphStore conditional = new JdbcAgentConditionalGraphStore(jdbcClient);
+        JdbcAgentCheckpointStore checkpoints = new JdbcAgentCheckpointStore(jdbcClient);
+        JdbcAgentCheckpointQuery checkpointQuery = new JdbcAgentCheckpointQuery(jdbcClient);
+        Instant now = Instant.parse("2026-08-22T04:00:00Z");
+        UUID runId = UUID.randomUUID();
+        runStore.startRun(ACTOR, runId, null, "p21b-conditional-" + runId,
+                "Release 失败时改查知识库", now);
+        AgentOrchestrationStore.PlanHandle plan = orchestration.startRun(runId,
+                new AgentOrchestrationStore.RunLimits(
+                        12, 3, 8, 16_000, new BigDecimal("0.500000")), now);
+        UUID releaseId = UUID.randomUUID();
+        UUID fallbackId = UUID.randomUUID();
+        conditional.appendGraph(plan.planId(), runId, 1, 2, List.of(
+                new AgentConditionalGraphStore.GraphNodeDraft(
+                        releaseId, "release", 1, "github_release_list", "READ_ONLY", true,
+                        "{\"limit\":10}", List.of(), "ALWAYS", "[]"),
+                new AgentConditionalGraphStore.GraphNodeDraft(
+                        fallbackId, "fallback", 2, "knowledge_hybrid_search", "READ_ONLY", false,
+                        "{\"query\":\"ChatClient\"}", List.of(releaseId),
+                        "ERROR_CODE_MATCH", "[\"TOOL_TIMEOUT\"]")), now);
+        checkpoints.recordRevision(plan.planId(), 2, "FAILURE_BRANCH",
+                "{\"nodes\":2}", now.plusSeconds(1));
+
+        assertThat(checkpoints.requestPause(
+                ACTOR.workspaceId(), ACTOR.userId(), runId, now.plusSeconds(2))).isTrue();
+        assertThat(checkpoints.control(runId))
+                .isEqualTo(AgentCheckpointStore.ControlState.PAUSE_REQUESTED);
+        UUID checkpointId = UUID.randomUUID();
+        AgentCheckpointStore.Checkpoint checkpoint = checkpoints.save(
+                new AgentCheckpointStore.CheckpointDraft(
+                        checkpointId, plan.planId(), runId, ACTOR.workspaceId(), ACTOR.userId(),
+                        "SAFE_POINT", "{\"evidence\":[\"release\"]}",
+                        "{\"usedNodes\":1}", now.plusSeconds(3)));
+        checkpoints.markPaused(plan.planId(), checkpointId, now.plusSeconds(3));
+        runStore.pauseRun(runId, "", now.plusSeconds(3));
+        assertThat(checkpoints.control(runId)).isEqualTo(AgentCheckpointStore.ControlState.PAUSED);
+        assertThat(checkpointQuery.latest(ACTOR, runId)).get()
+                .extracting("id", "status").containsExactly(checkpointId, "AVAILABLE");
+
+        AgentRunQuery.RunDetail paused = runQuery.findRun(ACTOR, runId).orElseThrow();
+        assertThat(paused.status()).isEqualTo("PAUSED");
+        assertThat(paused.plan().nodes()).hasSize(2);
+        assertThat(paused.plan().nodes().get(1).conditionType()).isEqualTo("ERROR_CODE_MATCH");
+        assertThat(paused.plan().nodes().get(1).expectedErrorCodes()).containsExactly("TOOL_TIMEOUT");
+        assertThat(paused.plan().nodes().get(1).revision()).isEqualTo(2);
+
+        UUID resumedRunId = UUID.randomUUID();
+        runStore.startRun(ACTOR, resumedRunId, null, "p21b-resume-" + resumedRunId,
+                "从检查点继续", now.plusSeconds(4));
+        AgentOrchestrationStore.PlanHandle resumedPlan = orchestration.startRun(
+                resumedRunId, new AgentOrchestrationStore.RunLimits(
+                        12, 3, 8, 16_000, new BigDecimal("0.500000")), now.plusSeconds(4));
+        assertThat(checkpoints.consume(checkpoint.id(), resumedRunId, now.plusSeconds(5))).isTrue();
+        checkpoints.linkResume(resumedPlan.planId(), checkpoint.id(), now.plusSeconds(5));
+        assertThat(jdbcClient.sql("select resumed_from_checkpoint_id from agent_plan where id = :id")
+                .param("id", resumedPlan.planId()).query(UUID.class).single())
+                .isEqualTo(checkpoint.id());
+        assertThat(checkpoints.consume(checkpoint.id(), UUID.randomUUID(), now.plusSeconds(6))).isFalse();
+        assertThat(checkpointQuery.latest(ACTOR, runId)).get()
+                .extracting("status", "resumedRunId").containsExactly("CONSUMED", resumedRunId);
+    }
+
+    @Test
+    @Order(17)
+    void workspaceCostReservationSettlementAndHardLimitAreAuditable() {
+        JdbcAgentCostGovernanceStore costs = new JdbcAgentCostGovernanceStore(jdbcClient);
+        Instant now = Instant.parse("2026-08-22T05:00:00Z");
+        LocalDate day = LocalDate.of(2026, 8, 22);
+        YearMonth month = YearMonth.of(2026, 8);
+        AgentCostGovernanceStore.Policy policy = costs.ensurePolicy(
+                ACTOR.workspaceId(), new AgentCostGovernanceStore.DefaultPolicy(
+                        10_000, new BigDecimal("10"), 100_000, new BigDecimal("100"),
+                        3, 80, true), now);
+        assertThat(policy.version()).isEqualTo(1);
+
+        UUID runId = UUID.randomUUID();
+        runStore.startRun(ACTOR, runId, null, "p21c-cost-" + runId,
+                "验证成本预占与结算", now);
+        AgentCostGovernanceStore.ReservationRequest request =
+                new AgentCostGovernanceStore.ReservationRequest(
+                        UUID.randomUUID(), runId, ACTOR.workspaceId(), ACTOR.userId(),
+                        2_000, new BigDecimal("2.000000"), day, month, now);
+        AgentCostGovernanceStore.ReservationDecision reserved = costs.reserve(request);
+        assertThat(reserved.allowed()).isTrue();
+        assertThat(reserved.reservation().status()).isEqualTo("RESERVED");
+        assertThat(costs.reserve(request).reservation().id())
+                .isEqualTo(reserved.reservation().id());
+
+        costs.settle(runId, 1_500, new BigDecimal("1.250000"), now.plusSeconds(1));
+        costs.settle(runId, 9_999, new BigDecimal("9.999999"), now.plusSeconds(2));
+        AgentCostGovernanceStore.Overview settled = costs.overview(
+                ACTOR.workspaceId(), day, month, 20);
+        assertThat(settled.usage().dailyTokens()).isEqualTo(1_500);
+        assertThat(settled.usage().dailyCostCny()).isEqualByComparingTo("1.250000");
+        assertThat(settled.usage().activeReservations()).isZero();
+        assertThat(settled.ledger()).extracting(AgentCostGovernanceStore.LedgerEntry::entryType)
+                .contains("RESERVE", "SETTLE");
+
+        costs.updatePolicy(ACTOR.workspaceId(), ACTOR.userId(),
+                new AgentCostGovernanceStore.PolicyUpdate(
+                        true, 1_600, new BigDecimal("2"), 2_000, new BigDecimal("3"),
+                        1, 75, true), now.plusSeconds(3));
+        UUID rejectedRunId = UUID.randomUUID();
+        runStore.startRun(ACTOR, rejectedRunId, null, "p21c-reject-" + rejectedRunId,
+                "验证硬配额拒绝", now.plusSeconds(3));
+        AgentCostGovernanceStore.ReservationDecision rejected = costs.reserve(
+                new AgentCostGovernanceStore.ReservationRequest(
+                        UUID.randomUUID(), rejectedRunId, ACTOR.workspaceId(), ACTOR.userId(),
+                        200, new BigDecimal("1.000000"), day, month, now.plusSeconds(4)));
+        assertThat(rejected.allowed()).isFalse();
+        assertThat(rejected.reason()).isEqualTo("DAILY_TOKEN_LIMIT");
+        assertThat(rejected.reservation().status()).isEqualTo("REJECTED");
+        assertThat(costs.overview(ACTOR.workspaceId(), day, month, 20).ledger())
+                .extracting(AgentCostGovernanceStore.LedgerEntry::entryType).contains("REJECT");
+    }
     private static ActorContext actor(String userId) {
         return new ActorContext(UUID.fromString(userId), ACTOR.workspaceId());
     }

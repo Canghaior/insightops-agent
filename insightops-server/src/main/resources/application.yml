@@ -38,6 +38,23 @@ spring:
           max-retries: ${MODEL_MAX_RETRIES:2}
 
 insightops:
+  agent:
+    orchestration:
+      enabled: ${AGENT_ORCHESTRATION_ENABLED:true}
+      max-nodes: ${AGENT_ORCHESTRATION_MAX_NODES:12}
+      max-parallelism: ${AGENT_ORCHESTRATION_MAX_PARALLELISM:3}
+      max-model-tokens: ${AGENT_ORCHESTRATION_MAX_MODEL_TOKENS:16000}
+      max-estimated-cost-cny: ${AGENT_ORCHESTRATION_MAX_ESTIMATED_COST_CNY:0.500000}
+    cost-governance:
+      enabled: ${AGENT_COST_GOVERNANCE_ENABLED:true}
+      daily-token-limit: ${AGENT_COST_DAILY_TOKEN_LIMIT:500000}
+      daily-cost-limit-cny: ${AGENT_COST_DAILY_COST_LIMIT_CNY:20.000000}
+      monthly-token-limit: ${AGENT_COST_MONTHLY_TOKEN_LIMIT:10000000}
+      monthly-cost-limit-cny: ${AGENT_COST_MONTHLY_COST_LIMIT_CNY:300.000000}
+      max-concurrent-runs: ${AGENT_COST_MAX_CONCURRENT_RUNS:5}
+      warning-percent: ${AGENT_COST_WARNING_PERCENT:80}
+      hard-limit-enabled: ${AGENT_COST_HARD_LIMIT_ENABLED:true}
+      timezone: ${AGENT_COST_TIMEZONE:Asia/Shanghai}
   report:
     pdf-font-path: ${REPORT_PDF_FONT_PATH:}
   knowledge:

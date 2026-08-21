@@ -51,7 +51,7 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 |---|---:|---|
 | 固定三项目的封闭 Alpha | 约 94% | 三项目生产知识库、50 题及反馈版本化 RAG 门禁、统一事件流、真实引用问答、采集可观测性和备份链路已验收 |
 | 用户可自由配置的技术情报产品 | 约 86% | 项目、知识源、RSS、Roadmap、用户资料、关注规则、反馈复核、报告导出和 Webhook 已产品化；邮件、专用协作渠道及十项目长期稳定性观察仍待完成 |
-| 通用多工具自主 Agent | 约 35% | 当前是固定工具编排，不是真正的 Plan-Act-Observe 多轮 Agent |
+| 通用多工具自主 Agent | 约 72% | P2.0 已完成 Function Calling、可靠性和写工具治理；P2.1-A/B/C 已完成受限并行 DAG、条件分支、检查点恢复和 Workspace 成本配额，本次生产验收待关闭 |
 | 可公开运营的 SaaS | 约 40% | 已有上传配额、应用指标、关键告警和含文件卷备份；仍缺注册、找回密码、计费、合规、异地副本和完整容灾演练 |
 
 当前最准确的阶段判断是：
@@ -250,22 +250,26 @@ P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `do
 ```text
 用户问题 + 对话上下文 + 可用项目
   -> DeepSeek Planner 原生 Function Calling
-  -> Registry 过滤后的只读工具
-  -> Executor 权限、Schema 和审计
-  -> Observation
-  -> 根据 Observation 继续、换工具或结束
+  -> 同轮只读调用形成 DAG 并行层
+  -> Registry 权限/Schema + 节点/Token/成本预算
+  -> Executor 受限并行；写工具独占并继续审批
+  -> Observation + 持久化节点状态与依赖边
+  -> 根据完整层结果重规划、换工具或结束
   -> 基于累计证据流式生成答案
 ```
 
 P2.0-B 已实现模型自主选择工具、Planner、Executor、Observation 和真实多轮循环；P2.0-C1/C2/C3 已补齐 Registry timeout 强制中断、客户端取消、Run 级资源预算、错误分类重试、指数退避、分组熔断、半开探测、尝试级审计与生产监控；P2.0-D 又增加了首个审批型写工具 `user_memory_upsert`、幂等 Effect、失败补偿，以及受 Workspace allowlist 约束的只读 MCP 调用。这是有边界、可观测、可恢复且对写副作用进行人工确认的受控 Agent，而不是无限自主系统。
 
+P2.1-A/B/C 已在本地形成完整受控编排层：V27 提供分层 DAG、受限并行和 Run 预算；V28 提供显式条件边、失败分支、计划修订、安全暂停与一次性跨 Run 检查点；V29 提供 Workspace 日/月 Token 和成本上限、并发预占、实际结算与审计流水。聊天 SSE、Run 详情和成本管理页分别支持实时观察、历史回放、恢复入口和策略治理。全部代码、前端和 PostgreSQL 门禁已通过，本次提交和生产验收尚待关闭。
+
 当前仍缺少：
 
-- 跨工具依赖图与 Token/成本等更细粒度资源预算。
+- 工作流可视化编辑器、依赖结果表达式和跨服务分布式任务执行；当前动态参数通过下一轮 Planner 修订。
 - 超出用户记忆的更多写工具及其差异化审批、幂等和补偿策略。
 - 认证型/会话型 MCP、合同发现、健康探测与更完整的租户级工具包策略。
+- 套餐、订单、支付、退款、发票和财务级用量对账。
 
-P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md` 和 `docs/testing/results/p2-0-agent-tool-resilience-2026-08-22.md`；P2.0-D 见 `docs/architecture/p2-0-agent-tool-governance.md` 和 `docs/testing/results/p2-0-agent-tool-governance-2026-08-22.md`。
+P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md` 和 `docs/testing/results/p2-0-agent-tool-resilience-2026-08-22.md`；P2.0-D 见 `docs/architecture/p2-0-agent-tool-governance.md` 和 `docs/testing/results/p2-0-agent-tool-governance-2026-08-22.md`。P2.1-A/B/C 设计与测试见 `docs/architecture/p2-1-agent-orchestration-cost-governance.md` 和 `docs/testing/results/p2-1-agent-orchestration-cost-governance-2026-08-22.md`。
 
 ### 5.3 RAG 重排与评测仍是基础版本
 
@@ -386,7 +390,7 @@ Owner 和系统管理员已经可以通过页面管理 GitHub 仓库，系统也
 - 模型超时、重试、降级和熔断。
 - Prompt 模板和版本管理。
 - Token、费用和调用次数统计。
-- Workspace 或用户配额。
+- Workspace Agent 配额、预占和用量页已实现；用户级套餐配额仍未实现。
 - 评测通过后才能切换生产 Prompt 或模型。
 
 ### 6.7 公开用户体系尚未实现
@@ -403,9 +407,9 @@ Owner 和系统管理员已经可以通过页面管理 GitHub 仓库，系统也
 - 数据导出和删除。
 - 用户协议和隐私政策。
 
-### 6.8 商业化与配额尚未实现
+### 6.8 基础配额已实现，商业化尚未实现
 
-如果未来收费，需要建设：
+P2.1-C 已实现 Workspace Agent Token/成本/并发配额、用量聚合、硬限制和管理员页面；如果未来收费，仍需要建设：
 
 - 免费版、个人版、团队版套餐。
 - 项目数量、采集频率、知识库容量和 Token 配额。
@@ -598,6 +602,11 @@ Owner 和系统管理员已经可以通过页面管理 GitHub 仓库，系统也
 - [x] 每一步决策和工具调用可在执行记录中查看（PLAN、TOOL、OBSERVATION）。
 - [x] 工具失败时能够安全降级，不能伪造结果（失败 Observation + 标准错误码）。
 - [x] 首个敏感写操作 `user_memory_upsert` 必须经过原请求用户人工审批，支持幂等执行、拒绝、过期和补偿（P2.0-D）；新增写工具仍必须逐项配置策略并验收。
+- [x] 同一 Planner 轮次的独立只读工具可受限并行，写工具保持独占（P2.1-A，本地门禁通过，生产待验收）。
+- [x] 计划节点、依赖边和终态可实时观察并在 Run 详情回放（P2.1-A）。
+- [x] 节点、工具尝试、规划 Token 与成本预算可配置、持久化并在耗尽时安全降级（P2.1-A）。
+- [x] 条件边、失败分支、计划修订、暂停、安全点和跨 Run 一次性检查点可持久化与恢复（P2.1-B，本地门禁通过）。
+- [x] Workspace 日/月 Token/成本、并发预占、实际结算、硬拒绝、审计流水和管理页面完整生效（P2.1-C，本地门禁通过）。
 
 ### 9.4 公开 SaaS 完成标准
 
@@ -640,12 +649,14 @@ Owner 和系统管理员已经可以通过页面管理 GitHub 仓库，系统也
 4. [x] 实现多轮工具循环（P2.0-B：Observation 驱动，真实轮次上限）。
 5. [x] 统一超时、取消、重试、熔断、幂等、资源预算、尝试级审计和监控（P2.0-C1/C2/C3）。
 6. [x] 增加首个写工具的人工审批、幂等 Effect、失败补偿和受控只读 MCP 扩展能力（P2.0-D）。
+7. [x] 实现分层任务图、只读工具受限并行、依赖/状态回放和节点/Token/成本预算治理（P2.1-A，本地完成）。
+8. [x] 实现条件 DAG、失败分支、计划修订、暂停/安全点/跨 Run 恢复和 Workspace 成本配额（P2.1-B/C，本地门禁通过，生产待验收）。
 
 ### 阶段 D：补齐公开运营能力
 
 1. 注册、邀请、找回密码和 MFA。
 2. 完整团队 Workspace。
-3. 配额、用量和计费。
+3. [~] Agent 基础配额与用量已完成；套餐、订单、支付、退款、发票和财务计费待完成。
 4. [x] Prometheus、Grafana 和应用告警规则正式启用；Alertmanager 外发待补充。
 5. 异地备份和定期恢复演练。
 6. 安全扫描、WAF/CDN 和合规文档。

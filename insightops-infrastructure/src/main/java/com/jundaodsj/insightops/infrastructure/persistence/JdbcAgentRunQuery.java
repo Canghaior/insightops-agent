@@ -133,6 +133,74 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                 .param("runId", runId)
                 .query((resultSet, rowNum) -> toolCall(resultSet, attemptsByToolCall))
                 .list();
+        Optional<PlanRow> storedPlan = jdbcClient.sql("""
+                        select id, version, status, max_parallelism, created_at, finished_at
+                        from agent_plan
+                        where run_id = :runId
+                        order by version desc
+                        limit 1
+                        """)
+                .param("runId", runId)
+                .query((resultSet, rowNum) -> new PlanRow(
+                        resultSet.getObject("id", UUID.class),
+                        resultSet.getInt("version"),
+                        resultSet.getString("status"),
+                        resultSet.getInt("max_parallelism"),
+                        instant(resultSet, "created_at"),
+                        instant(resultSet, "finished_at")))
+                .optional();
+        RunPlan plan = null;
+        if (storedPlan.isPresent()) {
+            PlanRow planRow = storedPlan.orElseThrow();
+            java.util.Map<UUID, List<UUID>> dependencies = new java.util.LinkedHashMap<>();
+            jdbcClient.sql("""
+                            select d.node_id, d.depends_on_node_id
+                            from agent_plan_dependency d
+                            join agent_plan_node n on n.id = d.node_id
+                            where n.plan_id = :planId
+                            order by n.plan_round, n.position
+                            """)
+                    .param("planId", planRow.id())
+                    .query((resultSet, rowNum) -> new DependencyRow(
+                            resultSet.getObject("node_id", UUID.class),
+                            resultSet.getObject("depends_on_node_id", UUID.class)))
+                    .list()
+                    .forEach(dependency -> dependencies.computeIfAbsent(
+                            dependency.nodeId(), ignored -> new java.util.ArrayList<>())
+                            .add(dependency.dependsOnNodeId()));
+            List<RunPlanNode> nodes = jdbcClient.sql("""
+                            select id, plan_round, position, tool_name, risk_level, required,
+                                   status, tool_call_id, error_code, started_at, finished_at,
+                                   condition_type, expected_error_codes::text, revision
+                            from agent_plan_node
+                            where plan_id = :planId
+                            order by plan_round, position
+                            """)
+                    .param("planId", planRow.id())
+                    .query((resultSet, rowNum) -> planNode(resultSet, dependencies))
+                    .list();
+            plan = new RunPlan(
+                    planRow.id(), planRow.version(), planRow.status(),
+                    planRow.maxParallelism(), planRow.createdAt(), planRow.finishedAt(), nodes);
+        }
+        RunBudget budget = jdbcClient.sql("""
+                        select b.max_nodes, b.max_parallelism, b.max_tool_attempts,
+                               b.max_model_tokens, b.max_estimated_cost_cny,
+                               b.used_nodes, b.used_tool_attempts,
+                               greatest(b.used_model_tokens,
+                                   coalesce(r.prompt_tokens, 0) + coalesce(r.completion_tokens, 0))
+                                   as used_model_tokens,
+                               greatest(b.estimated_cost_cny,
+                                   coalesce(r.estimated_cost_cny, 0)) as estimated_cost_cny,
+                               b.status, b.exhaustion_reason, b.updated_at
+                        from agent_run_budget b
+                        join agent_run r on r.id = b.run_id
+                        where b.run_id = :runId
+                        """)
+                .param("runId", runId)
+                .query((resultSet, rowNum) -> budget(resultSet))
+                .optional()
+                .orElse(null);
         RunRow value = row.orElseThrow();
         return Optional.of(new RunDetail(
                 value.id(), value.sessionId(), value.traceId(), value.status(), value.question(),
@@ -141,7 +209,45 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                 value.pricingEffectiveDate(), value.failureCode(), value.failureMessage(),
                 value.durationMs(), value.startedAt(),
                 value.finishedAt(), value.createdAt(), value.sources(),
-                value.citationDetails(), steps, toolCalls));
+                value.citationDetails(), steps, toolCalls, plan, budget));
+    }
+
+    private RunPlanNode planNode(
+            ResultSet resultSet,
+            java.util.Map<UUID, List<UUID>> dependencies) throws SQLException {
+        UUID nodeId = resultSet.getObject("id", UUID.class);
+        return new RunPlanNode(
+                nodeId,
+                resultSet.getInt("plan_round"),
+                resultSet.getInt("position"),
+                resultSet.getString("tool_name"),
+                resultSet.getString("risk_level"),
+                resultSet.getBoolean("required"),
+                resultSet.getString("status"),
+                resultSet.getObject("tool_call_id", UUID.class),
+                resultSet.getString("error_code"),
+                List.copyOf(dependencies.getOrDefault(nodeId, List.of())),
+                instant(resultSet, "started_at"),
+                instant(resultSet, "finished_at"),
+                resultSet.getString("condition_type"),
+                stringList(resultSet.getString("expected_error_codes")),
+                resultSet.getInt("revision"));
+    }
+
+    private RunBudget budget(ResultSet resultSet) throws SQLException {
+        return new RunBudget(
+                resultSet.getInt("max_nodes"),
+                resultSet.getInt("max_parallelism"),
+                resultSet.getInt("max_tool_attempts"),
+                resultSet.getLong("max_model_tokens"),
+                resultSet.getBigDecimal("max_estimated_cost_cny"),
+                resultSet.getInt("used_nodes"),
+                resultSet.getInt("used_tool_attempts"),
+                resultSet.getLong("used_model_tokens"),
+                resultSet.getBigDecimal("estimated_cost_cny"),
+                resultSet.getString("status"),
+                resultSet.getString("exhaustion_reason"),
+                instant(resultSet, "updated_at"));
     }
 
     private RunSummary summary(ResultSet resultSet) throws SQLException {
@@ -278,6 +384,18 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
     private static java.time.Instant instant(ResultSet resultSet, String column) throws SQLException {
         OffsetDateTime value = resultSet.getObject(column, OffsetDateTime.class);
         return value == null ? null : value.toInstant();
+    }
+
+    private record PlanRow(
+            UUID id,
+            int version,
+            String status,
+            int maxParallelism,
+            java.time.Instant createdAt,
+            java.time.Instant finishedAt) {
+    }
+
+    private record DependencyRow(UUID nodeId, UUID dependsOnNodeId) {
     }
 
     private record AttemptRow(UUID toolCallId, RunToolAttempt attempt) {

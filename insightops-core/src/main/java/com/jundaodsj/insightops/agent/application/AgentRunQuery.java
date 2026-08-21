@@ -1,7 +1,7 @@
 package com.jundaodsj.insightops.agent.application;
 
-import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.conversation.application.ChatCitation;
+import com.jundaodsj.insightops.identity.application.ActorContext;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -63,7 +63,9 @@ public interface AgentRunQuery {
             List<String> sources,
             List<ChatCitation> citationDetails,
             List<RunStep> steps,
-            List<RunToolCall> toolCalls) {
+            List<RunToolCall> toolCalls,
+            RunPlan plan,
+            RunBudget budget) {
     }
 
     record RunStep(
@@ -102,5 +104,57 @@ public interface AgentRunQuery {
             Long durationMs,
             Instant startedAt,
             Instant finishedAt) {
+    }
+
+    record RunPlan(
+            UUID id,
+            int version,
+            String status,
+            int maxParallelism,
+            Instant createdAt,
+            Instant finishedAt,
+            List<RunPlanNode> nodes) {
+    }
+
+    record RunPlanNode(
+            UUID id,
+            int round,
+            int position,
+            String toolName,
+            String riskLevel,
+            boolean required,
+            String status,
+            UUID toolCallId,
+            String errorCode,
+            List<UUID> dependencyIds,
+            Instant startedAt,
+            Instant finishedAt,
+            String conditionType,
+            List<String> expectedErrorCodes,
+            int revision) {
+
+        public RunPlanNode(
+                UUID id, int round, int position, String toolName, String riskLevel,
+                boolean required, String status, UUID toolCallId, String errorCode,
+                List<UUID> dependencyIds, Instant startedAt, Instant finishedAt) {
+            this(id, round, position, toolName, riskLevel, required, status, toolCallId,
+                    errorCode, dependencyIds, startedAt, finishedAt,
+                    "ALL_TERMINAL", List.of(), 1);
+        }
+    }
+
+    record RunBudget(
+            int maxNodes,
+            int maxParallelism,
+            int maxToolAttempts,
+            long maxModelTokens,
+            BigDecimal maxEstimatedCostCny,
+            int usedNodes,
+            int usedToolAttempts,
+            long usedModelTokens,
+            BigDecimal estimatedCostCny,
+            String status,
+            String exhaustionReason,
+            Instant updatedAt) {
     }
 }

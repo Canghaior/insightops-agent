@@ -6,11 +6,13 @@ import {
   getRun,
   listRuns,
   type RunDetail,
+  type RunPlanNode,
   type RunStatus,
   type RunSummary,
   type RunToolCall,
 } from '@/api/runs'
 import MarkdownContent from '@/components/MarkdownContent.vue'
+import { getLatestAgentCheckpoint, pauseAgentRun, type AgentCheckpoint } from '@/api/checkpoints'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +27,9 @@ const size = 20
 const total = ref(0)
 const totalPages = ref(0)
 const status = ref<RunStatus | ''>('')
+const checkpoint = ref<AgentCheckpoint | null>(null)
+const runActionLoading = ref(false)
+const runActionError = ref('')
 
 const rangeLabel = computed(() => {
   if (total.value === 0) return '0 条记录'
@@ -52,8 +57,13 @@ async function loadDetail(runId: string) {
   detailLoading.value = true
   detailError.value = null
   selectedRun.value = null
+  checkpoint.value = null
+  runActionError.value = ''
   try {
     selectedRun.value = await getRun(runId)
+    if (selectedRun.value.status === 'PAUSED') {
+      checkpoint.value = await getLatestAgentCheckpoint(runId)
+    }
   } catch {
     detailError.value = '该执行记录不存在或暂时无法读取。'
   } finally {
@@ -77,6 +87,25 @@ function openRun(runId: string) {
 
 function closeDetail() {
   void router.push('/runs')
+}
+
+async function requestPause() {
+  if (!selectedRun.value || selectedRun.value.status !== 'RUNNING') return
+  runActionLoading.value = true
+  runActionError.value = ''
+  try {
+    await pauseAgentRun(selectedRun.value.id)
+    runActionError.value = '暂停请求已提交；Agent 会在下一个安全点保存检查点。'
+  } catch {
+    runActionError.value = '暂停请求失败；该 Run 可能已结束或不属于当前 Workspace。'
+  } finally {
+    runActionLoading.value = false
+  }
+}
+
+function resumeCheckpoint() {
+  if (!checkpoint.value) return
+  void router.push({ path: '/chat', query: { checkpoint: checkpoint.value.id } })
 }
 
 function toolsFor(stepId: string): RunToolCall[] {
@@ -108,6 +137,28 @@ function formatCost(value: number | null): string {
   return value == null ? '—' : `¥${value.toFixed(6)}`
 }
 
+function planRounds(nodes: RunPlanNode[]): Array<[number, RunPlanNode[]]> {
+  const grouped = new Map<number, RunPlanNode[]>()
+  for (const node of nodes) {
+    const layer = grouped.get(node.round) ?? []
+    layer.push(node)
+    grouped.set(node.round, layer)
+  }
+  return [...grouped.entries()].sort(([left], [right]) => left - right)
+}
+
+function budgetPercent(run: RunDetail): number {
+  if (!run.budget?.maxNodes) return 0
+  return Math.min(100, Math.round((run.budget.usedNodes / run.budget.maxNodes) * 100))
+}
+
+function nodeStatusLabel(status: string): string {
+  return ({
+    PENDING: '等待', RUNNING: '执行中', SUCCEEDED: '成功', FAILED: '失败',
+    SKIPPED: '跳过', BLOCKED: '条件未满足', WAITING_APPROVAL: '待审批', CANCELLED: '已取消',
+  } as Record<string, string>)[status] ?? status
+}
+
 function pretty(value: unknown): string {
   return value == null ? '—' : JSON.stringify(value, null, 2)
 }
@@ -134,6 +185,7 @@ onMounted(loadRuns)
           <option value="">全部状态</option>
           <option value="SUCCEEDED">成功</option>
           <option value="RUNNING">运行中</option>
+          <option value="PAUSED">已暂停</option>
           <option value="FAILED">失败</option>
           <option value="CANCELLED">已取消</option>
         </select>
@@ -195,7 +247,13 @@ onMounted(loadRuns)
           <div class="detail-status-line">
             <i class="status-pill" :class="`status-${selectedRun.status.toLowerCase()}`">{{ selectedRun.status }}</i>
             <span>{{ formatDate(selectedRun.startedAt) }} · {{ formatDuration(selectedRun.durationMs) }}</span>
+            <button v-if="selectedRun.status === 'RUNNING'" class="secondary-button" :disabled="runActionLoading" @click="requestPause">请求暂停</button>
+            <button v-if="selectedRun.status === 'PAUSED' && checkpoint" class="primary-button" @click="resumeCheckpoint">从检查点恢复</button>
           </div>
+          <p v-if="runActionError" class="checkpoint-notice">{{ runActionError }}</p>
+          <p v-if="checkpoint" class="checkpoint-notice">
+            检查点 #{{ checkpoint.sequence }} · {{ checkpoint.reason }} · {{ formatDate(checkpoint.createdAt) }}
+          </p>
 
           <dl class="detail-metrics">
             <div><dt>模型</dt><dd>{{ selectedRun.modelName ?? '—' }}</dd></div>
@@ -205,6 +263,35 @@ onMounted(loadRuns)
             <div><dt>价格生效日</dt><dd>{{ selectedRun.pricingEffectiveDate ?? '—' }}</dd></div>
             <div><dt>Trace ID</dt><dd><code>{{ selectedRun.traceId }}</code></dd></div>
           </dl>
+
+          <section v-if="selectedRun.plan" class="detail-block run-plan-block">
+            <div class="detail-block-heading">
+              <span class="eyebrow">Task Graph · v{{ selectedRun.plan.version }}</span>
+              <small>{{ selectedRun.plan.status }} · 并行上限 {{ selectedRun.plan.maxParallelism }}</small>
+            </div>
+            <div v-if="selectedRun.budget" class="orchestration-budget">
+              <div><i :style="{ width: `${budgetPercent(selectedRun)}%` }"></i></div>
+              <span>
+                节点 {{ selectedRun.budget.usedNodes }}/{{ selectedRun.budget.maxNodes }} ·
+                尝试 {{ selectedRun.budget.usedToolAttempts }}/{{ selectedRun.budget.maxToolAttempts }} ·
+                Token {{ selectedRun.budget.usedModelTokens }}/{{ selectedRun.budget.maxModelTokens }} ·
+                ¥{{ selectedRun.budget.estimatedCostCny.toFixed(6) }}/¥{{ selectedRun.budget.maxEstimatedCostCny.toFixed(6) }}
+              </span>
+              <strong v-if="selectedRun.budget.exhaustionReason" class="budget-warning">
+                安全降级：{{ selectedRun.budget.exhaustionReason }}
+              </strong>
+            </div>
+            <div v-for="[round, nodes] in planRounds(selectedRun.plan.nodes)" :key="round" class="plan-layer run-plan-layer">
+              <b>第 {{ round }} 层</b>
+              <span
+                v-for="node in nodes"
+                :key="node.id"
+                class="plan-node"
+                :class="`is-${node.status.toLowerCase()}`"
+                :title="node.dependencyIds.length ? `依赖 ${node.dependencyIds.map(shortId).join(', ')}` : '根节点'"
+              >{{ node.toolName }} · {{ nodeStatusLabel(node.status) }} · {{ node.conditionType }} · r{{ node.revision }}</span>
+            </div>
+          </section>
 
           <section class="detail-block">
             <span class="eyebrow">Question</span>

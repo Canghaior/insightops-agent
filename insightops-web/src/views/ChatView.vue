@@ -21,7 +21,7 @@ import { submitAnswerFeedback, submitCitationFeedback } from '@/api/feedback'
 
 const route = useRoute()
 
-type StreamStatus = 'idle' | 'connecting' | 'streaming' | 'completed' | 'cancelled' | 'error'
+type StreamStatus = 'idle' | 'connecting' | 'streaming' | 'paused' | 'completed' | 'cancelled' | 'error'
 
 interface ToolExecution {
   id: string
@@ -31,6 +31,29 @@ interface ToolExecution {
   model?: string | null
   errorCode?: string | null
   progress?: string | null
+}
+
+interface PlanNodeState {
+  id: string
+  name: string
+  round: number
+  status: string
+  dependencyIds: string[]
+  errorCode?: string | null
+}
+
+interface OrchestrationState {
+  planId: string
+  version: number
+  maxNodes: number
+  maxParallelism: number
+  nodes: PlanNodeState[]
+  budgetStatus?: string | null
+  usedNodes: number
+  usedToolAttempts: number
+  usedModelTokens: number
+  estimatedCostCny: number
+  exhaustionReason?: string | null
 }
 
 interface ConversationMessage {
@@ -46,7 +69,9 @@ interface ConversationMessage {
   durationMs?: number | null
   timeToFirstTokenMs?: number | null
   errorMessage?: string
+  checkpointId?: string
   toolExecutions?: ToolExecution[]
+  orchestration?: OrchestrationState
   toolName?: string
   toolRunning?: boolean
   releaseCount?: number | null
@@ -68,6 +93,9 @@ const sessionsLoading = ref(false)
 const messages = ref<ConversationMessage[]>([])
 const historyLoading = ref(false)
 const historyError = ref('')
+const resumeCheckpointId = ref(
+  typeof route.query.checkpoint === 'string' ? route.query.checkpoint : '',
+)
 const hasEarlierMessages = ref(false)
 const conversationThread = ref<InstanceType<typeof globalThis.HTMLElement> | null>(null)
 let currentAssistantId = ''
@@ -95,9 +123,19 @@ const errorLabels: Record<string, string> = {
   TOOL_VALIDATION_ERROR: 'Release 查询参数不在 P0 允许范围内。',
   TOOL_ERROR: 'GitHub Release 查询失败，请稍后重试。',
   OUTPUT_SOURCE_NOT_ALLOWED: '回答来源没有通过安全校验，本次结果已停止。',
+  WORKSPACE_COST_MAX_CONCURRENT_RUNS: 'Workspace Agent 并发数已达上限，请等待其他任务结束。',
+  WORKSPACE_COST_DAILY_TOKEN_LIMIT: 'Workspace 今日 Token 配额已用尽。',
+  WORKSPACE_COST_DAILY_COST_LIMIT: 'Workspace 今日成本配额已用尽。',
+  WORKSPACE_COST_MONTHLY_TOKEN_LIMIT: 'Workspace 本月 Token 配额已用尽。',
+  WORKSPACE_COST_MONTHLY_COST_LIMIT: 'Workspace 本月成本配额已用尽。',
+  CHECKPOINT_NOT_FOUND: '检查点不存在或不属于当前账号。',
+  CHECKPOINT_ALREADY_CONSUMED: '该检查点已恢复过，不能重复消费。',
+  CHECKPOINT_CONCURRENTLY_CONSUMED: '该检查点刚被其他请求恢复，请刷新执行记录。',
+  CHECKPOINT_STATE_INVALID: '检查点数据无效，无法安全恢复。',
 }
 
 function statusLabel(message: ConversationMessage) {
+  if (message.orchestration?.nodes.some((item) => item.status === 'RUNNING')) return 'Agent 正在并行执行任务图'
   if (message.toolExecutions?.some((item) => item.status === 'running')) return 'Agent 正在执行工具'
   if (message.ragRunning) return '正在检索官方知识库'
   if (message.toolRunning) return '正在执行工具'
@@ -106,6 +144,7 @@ function statusLabel(message: ConversationMessage) {
     connecting: '正在连接 DeepSeek',
     streaming: '正在生成',
     completed: '生成完成',
+    paused: '已暂停并保存检查点',
     cancelled: '已停止生成',
     error: '生成失败',
   } as Record<StreamStatus, string>)[message.status ?? 'idle']
@@ -139,6 +178,59 @@ function handleEvent(event: ChatStreamEvent) {
   if (event.type === 'started') {
     status.value = 'streaming'
     assistant.status = 'streaming'
+    return
+  }
+  if (event.type === 'plan_created' && event.orchestration) {
+    assistant.orchestration = {
+      planId: event.orchestration.planId ?? '',
+      version: event.orchestration.version ?? 1,
+      maxNodes: event.orchestration.maxNodes ?? 0,
+      maxParallelism: event.orchestration.maxParallelism ?? 1,
+      nodes: [],
+      budgetStatus: event.orchestration.status,
+      usedNodes: 0,
+      usedToolAttempts: 0,
+      usedModelTokens: 0,
+      estimatedCostCny: 0,
+    }
+    return
+  }
+  if (event.type === 'plan_node_state' && event.orchestration) {
+    assistant.orchestration ??= {
+      planId: '', version: 1, maxNodes: 0, maxParallelism: 1, nodes: [],
+      usedNodes: 0, usedToolAttempts: 0, usedModelTokens: 0, estimatedCostCny: 0,
+    }
+    const payload = event.orchestration
+    const nodeId = payload.nodeId ?? `node-${event.sequence}`
+    let node = assistant.orchestration.nodes.find((item) => item.id === nodeId)
+    if (!node) {
+      node = {
+        id: nodeId,
+        name: event.toolName ?? 'unknown_tool',
+        round: payload.round ?? 1,
+        status: payload.status ?? 'PENDING',
+        dependencyIds: payload.dependencyIds ?? [],
+      }
+      assistant.orchestration.nodes.push(node)
+    }
+    node.status = payload.status ?? node.status
+    node.errorCode = payload.errorCode
+    node.dependencyIds = payload.dependencyIds ?? node.dependencyIds
+    return
+  }
+  if ((event.type === 'budget_updated' || event.type === 'budget_exhausted')
+    && event.orchestration) {
+    assistant.orchestration ??= {
+      planId: '', version: 1, maxNodes: 0, maxParallelism: 1, nodes: [],
+      usedNodes: 0, usedToolAttempts: 0, usedModelTokens: 0, estimatedCostCny: 0,
+    }
+    const payload = event.orchestration
+    assistant.orchestration.budgetStatus = payload.status
+    assistant.orchestration.usedNodes = payload.usedNodes ?? assistant.orchestration.usedNodes
+    assistant.orchestration.usedToolAttempts = payload.usedToolAttempts ?? assistant.orchestration.usedToolAttempts
+    assistant.orchestration.usedModelTokens = payload.usedModelTokens ?? assistant.orchestration.usedModelTokens
+    assistant.orchestration.estimatedCostCny = payload.estimatedCostCny ?? assistant.orchestration.estimatedCostCny
+    assistant.orchestration.exhaustionReason = payload.exhaustionReason
     return
   }
   if (event.type === 'tool_started') {
@@ -210,6 +302,15 @@ function handleEvent(event: ChatStreamEvent) {
     const shouldFollow = isNearConversationBottom()
     assistant.content += event.content ?? ''
     if (shouldFollow) void scrollConversationToBottom()
+    return
+  }
+  if (event.type === 'plan_paused') {
+    status.value = 'paused'
+    assistant.status = 'paused'
+    assistant.checkpointId = event.content ?? undefined
+    assistant.toolRunning = false
+    assistant.ragRunning = false
+    void loadConversations()
     return
   }
   if (event.type === 'completed') {
@@ -364,7 +465,11 @@ async function sendQuestion() {
 
   streamController = new globalThis.AbortController()
   try {
-    await streamChat(message, handleEvent, streamController.signal, sessionId.value)
+    const checkpointId = resumeCheckpointId.value
+    resumeCheckpointId.value = ''
+    await streamChat(
+      message, handleEvent, streamController.signal, sessionId.value, checkpointId || undefined,
+    )
     const assistant = currentAssistant()
     if (assistant && (status.value === 'connecting' || status.value === 'streaming')) {
       status.value = 'completed'
@@ -424,6 +529,29 @@ function formatMessageTime(value: string) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value))
+}
+
+function planRounds(message: ConversationMessage) {
+  const grouped = new Map<number, PlanNodeState[]>()
+  for (const node of message.orchestration?.nodes ?? []) {
+    const nodes = grouped.get(node.round) ?? []
+    nodes.push(node)
+    grouped.set(node.round, nodes)
+  }
+  return [...grouped.entries()].sort(([left], [right]) => left - right)
+}
+
+function planNodeStatus(status: string) {
+  return ({
+    PENDING: '等待', RUNNING: '执行中', SUCCEEDED: '成功', FAILED: '失败',
+    SKIPPED: '跳过', WAITING_APPROVAL: '待审批', CANCELLED: '已取消',
+  } as Record<string, string>)[status] ?? status
+}
+
+function budgetPercentage(message: ConversationMessage) {
+  const budget = message.orchestration
+  if (!budget?.maxNodes) return 0
+  return Math.min(100, Math.round((budget.usedNodes / budget.maxNodes) * 100))
 }
 
 function toolExecutionLabel(execution: ToolExecution) {
@@ -515,6 +643,12 @@ onBeforeUnmount(() => {
       <h2>与 DeepSeek 多轮实时问答</h2>
       <p class="lead">回答会按消息连续显示并保存到数据库；刷新当前标签页可以恢复本会话，模型使用最近 12 条消息理解指代。</p>
 
+      <div v-if="resumeCheckpointId" class="checkpoint-resume-banner">
+        <strong>准备从检查点 {{ resumeCheckpointId.slice(0, 8) }} 恢复</strong>
+        <span>输入后续要求并发送；已有证据、来源、预算与已执行节点会继续复用。</span>
+        <button class="text-button" @click="resumeCheckpointId = ''">取消恢复</button>
+      </div>
+
       <div class="suggestion-list">
         <button
           v-for="item in suggestions"
@@ -555,6 +689,35 @@ onBeforeUnmount(() => {
               <code v-if="message.runId">Run {{ message.runId.slice(0, 8) }}</code>
             </header>
 
+            <section v-if="message.orchestration" class="orchestration-panel">
+              <header>
+                <span>任务图 · v{{ message.orchestration.version }}</span>
+                <strong>并行上限 {{ message.orchestration.maxParallelism }}</strong>
+              </header>
+              <div class="orchestration-budget">
+                <div><i :style="{ width: `${budgetPercentage(message)}%` }"></i></div>
+                <span>
+                  节点 {{ message.orchestration.usedNodes }}/{{ message.orchestration.maxNodes }} ·
+                  工具尝试 {{ message.orchestration.usedToolAttempts }} ·
+                  规划 Token {{ message.orchestration.usedModelTokens }} ·
+                  ¥{{ message.orchestration.estimatedCostCny.toFixed(6) }}
+                </span>
+              </div>
+              <div v-for="[round, nodes] in planRounds(message)" :key="round" class="plan-layer">
+                <b>第 {{ round }} 层</b>
+                <span
+                  v-for="node in nodes"
+                  :key="node.id"
+                  class="plan-node"
+                  :class="`is-${node.status.toLowerCase()}`"
+                  :title="node.errorCode ?? node.dependencyIds.join(', ')"
+                >{{ toolExecutionLabel({ id: node.id, name: node.name, status: 'running' }) }} · {{ planNodeStatus(node.status) }}</span>
+              </div>
+              <p v-if="message.orchestration.exhaustionReason" class="budget-warning">
+                已安全停止新增节点：{{ message.orchestration.exhaustionReason }}
+              </p>
+            </section>
+
             <div
               v-for="execution in message.toolExecutions"
               :key="execution.id"
@@ -566,6 +729,11 @@ onBeforeUnmount(() => {
               <RouterLink v-if="execution.status === 'waiting_approval'" class="text-button" to="/approvals">前往审批</RouterLink>
             </div>
 
+            <div v-if="message.status === 'paused' && message.checkpointId" class="checkpoint-resume-banner">
+              <strong>Run 已在安全点暂停</strong>
+              <span>检查点 {{ message.checkpointId.slice(0, 8) }} 已持久化，可在执行记录中恢复。</span>
+              <RouterLink class="text-button" :to="`/runs/${message.runId}`">查看检查点</RouterLink>
+            </div>
             <p v-if="message.errorMessage" class="stream-error">{{ message.errorMessage }}</p>
             <div v-else-if="!message.content && (message.status === 'connecting' || message.status === 'streaming')" class="answer-skeleton">
               <span></span><span></span><span></span>
@@ -650,7 +818,8 @@ onBeforeUnmount(() => {
         <li>刷新后从数据库恢复会话</li>
         <li>复用最近 12 条消息理解追问</li>
         <li>DeepSeek Function Calling 动态选择只读工具</li>
-        <li>Plan-Act-Observe 多轮执行与安全轮次上限</li>
+        <li>分层 DAG、多只读工具受限并行与写操作独占</li>
+        <li>节点、工具尝试、Token 与成本预算治理</li>
         <li>bge-m3 + PostgreSQL 全文混合检索</li>
         <li>RRF 融合排序与结构化引用卡片</li>
         <li>DeepSeek 基于证据生成并附官方来源</li>

@@ -8,6 +8,23 @@ export interface ModelUsage {
   cacheWriteInputTokens: number | null
 }
 
+export interface AgentOrchestrationEvent {
+  planId: string | null
+  nodeId: string | null
+  status: string | null
+  version: number | null
+  round: number | null
+  maxNodes: number | null
+  maxParallelism: number | null
+  usedNodes: number | null
+  usedToolAttempts: number | null
+  usedModelTokens: number | null
+  estimatedCostCny: number | null
+  dependencyIds: string[]
+  errorCode: string | null
+  exhaustionReason: string | null
+}
+
 export interface ChatCitation {
   label: string
   title: string
@@ -19,7 +36,7 @@ export interface ChatCitation {
 }
 
 export interface ChatStreamEvent {
-  type: 'started' | 'tool_started' | 'tool_retrying' | 'tool_approval_required' | 'tool_completed' | 'tool_failed' | 'delta' | 'completed' | 'cancelled' | 'error'
+  type: 'started' | 'plan_created' | 'plan_node_state' | 'plan_paused' | 'budget_updated' | 'budget_exhausted' | 'tool_started' | 'tool_retrying' | 'tool_approval_required' | 'tool_completed' | 'tool_failed' | 'delta' | 'completed' | 'cancelled' | 'error'
   runId: string
   sessionId: string
   sequence: number
@@ -39,10 +56,16 @@ export interface ChatStreamEvent {
   retrievalModel: string | null
   sources: string[]
   citations: ChatCitation[]
+  orchestration: AgentOrchestrationEvent | null
 }
 
 const eventTypes = new Set<ChatStreamEvent['type']>([
   'started',
+  'plan_created',
+  'plan_node_state',
+  'plan_paused',
+  'budget_updated',
+  'budget_exhausted',
   'tool_started',
   'tool_retrying',
   'tool_approval_required',
@@ -106,6 +129,7 @@ export async function streamChat(
   onEvent: (event: ChatStreamEvent) => void,
   signal: AbortSignal,
   sessionId?: string,
+  resumeCheckpointId?: string,
 ): Promise<void> {
   const baseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
   const response = await fetch(`${baseUrl}/chat/streams`, {
@@ -115,7 +139,11 @@ export async function streamChat(
       'Content-Type': 'application/json',
       'X-Trace-Id': crypto.randomUUID(),
     },
-    body: JSON.stringify({ message, sessionId: sessionId || null }),
+    body: JSON.stringify({
+      message,
+      sessionId: sessionId || null,
+      resumeCheckpointId: resumeCheckpointId || null,
+    }),
     credentials: 'include',
     signal,
   })

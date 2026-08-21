@@ -294,6 +294,12 @@ public class JdbcChatRunStore implements ChatRunStore {
 
     @Override
     @Transactional
+    public void pauseRun(UUID runId, String partialAnswer, Instant pausedAt) {
+        finishWithoutAssistant(runId, "PAUSED", partialAnswer, "RUN_PAUSED", pausedAt);
+    }
+
+    @Override
+    @Transactional
     public void failRun(
             UUID runId,
             String partialAnswer,

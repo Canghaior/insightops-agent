@@ -267,6 +267,25 @@ class ChatStreamControllerTest {
         };
     }
 
+    @Test
+    void shouldExposeStructuredPlanAndBudgetEvents() {
+        UUID planId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        var plan = ChatStreamController.ChatSseEvent.planCreated(
+                "run-p21a", sessionId, 2, "trace-p21a", planId, 1, 12, 3);
+        var budget = ChatStreamController.ChatSseEvent.budget(
+                "budget_exhausted", "run-p21a", sessionId, 3, "trace-p21a",
+                new com.jundaodsj.insightops.agent.application.AgentOrchestrationStore.BudgetSnapshot(
+                        12, 5, 9_000, new java.math.BigDecimal("0.120000"),
+                        "EXHAUSTED", "MAX_NODES"));
+
+        assertThat(plan.type()).isEqualTo("plan_created");
+        assertThat(plan.orchestration().planId()).isEqualTo(planId.toString());
+        assertThat(plan.orchestration().maxParallelism()).isEqualTo(3);
+        assertThat(budget.type()).isEqualTo("budget_exhausted");
+        assertThat(budget.orchestration().exhaustionReason()).isEqualTo("MAX_NODES");
+    }
+
     private static ReleaseToolService noTool() {
         ReleaseToolService service = mock(ReleaseToolService.class);
         when(service.execute(any(), any(), anyString(), anyString(), any())).thenReturn(Optional.empty());

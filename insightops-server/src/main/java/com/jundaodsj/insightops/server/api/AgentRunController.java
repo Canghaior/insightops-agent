@@ -24,7 +24,7 @@ import java.util.UUID;
 public class AgentRunController {
 
     private static final Set<String> ALLOWED_STATUSES = Set.of(
-            "CREATED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED");
+            "CREATED", "RUNNING", "PAUSED", "SUCCEEDED", "FAILED", "CANCELLED");
 
     private final AgentRunQuery agentRunQuery;
 

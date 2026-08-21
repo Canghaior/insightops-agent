@@ -1,7 +1,7 @@
 import { apiClient } from './client'
 import type { ChatCitation } from './agentStream'
 
-export type RunStatus = 'CREATED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'
+export type RunStatus = 'CREATED' | 'RUNNING' | 'PAUSED' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'
 
 export interface RunSummary {
   id: string
@@ -57,6 +57,49 @@ export interface RunToolCall {
   attempts: RunToolAttempt[]
 }
 
+export interface RunPlanNode {
+  id: string
+  round: number
+  position: number
+  toolName: string
+  riskLevel: 'READ_ONLY' | 'MUTATING' | 'UNKNOWN'
+  required: boolean
+  status: string
+  toolCallId: string | null
+  errorCode: string | null
+  dependencyIds: string[]
+  conditionType: string
+  expectedErrorCodes: string[]
+  revision: number
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export interface RunPlan {
+  id: string
+  version: number
+  status: string
+  maxParallelism: number
+  createdAt: string
+  finishedAt: string | null
+  nodes: RunPlanNode[]
+}
+
+export interface RunBudget {
+  maxNodes: number
+  maxParallelism: number
+  maxToolAttempts: number
+  maxModelTokens: number
+  maxEstimatedCostCny: number
+  usedNodes: number
+  usedToolAttempts: number
+  usedModelTokens: number
+  estimatedCostCny: number
+  status: string
+  exhaustionReason: string | null
+  updatedAt: string
+}
+
 export interface RunDetail extends RunSummary {
   answer: string | null
   estimatedCostCny: number | null
@@ -68,6 +111,8 @@ export interface RunDetail extends RunSummary {
   citationDetails: ChatCitation[]
   steps: RunStep[]
   toolCalls: RunToolCall[]
+  plan: RunPlan | null
+  budget: RunBudget | null
 }
 
 export interface RunPage {

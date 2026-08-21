@@ -578,6 +578,32 @@ public class AgentToolDispatcher {
                 Instant expiresAt,
                 String summary) {
         }
+
+        default void onPlanCreated(
+                UUID planId,
+                int version,
+                int maxNodes,
+                int maxParallelism) {
+        }
+
+        default void onPlanNodeState(
+                UUID nodeId,
+                String toolName,
+                int round,
+                String status,
+                List<UUID> dependencyIds,
+                String errorCode) {
+        }
+
+        default void onBudgetUpdated(
+                com.jundaodsj.insightops.agent.application.AgentOrchestrationStore.BudgetSnapshot
+                        budget) {
+        }
+
+        default void onBudgetExhausted(
+                com.jundaodsj.insightops.agent.application.AgentOrchestrationStore.BudgetSnapshot
+                        budget) {
+        }
     }
 
     public static final class DispatchException extends RuntimeException {

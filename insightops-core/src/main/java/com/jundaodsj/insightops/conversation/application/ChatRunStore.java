@@ -48,6 +48,10 @@ public interface ChatRunStore {
 
     void cancelRun(UUID runId, String partialAnswer, Instant finishedAt);
 
+    default void pauseRun(UUID runId, String partialAnswer, Instant pausedAt) {
+        cancelRun(runId, partialAnswer, pausedAt);
+    }
+
     void failRun(
             UUID runId,
             String partialAnswer,

@@ -47,4 +47,15 @@
 
 ## 生产验收
 
-生产提交、CI、部署版本、容器健康、V25、指标端点和真实问答将在推送部署后补录；自动化与本地数据库门禁通过之前不进入部署。
+- 代码提交：`c79c7ceb14a8d906c965d72f7644d7a8945d2bec`。
+- GitHub Actions CI：Run `32502861982`，结论 `success`。
+- Deploy production：Run `32503221268`，`Validate deployment secrets`、`Configure SSH`、`Deploy and verify` 全部成功。
+- 部署脚本使用完整 SHA 镜像，执行生产预检、部署前备份、镜像拉取和六个核心服务健康检查。
+- 生产首页返回 HTTP 200；`/api/v1/system/status` 返回 Server `UP`、DeepSeek `deepseek-v4-flash` ready。
+- 生产静态资源 `ChatView-DKPlWiJl.js` 包含 `tool_retrying`；`RunsView-zMytD4W_.js` 包含 `attempts` 与 `retryDelayMs`，确认 C3 前端已发布。
+- Flyway V1-V25 已在真实 PostgreSQL 门禁通过；生产 Server 在包含 V25 的镜像启动并通过健康检查。
+- Prometheus 8 条规则通过 `promtool`，Grafana JSON 与 `observability` Compose Profile 通过解析。生产监控端口继续只绑定回环地址，不对公网开放。
+
+## 结论
+
+P2.0-C1、P2.0-C2、P2.0-C3 功能、自动化门禁、部署和即时生产验收全部通过，可以关闭。下一阶段进入 P2.0-D：写工具人工审批、失败补偿与 MCP 扩展。

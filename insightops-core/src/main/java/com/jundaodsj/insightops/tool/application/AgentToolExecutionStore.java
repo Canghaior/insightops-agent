@@ -23,6 +23,16 @@ public interface AgentToolExecutionStore {
             long durationMs,
             Instant finishedAt);
 
+    default void waitForApproval(
+            UUID stepId,
+            UUID toolCallId,
+            String resultPayload,
+            long durationMs,
+            Instant finishedAt) {
+        throw new UnsupportedOperationException(
+                "approval waiting is not supported");
+    }
+
     void failTool(
             UUID stepId,
             UUID toolCallId,

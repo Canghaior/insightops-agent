@@ -23,10 +23,15 @@ class AgentToolCatalogControllerTest {
                 controller.list(request);
 
         assertThat(response.traceId()).isEqualTo("trace-tools");
-        assertThat(response.data()).hasSize(3)
-                .allMatch(tool -> "READ_ONLY".equals(tool.riskLevel()))
-                .allMatch(tool -> "NOT_REQUIRED".equals(tool.approvalPolicy()))
+        assertThat(response.data()).hasSize(5)
                 .allMatch(tool -> tool.inputSchema().containsKey("additionalProperties"));
+        assertThat(response.data().stream()
+                .filter(tool -> "user_memory_upsert".equals(tool.name())))
+                .singleElement()
+                .satisfies(tool -> {
+                    assertThat(tool.riskLevel()).isEqualTo("MUTATING");
+                    assertThat(tool.approvalPolicy()).isEqualTo("REQUIRED");
+                });
     }
 
     @Test

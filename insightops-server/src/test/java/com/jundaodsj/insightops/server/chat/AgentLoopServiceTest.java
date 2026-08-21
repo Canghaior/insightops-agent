@@ -8,6 +8,7 @@ import com.jundaodsj.insightops.model.application.AgentPlanningModelGateway;
 import com.jundaodsj.insightops.model.application.ModelUsage;
 import com.jundaodsj.insightops.project.application.AdminProjectStore;
 import com.jundaodsj.insightops.server.tool.AgentToolResilienceProperties;
+import com.jundaodsj.insightops.tool.application.McpConnectionStore;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolDefinition;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolRegistry;
 import org.junit.jupiter.api.Test;
@@ -146,11 +147,18 @@ class AgentLoopServiceTest {
         return new AgentLoopService(
                 planning, dispatcher,
                 new AgentToolRegistry(List.of(tool(), secondTool())), audit, projects,
+                emptyMcpStore(),
                 new DeepSeekModelProperties(
                         true, "https://api.deepseek.com", "deepseek-v4-flash", false,
                         0.2, 4096, maxRounds, 90, 2, false),
                 new ObjectMapper(),
                 new AgentToolResilienceProperties());
+    }
+
+    private static McpConnectionStore emptyMcpStore() {
+        McpConnectionStore store = mock(McpConnectionStore.class);
+        when(store.list(any())).thenReturn(List.of());
+        return store;
     }
 
     private static AgentToolDefinition tool() {

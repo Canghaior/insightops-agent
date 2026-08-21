@@ -19,7 +19,8 @@ public class AgentToolRegistryConfiguration {
     }
 
     public static List<AgentToolDefinition> definitions(boolean ragEnabled) {
-        return List.of(releaseDefinition(), ragDefinition(ragEnabled), eventDefinition());
+        return List.of(releaseDefinition(), ragDefinition(ragEnabled), eventDefinition(),
+                memoryDefinition(), mcpDefinition());
     }
 
     private static AgentToolDefinition releaseDefinition() {
@@ -94,6 +95,60 @@ public class AgentToolRegistryConfiguration {
                                 "resultCount", "检索到的事件数量。", true, 0, 50),
                         AgentToolDefinition.Parameter.stringArray(
                                 "sources", "GitHub 官方事件 URL。", true, 50)));
+    }
+
+    private static AgentToolDefinition memoryDefinition() {
+        return new AgentToolDefinition(
+                AgentToolNames.USER_MEMORY_UPSERT,
+                1,
+                "新增或更新当前用户的长期记忆。该操作必须由当前用户人工审批后才会执行。",
+                true,
+                AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER,
+                AgentToolDefinition.RiskLevel.MUTATING,
+                AgentToolDefinition.ApprovalPolicy.REQUIRED,
+                Duration.ofSeconds(10),
+                100_000,
+                List.of(
+                        AgentToolDefinition.Parameter.string(
+                                "key", "记忆名称，例如回答风格。", true, 80),
+                        AgentToolDefinition.Parameter.string(
+                                "value", "需要记住的具体内容。", true, 1_000),
+                        AgentToolDefinition.Parameter.string(
+                                "category", "PROFILE、PREFERENCE、INTEREST 或 CONSTRAINT。", true, 32)),
+                List.of(
+                        AgentToolDefinition.Parameter.string(
+                                "status", "审批状态。", true, 32),
+                        AgentToolDefinition.Parameter.string(
+                                "approvalId", "人工审批记录 ID。", true, 64),
+                        AgentToolDefinition.Parameter.string(
+                                "expiresAt", "审批到期时间。", true, 64)));
+    }
+
+    private static AgentToolDefinition mcpDefinition() {
+        return new AgentToolDefinition(
+                AgentToolNames.MCP_READ_CALL,
+                1,
+                "调用 Workspace 管理员已启用并加入白名单的 HTTPS MCP 只读工具。",
+                true,
+                AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER,
+                AgentToolDefinition.RiskLevel.READ_ONLY,
+                AgentToolDefinition.ApprovalPolicy.NOT_REQUIRED,
+                Duration.ofSeconds(30),
+                200_000,
+                List.of(
+                        AgentToolDefinition.Parameter.string(
+                                "connectionId", "MCP 连接 ID。", true, 64),
+                        AgentToolDefinition.Parameter.string(
+                                "toolName", "连接白名单内的 MCP 工具名。", true, 128),
+                        AgentToolDefinition.Parameter.json(
+                                "arguments", "传给 MCP 工具的 JSON 参数。", true)),
+                List.of(
+                        AgentToolDefinition.Parameter.string(
+                                "connection", "MCP 连接名称。", true, 100),
+                        AgentToolDefinition.Parameter.string(
+                                "toolName", "实际调用的 MCP 工具名。", true, 128),
+                        AgentToolDefinition.Parameter.json(
+                                "result", "MCP JSON-RPC 结果。", true)));
     }
 
     private static AgentToolDefinition definition(

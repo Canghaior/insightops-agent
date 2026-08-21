@@ -79,6 +79,10 @@ GET /api/v1/agent/tools
 
 这些内容分别进入 P2.0-B、P2.0-C 和后续 MCP/审批阶段，不能用本次 Registry 完成状态替代。
 
+## 后续状态（2026-08-22）
+
+上述历史边界已由后续阶段逐步关闭：P2.0-B 完成模型 Function Calling 和多轮循环，P2.0-C 完成可靠性与监控，P2.0-D 完成首个写工具 `user_memory_upsert` 的持久化审批、幂等 Effect、补偿，以及公共 HTTPS + allowlist 的受控只读 MCP 首期能力。详细边界见 `p2-0-agent-tool-governance.md`。
+
 ## 验证范围
 
 - Registry 定义、封闭 Schema、参数类型与范围校验；

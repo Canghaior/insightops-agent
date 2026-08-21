@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentLoopAuditStore;
 import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
+import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.model.application.AgentPlanningModelGateway;
 import com.jundaodsj.insightops.model.application.AgentPlanningModelGateway.AgentPlanRequest;
 import com.jundaodsj.insightops.model.application.AgentPlanningModelGateway.FunctionDefinition;
@@ -15,6 +16,7 @@ import com.jundaodsj.insightops.model.application.ModelUsage;
 import com.jundaodsj.insightops.project.application.AdminProjectStore;
 import com.jundaodsj.insightops.server.tool.AgentRunExecutionBudget;
 import com.jundaodsj.insightops.server.tool.AgentToolResilienceProperties;
+import com.jundaodsj.insightops.tool.application.McpConnectionStore;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolDefinition;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolRegistry;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -42,7 +44,7 @@ public class AgentLoopService {
     private static final String PLANNER_PROMPT = """
             你是 InsightOps 的 Planner。你的职责是根据用户问题和已有 Observation 决定下一步，而不是直接回答事实。
             每轮只能二选一：
-            1. 需要更多证据时，精确调用一个已提供的只读 Function；
+            1. 需要证据或用户明确要求保存长期记忆时，精确调用一个已提供的 Function；
             2. 证据已经足够、问题不需要工具或无法继续时，不调用工具并返回 FINISH。
 
             约束：
@@ -52,6 +54,9 @@ public class AgentLoopService {
             - Release/版本/发布日期问题优先 github_release_list。
             - 官方文档、API、能力、架构和上传资料问题优先 knowledge_hybrid_search。
             - Issue、PR、安全公告、漏洞和项目风险问题使用 project_intelligence_event_search。
+            - 只有用户明确说“记住/保存偏好”时才可调用 user_memory_upsert；它只创建审批，不代表写入成功。
+            - 仅当 <available_mcp_connections> 中存在匹配白名单时才可调用 mcp_read_call。
+            - 写操作返回 WAITING_APPROVAL 后立即 FINISH，不得宣称操作已完成。
             - 不要重复相同工具和相同参数；Observation 足够后立即 FINISH。
             """;
 
@@ -60,6 +65,7 @@ public class AgentLoopService {
     private final AgentToolRegistry registry;
     private final AgentLoopAuditStore auditStore;
     private final AdminProjectStore projectStore;
+    private final McpConnectionStore mcpConnectionStore;
     private final DeepSeekModelProperties modelProperties;
     private final AgentToolResilienceProperties resilienceProperties;
     private final ObjectMapper objectMapper;
@@ -70,6 +76,7 @@ public class AgentLoopService {
             AgentToolRegistry registry,
             AgentLoopAuditStore auditStore,
             AdminProjectStore projectStore,
+            McpConnectionStore mcpConnectionStore,
             DeepSeekModelProperties modelProperties,
             ObjectMapper objectMapper,
             AgentToolResilienceProperties resilienceProperties) {
@@ -78,6 +85,7 @@ public class AgentLoopService {
         this.registry = registry;
         this.auditStore = auditStore;
         this.projectStore = projectStore;
+        this.mcpConnectionStore = mcpConnectionStore;
         this.modelProperties = modelProperties;
         this.objectMapper = objectMapper;
         this.resilienceProperties = resilienceProperties;
@@ -118,7 +126,7 @@ public class AgentLoopService {
             PlannedToolCall selectedCall;
             try {
                 plan = planningGateway.plan(new AgentPlanRequest(
-                        plannerPrompt(request.workspaceId()), request.userPrompt(),
+                        plannerPrompt(request.workspaceId(), request.userId()), request.userPrompt(),
                         exchanges, functions, 0.0,
                         Math.max(256, Math.min(1_024, modelProperties.maxOutputTokens()))));
                 selectedCall = selectToolCall(plan.toolCalls(), executedSignatures);
@@ -211,7 +219,7 @@ public class AgentLoopService {
         return call.name() + "\n" + call.argumentsJson();
     }
 
-    private String plannerPrompt(UUID workspaceId) {
+    private String plannerPrompt(UUID workspaceId, UUID userId) {
         List<Map<String, Object>> projects = projectStore.list(workspaceId).stream()
                 .filter(AdminProjectStore.ManagedProject::enabled)
                 .map(project -> Map.<String, Object>of(
@@ -219,9 +227,20 @@ public class AgentLoopService {
                         "name", project.repositoryName(),
                         "repository", project.repositoryOwner() + "/" + project.repositoryName()))
                 .toList();
+        List<Map<String, Object>> mcpConnections = mcpConnectionStore
+                .list(new ActorContext(userId, workspaceId)).stream()
+                .filter(McpConnectionStore.Connection::enabled)
+                .map(connection -> Map.<String, Object>of(
+                        "id", connection.id().toString(),
+                        "name", connection.name(),
+                        "allowedTools", parseOrText(connection.allowedToolsJson())))
+                .toList();
         return PLANNER_PROMPT + "\n<available_projects>\n"
                 + json(projects) + "\n</available_projects>\n"
-                + "projectIds 必须使用上述 id；不得自行生成 UUID。";
+                + "projectIds 必须使用上述 id；不得自行生成 UUID。\n"
+                + "<available_mcp_connections>\n" + json(mcpConnections)
+                + "\n</available_mcp_connections>\n"
+                + "MCP connectionId 与 toolName 必须严格来自上述列表。";
     }
 
     private Map<String, Object> arguments(PlannedToolCall call) {

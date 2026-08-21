@@ -16,4 +16,14 @@ class ToolCallStateMachineTest {
                 ToolCallStatus.REQUESTED, ToolCallStatus.TIMED_OUT))
                 .isInstanceOf(InvalidStateTransitionException.class);
     }
+
+    @Test
+    void shouldRequireWaitingApprovalBeforeHumanDecision() {
+        assertThat(ToolCallStateMachine.transition(
+                ToolCallStatus.RUNNING, ToolCallStatus.WAITING_APPROVAL))
+                .isEqualTo(ToolCallStatus.WAITING_APPROVAL);
+        assertThat(ToolCallStateMachine.transition(
+                ToolCallStatus.WAITING_APPROVAL, ToolCallStatus.REJECTED))
+                .isEqualTo(ToolCallStatus.REJECTED);
+    }
 }

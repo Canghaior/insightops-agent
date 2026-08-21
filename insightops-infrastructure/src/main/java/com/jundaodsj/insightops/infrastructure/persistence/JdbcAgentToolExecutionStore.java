@@ -102,6 +102,36 @@ public class JdbcAgentToolExecutionStore implements AgentToolExecutionStore {
 
     @Override
     @Transactional
+    public void waitForApproval(
+            UUID stepId,
+            UUID toolCallId,
+            String resultPayload,
+            long durationMs,
+            Instant finishedAt) {
+        jdbcClient.sql("""
+                update tool_call
+                set status = 'WAITING_APPROVAL',
+                    result_payload = cast(:resultPayload as jsonb),
+                    duration_ms = :durationMs
+                where id = :id and status = 'RUNNING'
+                """)
+                .param("id", toolCallId)
+                .param("resultPayload", resultPayload)
+                .param("durationMs", durationMs)
+                .update();
+        jdbcClient.sql("""
+                update agent_step
+                set status = 'WAITING_APPROVAL',
+                    output_payload = cast(:outputPayload as jsonb)
+                where id = :id and status = 'RUNNING'
+                """)
+                .param("id", stepId)
+                .param("outputPayload", resultPayload)
+                .update();
+    }
+
+    @Override
+    @Transactional
     public void failTool(
             UUID stepId,
             UUID toolCallId,

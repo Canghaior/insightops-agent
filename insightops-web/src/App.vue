@@ -25,6 +25,7 @@ const navigation = [
   { path: '/chat', label: '研究问答', icon: ChatDotRound },
   { path: '/knowledge-files', label: '知识文件', icon: Document },
   { path: '/memory', label: '长期记忆', icon: User },
+  { path: '/approvals', label: '操作审批', icon: Operation },
   { path: '/runs', label: '执行记录', icon: Operation },
   { path: '/settings', label: '账号设置', icon: Setting },
 ]
@@ -71,6 +72,7 @@ async function signOut() {
       <nav v-if="canManageAccounts" class="navigation admin-navigation" aria-label="管理导航">
         <RouterLink to="/admin/users"><el-icon><UserFilled /></el-icon><span>用户管理</span></RouterLink>
         <RouterLink to="/admin/projects"><el-icon><FolderOpened /></el-icon><span>项目管理</span></RouterLink>
+        <RouterLink to="/admin/agent-tools"><el-icon><Operation /></el-icon><span>Agent 工具</span></RouterLink>
         <RouterLink v-if="isSystemAdmin" to="/admin/knowledge"><el-icon><FolderOpened /></el-icon><span>知识库采集</span></RouterLink>
         <RouterLink v-if="isSystemAdmin" to="/admin/quality"><el-icon><DataAnalysis /></el-icon><span>质量复核</span></RouterLink>
       </nav>

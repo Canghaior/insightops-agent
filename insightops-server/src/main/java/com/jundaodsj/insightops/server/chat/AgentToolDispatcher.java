@@ -6,7 +6,10 @@ import com.jundaodsj.insightops.project.application.AdminProjectStore;
 import com.jundaodsj.insightops.project.application.ProjectUpdateStore;
 import com.jundaodsj.insightops.server.knowledge.KnowledgeAnswerabilityPolicy;
 import com.jundaodsj.insightops.server.knowledge.KnowledgeSearchService;
+import com.jundaodsj.insightops.server.tool.AgentToolApprovalService;
+import com.jundaodsj.insightops.server.tool.McpReadToolService;
 import com.jundaodsj.insightops.server.tool.RegisteredToolExecutionService;
+import com.jundaodsj.insightops.tool.application.AgentToolApprovalStore;
 import com.jundaodsj.insightops.tool.application.github.GitHubRelease;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseGateway;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseQuery;
@@ -36,6 +39,8 @@ public class AgentToolDispatcher {
 
     private final AgentToolRegistry registry;
     private final RegisteredToolExecutionService toolExecution;
+    private final AgentToolApprovalService approvalService;
+    private final McpReadToolService mcpReadToolService;
     private final ResilientAgentToolExecutor resilientExecutor;
     private final com.jundaodsj.insightops.server.tool.AgentToolOperationalMetrics metrics;
     private final AdminProjectStore projectStore;
@@ -49,6 +54,8 @@ public class AgentToolDispatcher {
     public AgentToolDispatcher(
             AgentToolRegistry registry,
             RegisteredToolExecutionService toolExecution,
+            AgentToolApprovalService approvalService,
+            McpReadToolService mcpReadToolService,
             AdminProjectStore projectStore,
             ResilientAgentToolExecutor resilientExecutor,
             com.jundaodsj.insightops.server.tool.AgentToolOperationalMetrics metrics,
@@ -60,6 +67,8 @@ public class AgentToolDispatcher {
             ProjectUpdateStore projectUpdateStore) {
         this.registry = registry;
         this.toolExecution = toolExecution;
+        this.approvalService = approvalService;
+        this.mcpReadToolService = mcpReadToolService;
         this.projectStore = projectStore;
         this.releaseGateway = releaseGateway;
         this.resilientExecutor = resilientExecutor;
@@ -96,6 +105,32 @@ public class AgentToolDispatcher {
 
         listener.onStarted(session.toolCallId(), session.toolName(), context.round());
         Instant startedAt = Instant.now();
+        if (session.definition().approvalPolicy()
+                == AgentToolDefinition.ApprovalPolicy.REQUIRED) {
+            try {
+                AgentToolApprovalService.PendingApproval pending =
+                        approvalService.requestMemoryUpsert(context, session, arguments);
+                listener.onApprovalRequired(
+                        session.toolCallId(), session.toolName(), context.round(),
+                        pending.id(), pending.expiresAt(), pending.summary());
+                recordMetrics(toolName, "waiting_approval", startedAt);
+                return new ExecutionResult(
+                        session.toolCallId(), session.toolName(), pending.observation(),
+                        "\n写操作尚未执行，正在等待用户人工审批。不得把待审批操作描述为已完成。\n",
+                        List.of(), List.of(), 0, "human-approval");
+            } catch (AgentToolApprovalStore.ApprovalException exception) {
+                session.failIfRunning(exception.code());
+                listener.onFailed(session.toolCallId(), session.toolName(),
+                        context.round(), exception.code());
+                throw new DispatchException(exception.code(), exception);
+            } catch (RuntimeException exception) {
+                session.failIfRunning("APPROVAL_PERSISTENCE_FAILED");
+                listener.onFailed(session.toolCallId(), session.toolName(),
+                        context.round(), "APPROVAL_PERSISTENCE_FAILED");
+                throw new DispatchException(
+                        "APPROVAL_PERSISTENCE_FAILED", exception);
+            }
+        }
         try {
             ExecutionResult result = resilientExecutor.execute(
                     session, context.budget(), active, listener, context.round(),
@@ -106,6 +141,8 @@ public class AgentToolDispatcher {
                                 knowledge(context, arguments, session);
                         case AgentToolNames.PROJECT_INTELLIGENCE_EVENT_SEARCH ->
                                 events(context, arguments, session);
+                        case AgentToolNames.MCP_READ_CALL ->
+                                mcp(context, arguments, session);
                         default -> throw new DispatchException("TOOL_NOT_ALLOWED");
                     });
             session.succeed(result.observation());
@@ -275,6 +312,35 @@ public class AgentToolDispatcher {
         }
         catch (RuntimeException exception) {
             throw new DispatchException("EVENT_RETRIEVAL_ERROR", exception);
+        }
+    }
+
+    private ExecutionResult mcp(
+            ExecutionContext context,
+            Map<String, Object> arguments,
+            RegisteredToolExecutionService.Session session) {
+        try {
+            UUID connectionId = UUID.fromString(string(arguments, "connectionId"));
+            String toolName = string(arguments, "toolName");
+            Object rawArguments = arguments.get("arguments");
+            if (!(rawArguments instanceof Map<?, ?> rawMap)) {
+                throw new DispatchException("MCP_ARGUMENTS_INVALID");
+            }
+            LinkedHashMap<String, Object> toolArguments = new LinkedHashMap<>();
+            rawMap.forEach((key, value) -> toolArguments.put(String.valueOf(key), value));
+            Map<String, Object> result = mcpReadToolService.call(
+                    context.workspaceId(), connectionId, toolName, Map.copyOf(toolArguments));
+            return new ExecutionResult(
+                    session.toolCallId(), session.toolName(), result,
+                    "\n以下内容来自 Workspace 允许的只读 MCP 工具；仍需按普通外部证据审慎引用。\n"
+                            + result + "\n",
+                    List.of(), List.of(), 1, "mcp");
+        } catch (DispatchException exception) {
+            throw exception;
+        } catch (IllegalArgumentException exception) {
+            throw new DispatchException("MCP_ARGUMENTS_INVALID", exception);
+        } catch (McpReadToolService.McpToolException exception) {
+            throw new DispatchException(exception.code(), exception);
         }
     }
 
@@ -502,6 +568,15 @@ public class AgentToolDispatcher {
                 int nextAttempt,
                 long delayMs,
                 String errorCode) {
+        }
+
+        default void onApprovalRequired(
+                UUID toolCallId,
+                String toolName,
+                int round,
+                UUID approvalId,
+                Instant expiresAt,
+                String summary) {
         }
     }
 

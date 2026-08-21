@@ -247,6 +247,18 @@ public class ChatStreamController {
                                     cancelDisconnectedRun(runUuid, runId, answer);
                                 }
                             }
+
+                            @Override
+                            public void onApprovalRequired(
+                                    UUID toolCallId, String toolName, int round,
+                                    UUID approvalId, Instant expiresAt, String summary) {
+                                if (!send(emitter, ChatSseEvent.approvalRequired(
+                                        runId, sessionId, sequence.incrementAndGet(), traceId,
+                                        toolCallId, toolName, approvalId, expiresAt, summary))) {
+                                    cancelDisconnectedRun(runUuid, runId, answer);
+                                }
+                            }
+
                             @Override
                             public void onRetrying(
                                     UUID toolCallId,
@@ -740,6 +752,25 @@ public class ChatStreamController {
                     "tool_retrying", runId, sessionId, sequence, Instant.now(), traceId,
                     content, null, null, null, null, null, errorCode,
                     toolName, toolCallId, null, null, null, List.of(), List.of());
+        }
+
+        static ChatSseEvent approvalRequired(
+                String runId,
+                UUID sessionId,
+                long sequence,
+                String traceId,
+                UUID toolCallId,
+                String toolName,
+                UUID approvalId,
+                Instant expiresAt,
+                String summary) {
+            String content = summary + "\n审批编号：" + approvalId
+                    + "\n请前往“操作审批”页面确认；到期时间：" + expiresAt;
+            return new ChatSseEvent(
+                    "tool_approval_required", runId, sessionId, sequence,
+                    Instant.now(), traceId, content, null, null, null,
+                    null, null, null, toolName, toolCallId,
+                    null, null, null, List.of(), List.of());
         }
 
         static ChatSseEvent toolCompleted(

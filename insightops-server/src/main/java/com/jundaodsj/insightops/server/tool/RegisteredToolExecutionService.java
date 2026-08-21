@@ -131,6 +131,23 @@ public class RegisteredToolExecutionService {
         public AgentToolDefinition definition() {
             return definition;
         }
+
+        public UUID runId() { return runId; }
+        public UUID stepId() { return stepId; }
+
+        public void waitForApproval(Object result) {
+            String payload = json(result);
+            completeOnce();
+            Instant finishedAt = Instant.now();
+            try {
+                executionStore.waitForApproval(
+                        stepId, toolCallId, payload, durationMs(finishedAt), finishedAt);
+            } catch (RuntimeException exception) {
+                finished.set(false);
+                throw exception;
+            }
+        }
+
         public Attempt startAttempt(int attemptNo) {
             positive(attemptNo, "attemptNo");
             UUID attemptId = UUID.randomUUID();

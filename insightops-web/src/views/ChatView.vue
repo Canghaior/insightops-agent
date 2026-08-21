@@ -26,7 +26,7 @@ type StreamStatus = 'idle' | 'connecting' | 'streaming' | 'completed' | 'cancell
 interface ToolExecution {
   id: string
   name: string
-  status: 'running' | 'succeeded' | 'failed'
+  status: 'running' | 'waiting_approval' | 'succeeded' | 'failed'
   resultCount?: number | null
   model?: string | null
   errorCode?: string | null
@@ -167,6 +167,19 @@ function handleEvent(event: ChatStreamEvent) {
     execution.status = 'running'
     execution.errorCode = event.errorCode
     execution.progress = event.content ?? '临时失败，正在重试'
+    return
+  }
+  if (event.type === 'tool_approval_required') {
+    assistant.toolExecutions ??= []
+    const id = event.toolCallId ?? `tool-${event.sequence}`
+    let execution = assistant.toolExecutions.find((item) => item.id === id)
+    if (!execution) {
+      execution = { id, name: event.toolName ?? 'user_memory_upsert', status: 'running' }
+      assistant.toolExecutions.push(execution)
+    }
+    execution.status = 'waiting_approval'
+    execution.progress = event.content ?? '写操作等待人工审批'
+    assistant.toolRunning = false
     return
   }
   if (event.type === 'tool_completed' || event.type === 'tool_failed') {
@@ -417,11 +430,14 @@ function toolExecutionLabel(execution: ToolExecution) {
   if (execution.name === 'github_release_list') return 'GitHub Release'
   if (execution.name === 'knowledge_hybrid_search') return '知识库混合检索'
   if (execution.name === 'project_intelligence_event_search') return '项目情报事件'
+  if (execution.name === 'user_memory_upsert') return '长期记忆写入'
+  if (execution.name === 'mcp_read_call') return '受控 MCP 只读调用'
   return execution.name
 }
 
 function toolExecutionResult(execution: ToolExecution) {
   if (execution.status === 'running') return execution.progress ?? '执行中'
+  if (execution.status === 'waiting_approval') return '尚未执行 · 等待你的审批'
   if (execution.status === 'failed') return `安全降级 · ${execution.errorCode ?? '工具不可用'}`
   const count = execution.resultCount ?? 0
   return execution.model ? `已获取 ${count} 条 · ${execution.model}` : `已获取 ${count} 条结果`
@@ -547,6 +563,7 @@ onBeforeUnmount(() => {
             >
               <span>Agent 工具 · {{ toolExecutionLabel(execution) }}</span>
               <strong>{{ toolExecutionResult(execution) }}</strong>
+              <RouterLink v-if="execution.status === 'waiting_approval'" class="text-button" to="/approvals">前往审批</RouterLink>
             </div>
 
             <p v-if="message.errorMessage" class="stream-error">{{ message.errorMessage }}</p>

@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AgentToolRegistryConfigurationTest {
 
     @Test
-    void shouldRegisterThreeReadOnlyBuiltInTools() {
+    void shouldRegisterReadOnlyAndApprovalGatedBuiltInTools() {
         AgentToolRegistry registry = new AgentToolRegistry(
                 AgentToolRegistryConfiguration.definitions(true));
 
@@ -19,12 +19,18 @@ class AgentToolRegistryConfigurationTest {
                 .containsExactly(
                         AgentToolNames.GITHUB_RELEASE_LIST,
                         AgentToolNames.KNOWLEDGE_HYBRID_SEARCH,
-                        AgentToolNames.PROJECT_INTELLIGENCE_EVENT_SEARCH);
-        assertThat(registry.definitions())
+                        AgentToolNames.MCP_READ_CALL,
+                        AgentToolNames.PROJECT_INTELLIGENCE_EVENT_SEARCH,
+                        AgentToolNames.USER_MEMORY_UPSERT);
+        AgentToolDefinition memory = registry.find(AgentToolNames.USER_MEMORY_UPSERT)
+                .orElseThrow();
+        assertThat(memory.riskLevel()).isEqualTo(AgentToolDefinition.RiskLevel.MUTATING);
+        assertThat(memory.approvalPolicy()).isEqualTo(
+                AgentToolDefinition.ApprovalPolicy.REQUIRED);
+        assertThat(registry.definitions().stream()
+                .filter(definition -> !definition.name().equals(AgentToolNames.USER_MEMORY_UPSERT)))
                 .allMatch(definition -> definition.riskLevel()
-                        == AgentToolDefinition.RiskLevel.READ_ONLY)
-                .allMatch(definition -> definition.approvalPolicy()
-                        == AgentToolDefinition.ApprovalPolicy.NOT_REQUIRED);
+                        == AgentToolDefinition.RiskLevel.READ_ONLY);
     }
 
     @Test
@@ -35,6 +41,6 @@ class AgentToolRegistryConfigurationTest {
         assertThat(registry.availableTo(AgentToolDefinition.AccessLevel.SYSTEM_ADMIN))
                 .extracting(definition -> definition.name())
                 .doesNotContain(AgentToolNames.KNOWLEDGE_HYBRID_SEARCH)
-                .hasSize(2);
+                .hasSize(4);
     }
 }

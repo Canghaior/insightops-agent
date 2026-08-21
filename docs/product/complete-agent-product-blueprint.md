@@ -257,15 +257,15 @@ P1.4 三项目生产知识库与 RAG 已于 2026-08-19 完成验收，详见 `do
   -> 基于累计证据流式生成答案
 ```
 
-P2.0-B 已实现模型自主选择工具、Planner、Executor、Observation 和真实多轮循环；P2.0-C1/C2/C3 已补齐 Registry timeout 强制中断、客户端取消、Run 级资源预算、错误分类重试、指数退避、分组熔断、半开探测、尝试级审计与生产监控。这是有边界、可观测且可恢复的真实只读 Agent，而不是无限自主系统。
+P2.0-B 已实现模型自主选择工具、Planner、Executor、Observation 和真实多轮循环；P2.0-C1/C2/C3 已补齐 Registry timeout 强制中断、客户端取消、Run 级资源预算、错误分类重试、指数退避、分组熔断、半开探测、尝试级审计与生产监控；P2.0-D 又增加了首个审批型写工具 `user_memory_upsert`、幂等 Effect、失败补偿，以及受 Workspace allowlist 约束的只读 MCP 调用。这是有边界、可观测、可恢复且对写副作用进行人工确认的受控 Agent，而不是无限自主系统。
 
 当前仍缺少：
 
-- 写入型工具的人工审批、幂等副作用和失败补偿。
 - 跨工具依赖图与 Token/成本等更细粒度资源预算。
-- MCP 工具动态接入与租户级工具策略。
+- 超出用户记忆的更多写工具及其差异化审批、幂等和补偿策略。
+- 认证型/会话型 MCP、合同发现、健康探测与更完整的租户级工具包策略。
 
-P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md` 和 `docs/testing/results/p2-0-agent-tool-resilience-2026-08-22.md`。
+P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md` 和 `docs/testing/results/p2-0-agent-tool-resilience-2026-08-22.md`；P2.0-D 见 `docs/architecture/p2-0-agent-tool-governance.md` 和 `docs/testing/results/p2-0-agent-tool-governance-2026-08-22.md`。
 
 ### 5.3 RAG 重排与评测仍是基础版本
 
@@ -280,7 +280,7 @@ P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md
 
 ### 5.4 长期记忆仍以人工维护为主
 
-已有记忆 CRUD 和 Prompt 注入，但尚未实现：
+已有记忆 CRUD 和 Prompt 注入。P2.0-D 已支持用户在聊天中明确要求保存记忆后先生成待审批请求，只有原请求用户批准才执行写入，并可补偿。仍未实现：
 
 - 从聊天中自动提取稳定偏好。
 - 自动生成会话长期摘要。
@@ -288,7 +288,6 @@ P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md
 - 相似记忆合并。
 - 冲突记忆处理。
 - 记忆有效期、来源和置信度。
-- 用户确认后再写入的记忆审批机制。
 
 ### 5.5 Workspace 只是隔离基础
 
@@ -595,10 +594,10 @@ Owner 和系统管理员已经可以通过页面管理 GitHub 仓库，系统也
 - [x] 模型能够根据问题自主选择工具，而不是完全依赖固定规则（P2.0-B）。
 - [x] Planner 能生成并在执行记录展示计划（P2.0-B，PLAN Step）。
 - [x] Agent 能根据工具观察结果继续、换工具或停止（P2.0-B）。
-- [x] 最大工具轮次、超时、取消、重试、熔断、幂等和资源预算真实生效（P2.0-B/C）。
+- [x] 最大工具轮次、超时、取消、重试、熔断、幂等和资源预算真实生效（P2.0-B/C/D）。
 - [x] 每一步决策和工具调用可在执行记录中查看（PLAN、TOOL、OBSERVATION）。
 - [x] 工具失败时能够安全降级，不能伪造结果（失败 Observation + 标准错误码）。
-- [ ] 敏感写操作必须经过人工审批。
+- [x] 首个敏感写操作 `user_memory_upsert` 必须经过原请求用户人工审批，支持幂等执行、拒绝、过期和补偿（P2.0-D）；新增写工具仍必须逐项配置策略并验收。
 
 ### 9.4 公开 SaaS 完成标准
 
@@ -640,7 +639,7 @@ Owner 和系统管理员已经可以通过页面管理 GitHub 仓库，系统也
 3. [x] 接入模型 Function Calling（P2.0-B：DeepSeek 原生 Function Tool Call）。
 4. [x] 实现多轮工具循环（P2.0-B：Observation 驱动，真实轮次上限）。
 5. [x] 统一超时、取消、重试、熔断、幂等、资源预算、尝试级审计和监控（P2.0-C1/C2/C3）。
-6. [ ] 增加写工具人工审批、失败补偿和 MCP 扩展能力（建议 P2.0-D）。
+6. [x] 增加首个写工具的人工审批、幂等 Effect、失败补偿和受控只读 MCP 扩展能力（P2.0-D）。
 
 ### 阶段 D：补齐公开运营能力
 

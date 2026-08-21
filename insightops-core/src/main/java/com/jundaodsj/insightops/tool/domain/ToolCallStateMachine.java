@@ -25,7 +25,13 @@ public final class ToolCallStateMachine {
         EnumMap<ToolCallStatus, Set<ToolCallStatus>> transitions = new EnumMap<>(ToolCallStatus.class);
         transitions.put(ToolCallStatus.REQUESTED, EnumSet.of(ToolCallStatus.RUNNING, ToolCallStatus.FAILED));
         transitions.put(ToolCallStatus.RUNNING,
-                EnumSet.of(ToolCallStatus.SUCCEEDED, ToolCallStatus.FAILED, ToolCallStatus.TIMED_OUT));
+                EnumSet.of(ToolCallStatus.WAITING_APPROVAL, ToolCallStatus.SUCCEEDED,
+                        ToolCallStatus.FAILED, ToolCallStatus.TIMED_OUT));
+        transitions.put(ToolCallStatus.WAITING_APPROVAL,
+                EnumSet.of(ToolCallStatus.SUCCEEDED, ToolCallStatus.REJECTED,
+                        ToolCallStatus.FAILED));
+        transitions.put(ToolCallStatus.REJECTED, EnumSet.noneOf(ToolCallStatus.class));
+        transitions.put(ToolCallStatus.COMPENSATED, EnumSet.noneOf(ToolCallStatus.class));
         transitions.put(ToolCallStatus.SUCCEEDED, EnumSet.noneOf(ToolCallStatus.class));
         transitions.put(ToolCallStatus.FAILED, EnumSet.noneOf(ToolCallStatus.class));
         transitions.put(ToolCallStatus.TIMED_OUT, EnumSet.noneOf(ToolCallStatus.class));

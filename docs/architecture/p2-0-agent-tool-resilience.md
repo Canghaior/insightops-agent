@@ -90,3 +90,7 @@ Grafana 展示工具结果、P95 延迟、重试/超时和熔断状态；Prometh
 - 熔断按上游组隔离，知识检索故障不会阻断数据库事件查询。
 - 当前工具均为只读，重试不会产生外部写副作用。
 - P2.0-D 再引入写工具审批、补偿、MCP 动态注册和更细粒度 Token/成本预算。
+
+## 后续状态（2026-08-22）
+
+P2.0-D 已增加首个真实写工具 `user_memory_upsert` 的人工审批、幂等 Effect 和补偿，并加入公共 HTTPS + Workspace allowlist 的受控只读 MCP 首期能力。跨工具依赖和更细粒度 Token/成本预算仍未完成；详细设计见 `p2-0-agent-tool-governance.md`。

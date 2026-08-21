@@ -18,6 +18,7 @@ import com.jundaodsj.insightops.infrastructure.persistence.JdbcAdminAccountStore
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAdminProjectStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAccountWorkspaceStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentToolExecutionStore;
+import com.jundaodsj.insightops.infrastructure.persistence.JdbcAgentToolApprovalStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcChatRunStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcKnowledgeUploadStore;
 import com.jundaodsj.insightops.infrastructure.persistence.JdbcUserMemoryStore;
@@ -52,8 +53,10 @@ import com.jundaodsj.insightops.server.chat.ReleaseToolService;
 import com.jundaodsj.insightops.server.tool.AgentToolRegistryConfiguration;
 import com.jundaodsj.insightops.server.tool.RegisteredToolExecutionService;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
+import com.jundaodsj.insightops.tool.application.AgentToolApprovalStore;
 import com.jundaodsj.insightops.tool.application.github.GitHubRelease;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolRegistry;
+import com.jundaodsj.insightops.tool.application.registry.AgentToolNames;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseGateway;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseQuery;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseResult;
@@ -140,7 +143,7 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(25);
+        assertThat(migration.migrationsExecuted).isEqualTo(26);
 
         jdbcClient = JdbcClient.create(dataSource);
         assertThat(jdbcClient.sql("select count(*) from tracked_project")
@@ -1040,6 +1043,102 @@ class P0ChainDatabaseGateTest {
                 where snapshot.source_url=:url
                 """).param("url", page.canonicalUrl())
                 .query(String.class).single()).isEqualTo("OFFICIAL_BLOG");
+    }
+
+    @Test
+    @Order(14)
+    void mutatingToolApprovalIsIdempotentRejectableAndCompensatable() {
+        JdbcAgentToolExecutionStore executions = new JdbcAgentToolExecutionStore(jdbcClient);
+        JdbcAgentToolApprovalStore approvals = new JdbcAgentToolApprovalStore(
+                jdbcClient, objectMapper());
+        Instant now = Instant.parse("2026-08-22T02:00:00Z");
+        UUID runId = UUID.randomUUID();
+        runStore.startRun(ACTOR, runId, null, "p2d-approval-" + runId,
+                "记住：先给结论", now);
+
+        UUID stepId = UUID.randomUUID();
+        UUID toolCallId = UUID.randomUUID();
+        String payload = "{\"key\":\"p2d-approval-memory\","
+                + "\"value\":\"conclusion first\",\"category\":\"PREFERENCE\"}";
+        executions.startTool(runId, stepId, toolCallId, 1,
+                AgentToolNames.USER_MEMORY_UPSERT, "p2d:approval:" + runId,
+                payload, now);
+        UUID approvalId = UUID.randomUUID();
+        AgentToolApprovalStore.Approval pending = approvals.request(
+                new AgentToolApprovalStore.Request(
+                        approvalId, runId, stepId, toolCallId, ACTOR.userId(),
+                        ACTOR.workspaceId(), AgentToolNames.USER_MEMORY_UPSERT,
+                        "写入长期记忆", payload, "p2d:approval:" + runId,
+                        now.plusSeconds(1_800), now));
+        executions.waitForApproval(stepId, toolCallId,
+                "{\"status\":\"WAITING_APPROVAL\"}", 1, now);
+        assertThat(pending.status()).isEqualTo("PENDING");
+
+        AgentToolApprovalStore.Approval executed = approvals.approve(
+                ACTOR, approvalId, "数据库验收", now.plusSeconds(1));
+        assertThat(executed.status()).isEqualTo("EXECUTED");
+        assertThat(memoryStore.list(ACTOR).stream()
+                .filter(memory -> memory.key().equals("p2d-approval-memory")))
+                .singleElement().extracting("value").isEqualTo("conclusion first");
+
+        AgentToolApprovalStore.Approval repeated = approvals.approve(
+                ACTOR, approvalId, "重复确认", now.plusSeconds(2));
+        assertThat(repeated.status()).isEqualTo("EXECUTED");
+        assertThat(memoryStore.list(ACTOR).stream()
+                .filter(memory -> memory.key().equals("p2d-approval-memory"))).hasSize(1);
+
+        jdbcClient.sql("""
+                update user_memory set memory_value = 'newer user edit'
+                where user_id = :userId and workspace_id = :workspaceId
+                  and memory_key = 'p2d-approval-memory'
+                """)
+                .param("userId", ACTOR.userId())
+                .param("workspaceId", ACTOR.workspaceId()).update();
+        assertThatThrownBy(() -> approvals.compensate(
+                ACTOR, approvalId, "不得覆盖后续编辑", now.plusSeconds(3)))
+                .isInstanceOf(AgentToolApprovalStore.ApprovalException.class)
+                .extracting(error -> ((AgentToolApprovalStore.ApprovalException) error).code())
+                .isEqualTo("APPROVAL_EFFECT_CONFLICT");
+        jdbcClient.sql("""
+                update user_memory set memory_value = 'conclusion first'
+                where user_id = :userId and workspace_id = :workspaceId
+                  and memory_key = 'p2d-approval-memory'
+                """)
+                .param("userId", ACTOR.userId())
+                .param("workspaceId", ACTOR.workspaceId()).update();
+
+        assertThat(approvals.compensate(
+                ACTOR, approvalId, "恢复执行前状态", now.plusSeconds(3)).status())
+                .isEqualTo("COMPENSATED");
+        assertThat(approvals.compensate(
+                ACTOR, approvalId, "重复补偿", now.plusSeconds(4)).status())
+                .isEqualTo("COMPENSATED");
+        assertThat(memoryStore.list(ACTOR)).noneMatch(
+                memory -> memory.key().equals("p2d-approval-memory"));
+
+        UUID rejectedRun = UUID.randomUUID();
+        runStore.startRun(ACTOR, rejectedRun, null, "p2d-reject-" + rejectedRun,
+                "记住一条不应执行的内容", now.plusSeconds(5));
+        UUID rejectedStep = UUID.randomUUID();
+        UUID rejectedCall = UUID.randomUUID();
+        String rejectedPayload = "{\"key\":\"p2d-rejected-memory\","
+                + "\"value\":\"must not exist\",\"category\":\"PREFERENCE\"}";
+        executions.startTool(rejectedRun, rejectedStep, rejectedCall, 1,
+                AgentToolNames.USER_MEMORY_UPSERT, "p2d:reject:" + rejectedRun,
+                rejectedPayload, now.plusSeconds(5));
+        UUID rejectedApproval = UUID.randomUUID();
+        approvals.request(new AgentToolApprovalStore.Request(
+                rejectedApproval, rejectedRun, rejectedStep, rejectedCall,
+                ACTOR.userId(), ACTOR.workspaceId(), AgentToolNames.USER_MEMORY_UPSERT,
+                "拒绝长期记忆", rejectedPayload, "p2d:reject:" + rejectedRun,
+                now.plusSeconds(1_805), now.plusSeconds(5)));
+        executions.waitForApproval(rejectedStep, rejectedCall,
+                "{\"status\":\"WAITING_APPROVAL\"}", 1, now.plusSeconds(5));
+        assertThat(approvals.reject(
+                ACTOR, rejectedApproval, "拒绝执行", now.plusSeconds(6)).status())
+                .isEqualTo("REJECTED");
+        assertThat(memoryStore.list(ACTOR)).noneMatch(
+                memory -> memory.key().equals("p2d-rejected-memory"));
     }
 
     private static ActorContext actor(String userId) {

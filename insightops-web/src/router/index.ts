@@ -17,6 +17,7 @@ const router = createRouter({
     { path: '/chat', name: 'chat', component: () => import('@/views/ChatView.vue') },
     { path: '/knowledge-files', name: 'knowledge-files', component: () => import('@/views/KnowledgeFilesView.vue') },
     { path: '/memory', name: 'memory', component: () => import('@/views/MemoryView.vue') },
+    { path: '/approvals', name: 'approvals', component: () => import('@/views/ApprovalsView.vue') },
     { path: '/runs', name: 'runs', component: () => import('@/views/RunsView.vue') },
     { path: '/runs/:runId', name: 'run-detail', component: () => import('@/views/RunsView.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
@@ -43,6 +44,12 @@ const router = createRouter({
       name: 'admin-quality',
       component: () => import('@/views/AdminQualityReviewView.vue'),
       meta: { systemAdmin: true },
+    },
+    {
+      path: '/admin/agent-tools',
+      name: 'admin-agent-tools',
+      component: () => import('@/views/AdminAgentToolsView.vue'),
+      meta: { manager: true },
     },
   ],
 })

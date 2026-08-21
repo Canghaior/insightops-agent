@@ -6,6 +6,7 @@ import com.jundaodsj.insightops.infrastructure.model.DeepSeekCostEstimator;
 import com.jundaodsj.insightops.model.application.ModelUsage;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -23,6 +24,25 @@ import static org.mockito.Mockito.when;
 class AgentCostGovernanceServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-08-22T01:00:00Z");
+
+    @Test
+    void springSelectsTheProductionConstructorWhenTheServiceHasATestClockConstructor() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(AgentCostGovernanceStore.class,
+                    () -> mock(AgentCostGovernanceStore.class));
+            context.registerBean(AgentCostGovernanceProperties.class,
+                    AgentCostGovernanceProperties::new);
+            context.registerBean(DeepSeekCostEstimator.class,
+                    () -> mock(DeepSeekCostEstimator.class));
+            context.registerBean(AgentCostGovernanceMetrics.class,
+                    () -> new AgentCostGovernanceMetrics(new SimpleMeterRegistry()));
+            context.register(AgentCostGovernanceService.class);
+            context.refresh();
+
+            org.assertj.core.api.Assertions.assertThat(
+                    context.getBean(AgentCostGovernanceService.class)).isNotNull();
+        }
+    }
 
     @Test
     void rejectsAWorkspaceRunWhenTheAtomicReservationIsDenied() {

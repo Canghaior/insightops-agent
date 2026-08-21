@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.server.chat;
 import com.jundaodsj.insightops.agent.application.AgentCostGovernanceStore;
 import com.jundaodsj.insightops.infrastructure.model.DeepSeekCostEstimator;
 import com.jundaodsj.insightops.model.application.ModelUsage;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -22,6 +23,7 @@ public class AgentCostGovernanceService {
     private final AgentCostGovernanceMetrics metrics;
     private final Clock clock;
 
+    @Autowired
     public AgentCostGovernanceService(
             AgentCostGovernanceStore store,
             AgentCostGovernanceProperties properties,

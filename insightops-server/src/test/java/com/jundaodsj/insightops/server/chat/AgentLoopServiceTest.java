@@ -99,6 +99,43 @@ class AgentLoopServiceTest {
         verify(dispatcher, times(2)).execute(any(), anyString(), any(), any());
     }
 
+    @Test
+    void shouldSequentializeMultipleToolCallsAcrossPlanningRounds() {
+        AgentPlanningModelGateway planning = mock(AgentPlanningModelGateway.class);
+        AgentToolDispatcher dispatcher = mock(AgentToolDispatcher.class);
+        AgentLoopAuditStore audit = mock(AgentLoopAuditStore.class);
+        AdminProjectStore projects = mock(AdminProjectStore.class);
+        when(projects.list(any())).thenReturn(List.of());
+        var first = new AgentPlanningModelGateway.PlannedToolCall(
+                "call-release", "test_search", "{\"query\":\"release\"}");
+        var second = new AgentPlanningModelGateway.PlannedToolCall(
+                "call-docs", "second_search", "{\"query\":\"docs\"}");
+        when(planning.plan(any()))
+                .thenReturn(plan("", List.of(first, second), ModelUsage.unknown()))
+                .thenReturn(plan("", List.of(first, second), ModelUsage.unknown()))
+                .thenReturn(plan("FINISH", List.of(), ModelUsage.unknown()));
+        when(dispatcher.execute(any(), anyString(), any(), any())).thenAnswer(invocation -> {
+            String toolName = invocation.getArgument(1);
+            return new AgentToolDispatcher.ExecutionResult(
+                    UUID.randomUUID(), toolName, Map.of("answer", toolName),
+                    "evidence-" + toolName, List.of(), List.of(), 1, null);
+        });
+        AgentLoopService service = service(planning, dispatcher, audit, projects, 4);
+
+        AgentLoopService.LoopResult result = service.run(request(), mockListener(), () -> true);
+
+        assertThat(result.toolRounds()).isEqualTo(2);
+        assertThat(result.limitReached()).isFalse();
+        ArgumentCaptor<String> toolNames = ArgumentCaptor.forClass(String.class);
+        verify(dispatcher, times(2)).execute(any(), toolNames.capture(), any(), any());
+        assertThat(toolNames.getAllValues()).containsExactly("test_search", "second_search");
+        ArgumentCaptor<AgentPlanningModelGateway.AgentPlanRequest> plans =
+                ArgumentCaptor.forClass(AgentPlanningModelGateway.AgentPlanRequest.class);
+        verify(planning, times(3)).plan(plans.capture());
+        assertThat(plans.getAllValues().get(1).exchanges()).hasSize(1);
+        assertThat(plans.getAllValues().get(2).exchanges()).hasSize(2);
+    }
+
     private static AgentLoopService service(
             AgentPlanningModelGateway planning,
             AgentToolDispatcher dispatcher,
@@ -106,7 +143,8 @@ class AgentLoopServiceTest {
             AdminProjectStore projects,
             int maxRounds) {
         return new AgentLoopService(
-                planning, dispatcher, new AgentToolRegistry(List.of(tool())), audit, projects,
+                planning, dispatcher,
+                new AgentToolRegistry(List.of(tool(), secondTool())), audit, projects,
                 new DeepSeekModelProperties(
                         true, "https://api.deepseek.com", "deepseek-v4-flash", false,
                         0.2, 4096, maxRounds, 90, 2, false),
@@ -116,6 +154,19 @@ class AgentLoopServiceTest {
     private static AgentToolDefinition tool() {
         return new AgentToolDefinition(
                 "test_search", 1, "Search test evidence", true,
+                AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER,
+                AgentToolDefinition.RiskLevel.READ_ONLY,
+                AgentToolDefinition.ApprovalPolicy.NOT_REQUIRED,
+                Duration.ofSeconds(10), 10_000,
+                List.of(AgentToolDefinition.Parameter.string(
+                        "query", "Search query", true, 200)),
+                List.of(AgentToolDefinition.Parameter.string(
+                        "answer", "Search answer", false, 2_000)));
+    }
+
+    private static AgentToolDefinition secondTool() {
+        return new AgentToolDefinition(
+                "second_search", 1, "Search secondary evidence", true,
                 AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER,
                 AgentToolDefinition.RiskLevel.READ_ONLY,
                 AgentToolDefinition.ApprovalPolicy.NOT_REQUIRED,

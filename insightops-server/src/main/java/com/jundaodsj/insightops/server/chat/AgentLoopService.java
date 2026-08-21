@@ -99,21 +99,15 @@ public class AgentLoopService {
             int planStep = ++stepNo;
             Instant planStartedAt = Instant.now();
             AgentPlanningModelGateway.AgentPlanResponse plan;
+            PlannedToolCall selectedCall;
             try {
                 plan = planningGateway.plan(new AgentPlanRequest(
                         plannerPrompt(request.workspaceId()), request.userPrompt(),
                         exchanges, functions, 0.0,
                         Math.max(256, Math.min(1_024, modelProperties.maxOutputTokens()))));
-                if (plan.toolCalls().size() > 1) {
-                    recordPlan(request.runId(), planStep, round, "FAILED", plan,
-                            "MULTIPLE_TOOL_CALLS", planStartedAt);
-                    throw new AgentLoopException("MODEL_MULTIPLE_TOOL_CALLS");
-                }
-                recordPlan(request.runId(), planStep, round, "SUCCEEDED", plan,
-                        null, planStartedAt);
-            }
-            catch (AgentLoopException exception) {
-                throw exception;
+                selectedCall = selectToolCall(plan.toolCalls(), executedSignatures);
+                recordPlan(request.runId(), planStep, round, plan,
+                        selectedCall, planStartedAt);
             }
             catch (RuntimeException exception) {
                 recordFailedPlan(request.runId(), planStep, round, exception, planStartedAt);
@@ -125,8 +119,8 @@ public class AgentLoopService {
                         executedRounds, false);
             }
 
-            PlannedToolCall call = plan.toolCalls().getFirst();
-            String signature = call.name() + "\n" + call.argumentsJson();
+            PlannedToolCall call = selectedCall;
+            String signature = signature(call);
             if (!executedSignatures.add(signature)) {
                 String response = errorObservation("DUPLICATE_TOOL_CALL");
                 exchanges.add(new ToolExchange(call, response));
@@ -178,6 +172,19 @@ public class AgentLoopService {
                 .map(definition -> new FunctionDefinition(
                         definition.name(), definition.description(), json(definition.inputSchema())))
                 .toList();
+    }
+
+    private static PlannedToolCall selectToolCall(
+            List<PlannedToolCall> toolCalls, Set<String> executedSignatures) {
+        if (toolCalls.isEmpty()) return null;
+        return toolCalls.stream()
+                .filter(call -> !executedSignatures.contains(signature(call)))
+                .findFirst()
+                .orElse(toolCalls.getFirst());
+    }
+
+    private static String signature(PlannedToolCall call) {
+        return call.name() + "\n" + call.argumentsJson();
     }
 
     private String plannerPrompt(UUID workspaceId) {
@@ -250,9 +257,8 @@ public class AgentLoopService {
             UUID runId,
             int stepNo,
             int round,
-            String status,
             AgentPlanningModelGateway.AgentPlanResponse plan,
-            String errorCode,
+            PlannedToolCall selectedCall,
             Instant startedAt) {
         List<Map<String, Object>> toolCalls = plan.toolCalls().stream()
                 .map(call -> Map.<String, Object>of(
@@ -266,9 +272,12 @@ public class AgentLoopService {
         output.put("provider", plan.provider());
         output.put("model", plan.model());
         output.put("durationMs", plan.duration().toMillis());
-        if (errorCode != null) output.put("errorCode", errorCode);
+        if (selectedCall != null) {
+            output.put("selectedToolCallId", selectedCall.id());
+            output.put("deferredToolCallCount", Math.max(0, toolCalls.size() - 1));
+        }
         auditStore.recordStep(
-                runId, UUID.randomUUID(), stepNo, "PLAN", status,
+                runId, UUID.randomUUID(), stepNo, "PLAN", "SUCCEEDED",
                 json(Map.of("round", round)), json(output), startedAt, Instant.now());
     }
 

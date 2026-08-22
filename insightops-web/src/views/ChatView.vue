@@ -180,6 +180,13 @@ function handleEvent(event: ChatStreamEvent) {
     assistant.status = 'streaming'
     return
   }
+  if (event.type === 'run_recovered') {
+    status.value = 'streaming'
+    assistant.status = 'streaming'
+    assistant.toolRunning = true
+    assistant.toolName = event.content ?? '正在从安全点恢复'
+    return
+  }
   if (event.type === 'plan_created' && event.orchestration) {
     assistant.orchestration = {
       planId: event.orchestration.planId ?? '',
@@ -516,7 +523,7 @@ async function stopGeneration() {
     try {
       await cancelChat(activeRunId)
     } catch {
-      // Aborting the HTTP stream still triggers server-side disconnect cleanup.
+      // The durable cancellation request may already have reached another Server instance.
     }
   }
   streamController?.abort()
@@ -605,9 +612,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  const activeRunId = runId.value
   streamController?.abort()
-  if (streaming.value && activeRunId) void cancelChat(activeRunId).catch(() => undefined)
 })
 </script>
 
@@ -641,7 +646,7 @@ onBeforeUnmount(() => {
     <div class="research-main">
       <span class="eyebrow">研究问答 · P1 个人工作区</span>
       <h2>与 DeepSeek 多轮实时问答</h2>
-      <p class="lead">回答会按消息连续显示并保存到数据库；刷新当前标签页可以恢复本会话，模型使用最近 12 条消息理解指代。</p>
+      <p class="lead">Agent Run 在后台持久执行；刷新、断网或实例切换后会从事件序号继续，只有点击“停止生成”才会取消任务。</p>
 
       <div v-if="resumeCheckpointId" class="checkpoint-resume-banner">
         <strong>准备从检查点 {{ resumeCheckpointId.slice(0, 8) }} 恢复</strong>
@@ -824,7 +829,8 @@ onBeforeUnmount(() => {
         <li>RRF 融合排序与结构化引用卡片</li>
         <li>DeepSeek 基于证据生成并附官方来源</li>
         <li>记录 Token、耗时与 TraceId</li>
-        <li>用户取消立即终止</li>
+        <li>跨实例租约接管与安全点恢复</li>
+        <li>断线自动续传；用户显式取消才终止</li>
       </ul>
       <div class="scope-warning">
         <strong>当前限制</strong>

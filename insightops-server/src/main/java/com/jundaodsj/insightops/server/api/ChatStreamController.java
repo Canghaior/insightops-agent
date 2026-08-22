@@ -14,6 +14,7 @@ import com.jundaodsj.insightops.model.application.ModelUsage;
 import com.jundaodsj.insightops.model.application.StreamingChatModelGateway;
 import com.jundaodsj.insightops.server.chat.AgentLoopService;
 import com.jundaodsj.insightops.server.chat.ChatStreamSessionRegistry;
+import com.jundaodsj.insightops.server.chat.DurableChatRunCoordinator;
 import com.jundaodsj.insightops.server.chat.KnowledgeRagService;
 import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
 import com.jundaodsj.insightops.server.chat.ProjectEventEvidenceService;
@@ -30,10 +31,12 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.slf4j.Logger;
@@ -71,6 +74,9 @@ public class ChatStreamController {
     private final AgentLoopService agentLoopService;
     private final P0ChatGuardrail guardrail;
     private final UserMemoryStore userMemoryStore;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DurableChatRunCoordinator durableChatRuns;
 
     @org.springframework.beans.factory.annotation.Autowired
     public ChatStreamController(
@@ -165,6 +171,23 @@ public class ChatStreamController {
                 traceId,
                 userMessage,
                 startedAt);
+        if (durableChatRuns != null && durableChatRuns.enabled() && agentLoopService != null) {
+            try {
+                return durableChatRuns.enqueueAndOpen(
+                        actor, runUuid, sessionId, traceId,
+                        "SYSTEM_ADMIN".equals(account.systemRole()),
+                        toolAccess(account.systemRole(), account.role()),
+                        userMessage, guardrail.contextualUserPrompt(history, userMessage),
+                        body.resumeCheckpointId(), startedAt);
+            }
+            catch (RuntimeException exception) {
+                LOGGER.error("Failed to enqueue durable chat run {}", runId, exception);
+                chatRunStore.failRun(runUuid, "", "CHAT_QUEUE_ERROR", Instant.now());
+                throw new org.springframework.web.server.ResponseStatusException(
+                        HttpStatus.SERVICE_UNAVAILABLE,
+                        "Chat queue is temporarily unavailable", exception);
+            }
+        }
         AtomicLong sequence = new AtomicLong();
         StringBuffer answer = new StringBuffer();
         SseEmitter emitter = new SseEmitter(modelProperties.requestTimeoutSeconds() * 1_000L);
@@ -667,6 +690,24 @@ public class ChatStreamController {
         }
     }
 
+    @GetMapping(value = "/{runId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter resume(
+            @PathVariable String runId,
+            @RequestParam(defaultValue = "0") long afterSequence,
+            HttpServletRequest request) {
+        UUID runUuid;
+        try { runUuid = UUID.fromString(runId); }
+        catch (IllegalArgumentException exception) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.NOT_FOUND, "Agent run not found");
+        }
+        if (afterSequence < 0 || durableChatRuns == null || !durableChatRuns.enabled()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.NOT_FOUND, "Agent run not found");
+        }
+        return durableChatRuns.open(CurrentAccount.actor(request), runUuid, afterSequence);
+    }
+
     @PostMapping("/{runId}/cancel")
     public ResponseEntity<ApiResponse<CancelStreamResult>> cancel(
             @PathVariable String runId,
@@ -683,7 +724,11 @@ public class ChatStreamController {
             throw new org.springframework.web.server.ResponseStatusException(
                     HttpStatus.NOT_FOUND, "Agent run not found");
         }
-        boolean cancelled = sessionRegistry.cancel(runId);
+        ActorContext actor = CurrentAccount.actor(request);
+        boolean cancelled = durableChatRuns != null && durableChatRuns.enabled()
+                && durableChatRuns.ownsWork(actor, runUuid)
+                ? durableChatRuns.requestCancel(actor, runUuid)
+                : sessionRegistry.cancel(runId);
         String traceId = (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE);
         ApiResponse<CancelStreamResult> response = new ApiResponse<>(
                 traceId,

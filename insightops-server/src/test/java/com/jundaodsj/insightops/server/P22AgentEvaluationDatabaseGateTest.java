@@ -54,7 +54,7 @@ class P22AgentEvaluationDatabaseGateTest {
         var result = Flyway.configure().dataSource(dataSource).schemas(SCHEMA)
                 .defaultSchema(SCHEMA).createSchemas(true)
                 .locations("classpath:db/migration").load().migrate();
-        assertThat(result.migrationsExecuted).isEqualTo(33);
+        assertThat(result.migrationsExecuted).isEqualTo(34);
     }
 
     @AfterAll

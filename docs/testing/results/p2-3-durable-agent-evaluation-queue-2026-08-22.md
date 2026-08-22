@@ -2,7 +2,7 @@
 
 ## 1. 验收结论
 
-P2.3-A 功能实现和本地自动化门禁通过，尚未提交、推送或部署生产。
+P2.3-A 已提交、部署并完成生产健康验收。
 
 已验证：
 
@@ -66,9 +66,10 @@ npm run build
 - `vue-tsc`：通过。
 - Vite production build：通过。
 
-## 5. 尚未完成
+## 5. 生产验收
 
-- 尚未提交或推送 Git。
-- 尚未运行 GitHub Actions CI。
-- 尚未部署生产和执行真实 Server 重启接管演练。
-- P2.3-B/C 不在本次 P2.3-A 验收范围。
+- 生产提交：`b1ea13be18303b41305f492aa1f021c6c6b6bf00`。
+- GitHub Actions 生产部署：Run `32572712131`，成功。
+- Flyway V33、Server、Worker、Web 和生产健康检查通过。
+- 首次版本 `17c2405` 因 `AgentEvaluationQueueWorker` 构造函数选择失败触发自动回滚；`b1ea13b` 显式标记生产构造函数后重新部署成功。
+- P2.3-A 生产闭环已关闭；普通聊天跨实例执行由 P2.3-B 继续建设。

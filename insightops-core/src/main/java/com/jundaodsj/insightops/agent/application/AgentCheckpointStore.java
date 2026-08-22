@@ -15,6 +15,8 @@ public interface AgentCheckpointStore {
 
     Optional<Checkpoint> findOwned(UUID checkpointId, UUID workspaceId, UUID userId);
 
+    Optional<Checkpoint> findLatestForRun(UUID runId, UUID workspaceId, UUID userId);
+
     boolean consume(UUID checkpointId, UUID resumedRunId, Instant consumedAt);
 
     void linkResume(UUID planId, UUID checkpointId, Instant resumedAt);

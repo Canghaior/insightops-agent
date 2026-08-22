@@ -65,6 +65,26 @@ public final class AgentRunExecutionBudget {
         this.maxCostMicros = toMicros(maxEstimatedCostCny);
     }
 
+    public AgentRunExecutionBudget(
+            Duration runTimeout,
+            int maxTotalAttempts,
+            Duration maxToolDuration,
+            int maxNodes,
+            long maxModelTokens,
+            BigDecimal maxEstimatedCostCny,
+            AgentOrchestrationStore.BudgetSnapshot restored) {
+        this(runTimeout, maxTotalAttempts, maxToolDuration, maxNodes,
+                maxModelTokens, maxEstimatedCostCny);
+        if (restored == null) return;
+        remainingAttempts.set(Math.max(0, maxTotalAttempts - restored.usedToolAttempts()));
+        remainingNodes.set(Math.max(0, maxNodes - restored.usedNodes()));
+        usedModelTokens.set(Math.max(0, restored.usedModelTokens()));
+        if (restored.estimatedCostCny() != null && restored.estimatedCostCny().signum() > 0) {
+            usedCostMicros.set(toMicros(restored.estimatedCostCny()));
+        }
+        exhaustionReason = restored.exhaustionReason();
+    }
+
     public Duration remaining() {
         Duration value = Duration.between(Instant.now(), deadline);
         return value.isNegative() ? Duration.ZERO : value;

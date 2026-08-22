@@ -63,6 +63,15 @@ insightops:
       lease-seconds: ${AGENT_EVALUATION_QUEUE_LEASE_SECONDS:180}
       heartbeat-seconds: ${AGENT_EVALUATION_QUEUE_HEARTBEAT_SECONDS:30}
       max-attempts: ${AGENT_EVALUATION_QUEUE_MAX_ATTEMPTS:3}
+    chat-queue:
+      enabled: ${AGENT_CHAT_QUEUE_ENABLED:true}
+      concurrency: ${AGENT_CHAT_QUEUE_CONCURRENCY:2}
+      poll-interval-ms: ${AGENT_CHAT_QUEUE_POLL_INTERVAL_MS:500}
+      initial-delay-ms: ${AGENT_CHAT_QUEUE_INITIAL_DELAY_MS:1000}
+      lease-seconds: ${AGENT_CHAT_QUEUE_LEASE_SECONDS:120}
+      heartbeat-seconds: ${AGENT_CHAT_QUEUE_HEARTBEAT_SECONDS:15}
+      max-attempts: ${AGENT_CHAT_QUEUE_MAX_ATTEMPTS:3}
+      event-poll-ms: ${AGENT_CHAT_QUEUE_EVENT_POLL_MS:200}
   report:
     pdf-font-path: ${REPORT_PDF_FONT_PATH:}
   knowledge:

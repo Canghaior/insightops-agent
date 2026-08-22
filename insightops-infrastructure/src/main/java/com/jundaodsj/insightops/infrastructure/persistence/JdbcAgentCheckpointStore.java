@@ -97,6 +97,28 @@ public class JdbcAgentCheckpointStore implements AgentCheckpointStore {
     }
 
     @Override
+    public Optional<Checkpoint> findLatestForRun(
+            UUID runId, UUID workspaceId, UUID userId) {
+        return jdbcClient.sql("""
+                        select id, plan_id, run_id, workspace_id, user_id, sequence, reason,
+                               status, state_json::text, budget_json::text, created_at, resumed_run_id
+                        from agent_plan_checkpoint
+                        where run_id = :runId and workspace_id = :workspaceId
+                          and user_id = :userId and status = 'AVAILABLE'
+                        order by created_at desc, sequence desc limit 1
+                        """)
+                .param("runId", runId).param("workspaceId", workspaceId)
+                .param("userId", userId)
+                .query((rs, rowNum) -> new Checkpoint(
+                        rs.getObject("id", UUID.class), rs.getObject("plan_id", UUID.class),
+                        rs.getObject("run_id", UUID.class), rs.getObject("workspace_id", UUID.class),
+                        rs.getObject("user_id", UUID.class), rs.getInt("sequence"),
+                        rs.getString("reason"), rs.getString("status"), rs.getString("state_json"),
+                        rs.getString("budget_json"), rs.getObject("created_at", OffsetDateTime.class).toInstant(),
+                        rs.getObject("resumed_run_id", UUID.class))).optional();
+    }
+
+    @Override
     public boolean consume(UUID checkpointId, UUID resumedRunId, Instant consumedAt) {
         return jdbcClient.sql("""
                         update agent_plan_checkpoint

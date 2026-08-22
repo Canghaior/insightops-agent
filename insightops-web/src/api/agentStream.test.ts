@@ -1,9 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createSseParser, parseSseEnvelope } from './agentStream'
+import { createSseParser, parseSseEnvelope, streamChat } from './agentStream'
 
 const started = '{"type":"started","runId":"run-1","sessionId":"session-1","sequence":1}'
 const delta = '{"type":"delta","runId":"run-1","sequence":2,"content":"Spring AI"}'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('parseSseEnvelope', () => {
   it('parses a valid chat event', () => {
@@ -97,5 +101,42 @@ describe('createSseParser', () => {
       type: 'plan_paused', runId: 'run-4', sequence: 5, content: 'checkpoint-1',
     }))
     expect(paused).toMatchObject({ type: 'plan_paused', content: 'checkpoint-1' })
+  })
+
+  it('parses a durable worker recovery event', () => {
+    const recovered = parseSseEnvelope(JSON.stringify({
+      type: 'run_recovered', runId: 'run-5', sequence: 8,
+      content: '从安全点恢复', orchestration: { status: 'RECOVERING', dependencyIds: [] },
+    }))
+
+    expect(recovered).toMatchObject({ type: 'run_recovered', runId: 'run-5', sequence: 8 })
+    expect(recovered.orchestration).toMatchObject({ status: 'RECOVERING' })
+  })
+
+  it('reconnects from the durable sequence cursor after a response ends early', async () => {
+    const initialWire = 'data: {"type":"started","runId":"run-durable","sequence":1}\n\n'
+    const resumedWire = [
+      'data: {"type":"run_recovered","runId":"run-durable","sequence":2}\n\n',
+      'data: {"type":"delta","runId":"run-durable","sequence":3,"content":"done"}\n\n',
+      'data: {"type":"completed","runId":"run-durable","sequence":4}\n\n',
+    ].join('')
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(initialWire, { status: 200 }))
+      .mockResolvedValueOnce(new Response(resumedWire, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const events: ReturnType<typeof parseSseEnvelope>[] = []
+
+    await streamChat('question', (event) => events.push(event), new AbortController().signal)
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1]?.[0]).toContain(
+      '/chat/streams/run-durable?afterSequence=1',
+    )
+    expect(events.map((event) => [event.type, event.sequence])).toEqual([
+      ['started', 1],
+      ['run_recovered', 2],
+      ['delta', 3],
+      ['completed', 4],
+    ])
   })
 })

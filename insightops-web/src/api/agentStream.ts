@@ -36,7 +36,7 @@ export interface ChatCitation {
 }
 
 export interface ChatStreamEvent {
-  type: 'started' | 'plan_created' | 'plan_node_state' | 'plan_paused' | 'budget_updated' | 'budget_exhausted' | 'tool_started' | 'tool_retrying' | 'tool_approval_required' | 'tool_completed' | 'tool_failed' | 'delta' | 'completed' | 'cancelled' | 'error'
+  type: 'started' | 'run_recovered' | 'plan_created' | 'plan_node_state' | 'plan_paused' | 'budget_updated' | 'budget_exhausted' | 'tool_started' | 'tool_retrying' | 'tool_approval_required' | 'tool_completed' | 'tool_failed' | 'delta' | 'completed' | 'cancelled' | 'error'
   runId: string
   sessionId: string
   sequence: number
@@ -61,6 +61,7 @@ export interface ChatStreamEvent {
 
 const eventTypes = new Set<ChatStreamEvent['type']>([
   'started',
+  'run_recovered',
   'plan_created',
   'plan_node_state',
   'plan_paused',
@@ -124,6 +125,36 @@ export function createSseParser(onEvent: (event: ChatStreamEvent) => void) {
   }
 }
 
+async function consumeSseResponse(
+  response: Response,
+  onEvent: (event: ChatStreamEvent) => void,
+): Promise<void> {
+  if (!response.ok) throw new Error(`聊天流请求失败：HTTP ${response.status}`)
+  if (!response.body) throw new Error('浏览器没有收到聊天流响应体')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const parser = createSseParser(onEvent)
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      parser.push(decoder.decode())
+      parser.finish()
+      return
+    }
+    parser.push(decoder.decode(value, { stream: true }))
+  }
+}
+
+function reconnectDelay(signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const timer = globalThis.setTimeout(resolve, 500)
+    signal.addEventListener('abort', () => {
+      globalThis.clearTimeout(timer)
+      reject(new globalThis.DOMException('Aborted', 'AbortError'))
+    }, { once: true })
+  })
+}
+
 export async function streamChat(
   message: string,
   onEvent: (event: ChatStreamEvent) => void,
@@ -132,7 +163,17 @@ export async function streamChat(
   resumeCheckpointId?: string,
 ): Promise<void> {
   const baseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
-  const response = await fetch(`${baseUrl}/chat/streams`, {
+  let activeRunId = ''
+  let lastSequence = 0
+  let terminal = false
+  const forward = (event: ChatStreamEvent) => {
+    activeRunId = event.runId
+    lastSequence = Math.max(lastSequence, event.sequence)
+    terminal = event.type === 'completed' || event.type === 'cancelled'
+      || event.type === 'error' || event.type === 'plan_paused'
+    onEvent(event)
+  }
+  const initial = await fetch(`${baseUrl}/chat/streams`, {
     method: 'POST',
     headers: {
       Accept: 'text/event-stream',
@@ -147,25 +188,24 @@ export async function streamChat(
     credentials: 'include',
     signal,
   })
-
-  if (!response.ok) {
-    throw new Error(`聊天流请求失败：HTTP ${response.status}`)
-  }
-  if (!response.body) {
-    throw new Error('浏览器没有收到聊天流响应体')
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  const parser = createSseParser(onEvent)
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) {
-      parser.push(decoder.decode())
-      parser.finish()
-      return
+  await consumeSseResponse(initial, forward)
+  while (activeRunId && !terminal && !signal.aborted) {
+    await reconnectDelay(signal)
+    try {
+      const resumed = await fetch(
+        `${baseUrl}/chat/streams/${encodeURIComponent(activeRunId)}?afterSequence=${lastSequence}`,
+        {
+          method: 'GET',
+          headers: { Accept: 'text/event-stream' },
+          credentials: 'include',
+          signal,
+        },
+      )
+      await consumeSseResponse(resumed, forward)
+    } catch (error) {
+      if (signal.aborted) throw error
+      // A different Server instance may be taking over; retry from the durable event cursor.
     }
-    parser.push(decoder.decode(value, { stream: true }))
   }
 }
 

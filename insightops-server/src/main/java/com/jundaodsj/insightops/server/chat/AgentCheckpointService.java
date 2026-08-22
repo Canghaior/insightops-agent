@@ -63,6 +63,28 @@ public class AgentCheckpointService {
         }
     }
 
+    public RecoveryState restoreForTakeover(
+            UUID checkpointId, UUID runId, UUID workspaceId, UUID userId) {
+        AgentCheckpointStore.Checkpoint checkpoint = checkpointId == null
+                ? store.findLatestForRun(runId, workspaceId, userId).orElseThrow(
+                        () -> new CheckpointException("RECOVERY_CHECKPOINT_NOT_FOUND"))
+                : store.findOwned(checkpointId, workspaceId, userId).orElseThrow(
+                        () -> new CheckpointException("RECOVERY_CHECKPOINT_NOT_FOUND"));
+        if (!runId.equals(checkpoint.sourceRunId()) || !"AVAILABLE".equals(checkpoint.status())) {
+            throw new CheckpointException("RECOVERY_CHECKPOINT_INVALID");
+        }
+        try {
+            return new RecoveryState(
+                    checkpoint.id(),
+                    objectMapper.readValue(checkpoint.stateJson(), ResumeState.class),
+                    objectMapper.readValue(
+                            checkpoint.budgetJson(), AgentOrchestrationStore.BudgetSnapshot.class));
+        }
+        catch (JsonProcessingException exception) {
+            throw new CheckpointException("RECOVERY_CHECKPOINT_STATE_INVALID", exception);
+        }
+    }
+
     public void linkResume(UUID planId, UUID checkpointId) {
         store.linkResume(planId, checkpointId, Instant.now());
     }
@@ -96,6 +118,12 @@ public class AgentCheckpointService {
 
         public LinkedHashSet<String> sourceSet() { return new LinkedHashSet<>(sourceUrls); }
         public LinkedHashSet<String> signatureSet() { return new LinkedHashSet<>(executedSignatures); }
+    }
+
+    public record RecoveryState(
+            UUID checkpointId,
+            ResumeState resumeState,
+            AgentOrchestrationStore.BudgetSnapshot budget) {
     }
 
     public static final class CheckpointException extends RuntimeException {

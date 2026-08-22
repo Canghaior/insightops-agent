@@ -14,7 +14,14 @@ public interface AgentPlanningModelGateway {
             List<ToolExchange> exchanges,
             List<FunctionDefinition> tools,
             double temperature,
-            int maxOutputTokens) {
+            int maxOutputTokens,
+            String modelOverride) {
+
+        public AgentPlanRequest(
+                String systemPrompt, String userPrompt, List<ToolExchange> exchanges,
+                List<FunctionDefinition> tools, double temperature, int maxOutputTokens) {
+            this(systemPrompt, userPrompt, exchanges, tools, temperature, maxOutputTokens, null);
+        }
 
         public AgentPlanRequest {
             if (systemPrompt == null || systemPrompt.isBlank()) {
@@ -34,6 +41,8 @@ public interface AgentPlanningModelGateway {
             if (maxOutputTokens < 1 || maxOutputTokens > 8192) {
                 throw new IllegalArgumentException("maxOutputTokens must be between 1 and 8192");
             }
+            modelOverride = modelOverride == null || modelOverride.isBlank()
+                    ? null : modelOverride.strip();
         }
     }
 

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentCheckpointStore;
+import com.jundaodsj.insightops.agent.application.AgentEvaluationStore;
 import com.jundaodsj.insightops.agent.application.AgentLoopAuditStore;
 import com.jundaodsj.insightops.agent.application.AgentOrchestrationStore;
 import com.jundaodsj.insightops.agent.application.AgentTaskGraphValidator;
@@ -93,6 +94,8 @@ public class AgentLoopService {
     private AgentCheckpointService checkpointService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private AgentCostGovernanceService costGovernanceService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AgentEvaluationStore evaluationStore;
 
     public AgentLoopService(
             AgentPlanningModelGateway planningGateway,
@@ -127,7 +130,11 @@ public class AgentLoopService {
             LoopRequest request,
             AgentToolDispatcher.ProgressListener listener,
             BooleanSupplier active) {
-        List<FunctionDefinition> functions = functions(request.accessLevel());
+        AgentEvaluationStore.RuntimeProfile profile = request.plannerProfile() != null
+                ? request.plannerProfile()
+                : evaluationStore == null ? null
+                : evaluationStore.activeProfile(request.workspaceId()).orElse(null);
+        List<FunctionDefinition> functions = functions(request.accessLevel(), request.evaluationMode());
         if (functions.isEmpty()) throw new AgentLoopException("NO_AVAILABLE_TOOLS");
         List<ToolExchange> exchanges = new ArrayList<>();
         List<String> evidence = new ArrayList<>();
@@ -145,7 +152,7 @@ public class AgentLoopService {
         int maxRounds = Math.max(1, Math.min(12, modelProperties.maxToolRounds()));
         AgentOrchestrationStore.RunLimits limits = limits();
         AgentRunExecutionBudget budget = budget(limits);
-        reserveWorkspaceCost(request, limits);
+        reserveWorkspaceCost(request, limits, profile);
         AgentOrchestrationStore.PlanHandle planHandle = orchestrationStore.startRun(
                 request.runId(), limits, Instant.now());
         listener.onPlanCreated(planHandle.planId(), planHandle.version(),
@@ -182,9 +189,13 @@ public class AgentLoopService {
                 AgentPlanningModelGateway.AgentPlanResponse plan;
                 try {
                     plan = planningGateway.plan(new AgentPlanRequest(
-                            plannerPrompt(request.workspaceId(), request.userId()),
-                            effectiveUserPrompt, exchanges, functions, 0.0,
-                            Math.max(256, Math.min(1_024, modelProperties.maxOutputTokens()))));
+                            plannerPrompt(request.workspaceId(), request.userId(), profile),
+                            effectiveUserPrompt, exchanges, functions,
+                            profile == null ? 0.0 : profile.temperature(),
+                            profile == null
+                                    ? Math.max(256, Math.min(1_024, modelProperties.maxOutputTokens()))
+                                    : profile.maxOutputTokens(),
+                            profile == null ? null : profile.modelName()));
                     recordPlan(request.runId(), planStep, round, plan, planStartedAt);
                 }
                 catch (RuntimeException exception) {
@@ -230,6 +241,12 @@ public class AgentLoopService {
                     catch (ConditionalTaskGraph.GraphException exception) {
                         exchanges.add(new ToolExchange(plan.toolCalls().getFirst(),
                                 errorObservation(exception.errorCode())));
+                        continue;
+                    }
+                    if (request.evaluationMode() && submission.nodes().stream()
+                            .anyMatch(node -> "MUTATING".equals(node.riskLevel()))) {
+                        exchanges.add(new ToolExchange(submission.providerCall(),
+                                errorObservation("EVALUATION_WRITE_TOOL_FORBIDDEN")));
                         continue;
                     }
                     int graphReserved = budget.reserveNodes(submission.nodes().size());
@@ -278,6 +295,15 @@ public class AgentLoopService {
                     continue;
                 }
 
+                if (request.evaluationMode() && plan.toolCalls().stream()
+                        .anyMatch(call -> "MUTATING".equals(riskLevel(call.name())))) {
+                    PlannedToolCall forbidden = plan.toolCalls().stream()
+                            .filter(call -> "MUTATING".equals(riskLevel(call.name())))
+                            .findFirst().orElseThrow();
+                    exchanges.add(new ToolExchange(forbidden,
+                            errorObservation("EVALUATION_WRITE_TOOL_FORBIDDEN")));
+                    continue;
+                }
                 int reserved = budget.reserveNodes(plan.toolCalls().size());
                 if (reserved == 0) {
                     appendBudgetLimitation(evidence, budget.exhaustionReason());
@@ -622,8 +648,11 @@ public class AgentLoopService {
                 limits.maxNodes(), limits.maxModelTokens(), limits.maxEstimatedCostCny());
     }
 
-    private List<FunctionDefinition> functions(AgentToolDefinition.AccessLevel accessLevel) {
+    private List<FunctionDefinition> functions(
+            AgentToolDefinition.AccessLevel accessLevel, boolean evaluationMode) {
         List<FunctionDefinition> available = new ArrayList<>(registry.availableTo(accessLevel).stream()
+                .filter(definition -> !evaluationMode
+                        || definition.riskLevel() == AgentToolDefinition.RiskLevel.READ_ONLY)
                 .map(definition -> new FunctionDefinition(
                         definition.name(), definition.description(), json(definition.inputSchema())))
                 .toList());
@@ -647,7 +676,8 @@ public class AgentLoopService {
         return call.name() + "\n" + call.argumentsJson();
     }
 
-    private String plannerPrompt(UUID workspaceId, UUID userId) {
+    private String plannerPrompt(
+            UUID workspaceId, UUID userId, AgentEvaluationStore.RuntimeProfile profile) {
         List<Map<String, Object>> projects = projectStore.list(workspaceId).stream()
                 .filter(AdminProjectStore.ManagedProject::enabled)
                 .map(project -> Map.<String, Object>of(
@@ -663,7 +693,10 @@ public class AgentLoopService {
                         "name", connection.name(),
                         "allowedTools", parseOrText(connection.allowedToolsJson())))
                 .toList();
-        return PLANNER_PROMPT + "\n<available_projects>\n"
+        String releasePolicy = profile == null || profile.plannerPromptAppendix().isBlank()
+                ? "" : "\n<release_policy>\n" + profile.plannerPromptAppendix()
+                + "\n</release_policy>\n";
+        return PLANNER_PROMPT + releasePolicy + "\n<available_projects>\n"
                 + json(projects) + "\n</available_projects>\n"
                 + "projectIds 必须使用上述 id；不得自行生成 UUID。\n"
                 + "<available_mcp_connections>\n" + json(mcpConnections)
@@ -816,11 +849,15 @@ public class AgentLoopService {
         return value.length() <= limit ? value : value.substring(0, limit);
     }
 
-    private void reserveWorkspaceCost(LoopRequest request, AgentOrchestrationStore.RunLimits limits) {
+    private void reserveWorkspaceCost(
+            LoopRequest request, AgentOrchestrationStore.RunLimits limits,
+            AgentEvaluationStore.RuntimeProfile profile) {
         if (costGovernanceService == null) return;
         try {
+            int maxOutputTokens = profile == null
+                    ? modelProperties.maxOutputTokens() : profile.maxOutputTokens();
             costGovernanceService.reserve(request.runId(), request.workspaceId(), request.userId(),
-                    limits.maxModelTokens() + Math.max(256, modelProperties.maxOutputTokens()),
+                    limits.maxModelTokens() + Math.max(256, maxOutputTokens),
                     limits.maxEstimatedCostCny());
         }
         catch (AgentCostGovernanceService.CostQuotaException exception) {
@@ -868,12 +905,23 @@ public class AgentLoopService {
             boolean systemAdmin,
             AgentToolDefinition.AccessLevel accessLevel,
             String userPrompt,
-            UUID resumeCheckpointId) {
+            UUID resumeCheckpointId,
+            AgentEvaluationStore.RuntimeProfile plannerProfile,
+            boolean evaluationMode) {
+
+        public LoopRequest(
+                UUID runId, UUID workspaceId, UUID userId, boolean systemAdmin,
+                AgentToolDefinition.AccessLevel accessLevel, String userPrompt,
+                UUID resumeCheckpointId) {
+            this(runId, workspaceId, userId, systemAdmin, accessLevel, userPrompt,
+                    resumeCheckpointId, null, false);
+        }
 
         public LoopRequest(
                 UUID runId, UUID workspaceId, UUID userId, boolean systemAdmin,
                 AgentToolDefinition.AccessLevel accessLevel, String userPrompt) {
-            this(runId, workspaceId, userId, systemAdmin, accessLevel, userPrompt, null);
+            this(runId, workspaceId, userId, systemAdmin, accessLevel, userPrompt,
+                    null, null, false);
         }
     }
 

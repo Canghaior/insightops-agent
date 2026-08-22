@@ -82,7 +82,7 @@ public class SpringAiDeepSeekPlanningModelGateway implements AgentPlanningModelG
                 .map(SpringAiDeepSeekPlanningModelGateway::definitionOnlyCallback)
                 .toList();
         OpenAiChatOptions options = OpenAiChatOptions.builder()
-                .model(properties.model())
+                .model(request.modelOverride() == null ? properties.model() : request.modelOverride())
                 .temperature(request.temperature())
                 .maxTokens(request.maxOutputTokens())
                 .timeout(Duration.ofSeconds(properties.requestTimeoutSeconds()))

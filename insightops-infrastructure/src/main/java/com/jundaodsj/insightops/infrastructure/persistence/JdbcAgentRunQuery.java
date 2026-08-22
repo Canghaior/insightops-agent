@@ -37,6 +37,7 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                 select count(*)
                 from agent_run
                 where workspace_id = :workspaceId and owner_user_id = :userId
+                  and run_kind = 'CHAT'
                 """ + statusClause)
                 .param("workspaceId", actor.workspaceId())
                 .param("userId", actor.userId());
@@ -48,6 +49,7 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                        created_at, finished_at
                 from agent_run
                 where workspace_id = :workspaceId and owner_user_id = :userId
+                  and run_kind = 'CHAT'
                 """ + statusClause + " order by created_at desc limit :limit offset :offset")
                 .param("workspaceId", actor.workspaceId())
                 .param("userId", actor.userId())

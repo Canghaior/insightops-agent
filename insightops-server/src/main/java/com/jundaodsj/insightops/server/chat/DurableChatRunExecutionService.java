@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -57,6 +59,7 @@ public class DurableChatRunExecutionService {
     private final DurableChatRunTerminalService terminalService;
     private final DurableChatRunProperties properties;
     private final ScheduledExecutorService heartbeatExecutor;
+    private final ExecutorService attemptExecutor;
     private final DurableChatRunMetrics metrics;
     private final ObjectMapper json;
 
@@ -70,6 +73,7 @@ public class DurableChatRunExecutionService {
             DurableChatRunTerminalService terminalService,
             DurableChatRunProperties properties,
             @Qualifier("durableChatHeartbeatExecutor") ScheduledExecutorService heartbeatExecutor,
+            @Qualifier("durableChatAttemptExecutor") ExecutorService attemptExecutor,
             DurableChatRunMetrics metrics,
             ObjectMapper json) {
         this.store = store;
@@ -81,6 +85,7 @@ public class DurableChatRunExecutionService {
         this.terminalService = terminalService;
         this.properties = properties;
         this.heartbeatExecutor = heartbeatExecutor;
+        this.attemptExecutor = attemptExecutor;
         this.metrics = metrics;
         this.json = json;
     }
@@ -89,6 +94,56 @@ public class DurableChatRunExecutionService {
         StringBuffer answer = new StringBuffer();
         try (LeaseGuard guard = new LeaseGuard(lease)) {
             guard.renewNow();
+            Future<?> attempt = attemptExecutor.submit(
+                    () -> executeAttempt(lease, guard, answer));
+            try {
+                attempt.get(properties.runTimeout().toMillis(), TimeUnit.MILLISECONDS);
+            }
+            catch (TimeoutException exception) {
+                attempt.cancel(true);
+                throw new AgentRunTimedOutException();
+            }
+            catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                attempt.cancel(true);
+                throw new AgentRunLeaseLostException();
+            }
+            catch (ExecutionException exception) {
+                Throwable cause = exception.getCause();
+                if (cause instanceof RuntimeException runtime) throw runtime;
+                if (cause instanceof Error error) throw error;
+                throw new IllegalStateException(cause);
+            }
+        }
+        catch (AgentRunTimedOutException exception) {
+            fail(lease, answer, "TIMED_OUT", null);
+        }
+        catch (AgentLoopService.AgentLoopPausedException exception) {
+            ChatSseEvent event = planPaused(lease, exception.checkpointId());
+            if (!terminalService.pause(
+                    lease, answer.toString(), json(event), Instant.now())) metrics.leaseLost();
+        }
+        catch (AgentRunCancelledException exception) {
+            cancel(lease, answer);
+        }
+        catch (AgentRunLeaseLostException exception) {
+            metrics.leaseLost();
+        }
+        catch (ModelCallException exception) {
+            fail(lease, answer, exception.code().name(), null);
+        }
+        catch (AgentLoopService.AgentLoopException exception) {
+            if ("CANCELLED".equals(exception.errorCode())) cancel(lease, answer);
+            else fail(lease, answer, exception.errorCode(), null);
+        }
+        catch (RuntimeException exception) {
+            LOGGER.error("Durable chat run {} failed", lease.runId(), exception);
+            fail(lease, answer, failureCode(exception), null);
+        }
+    }
+
+    private void executeAttempt(
+            DurableChatRunStore.WorkLease lease, LeaseGuard guard, StringBuffer answer) {
             if (lease.attemptCount() > lease.maxAttempts()) {
                 fail(lease, answer, "AGENT_RUN_ATTEMPTS_EXHAUSTED", guard);
                 return;
@@ -125,29 +180,18 @@ public class DurableChatRunExecutionService {
                 throw new AgentRunLeaseLostException();
             }
             settleCostSafely(lease.runId(), completion.event().usage());
+    }
+
+    void timeout(DurableChatRunStore.WorkLease lease) {
+        Instant now = Instant.now();
+        if (terminalService.fail(
+                lease, "", "TIMED_OUT",
+                json(simple("error", lease, null, "TIMED_OUT")), now)) {
+            releaseCostSafely(lease.runId(), "TIMED_OUT");
+            LOGGER.warn("Durable chat run {} exceeded total timeout and was fenced",
+                    lease.runId());
         }
-        catch (AgentLoopService.AgentLoopPausedException exception) {
-            ChatSseEvent event = planPaused(lease, exception.checkpointId());
-            if (!terminalService.pause(
-                    lease, answer.toString(), json(event), Instant.now())) metrics.leaseLost();
-        }
-        catch (AgentRunCancelledException exception) {
-            cancel(lease, answer);
-        }
-        catch (AgentRunLeaseLostException exception) {
-            metrics.leaseLost();
-        }
-        catch (ModelCallException exception) {
-            fail(lease, answer, exception.code().name(), null);
-        }
-        catch (AgentLoopService.AgentLoopException exception) {
-            if ("CANCELLED".equals(exception.errorCode())) cancel(lease, answer);
-            else fail(lease, answer, exception.errorCode(), null);
-        }
-        catch (RuntimeException exception) {
-            LOGGER.error("Durable chat run {} failed", lease.runId(), exception);
-            fail(lease, answer, failureCode(exception), null);
-        }
+        else metrics.leaseLost();
     }
 
     private Completion streamAnswer(
@@ -525,5 +569,8 @@ public class DurableChatRunExecutionService {
     }
 
     private static final class AgentRunCancelledException extends RuntimeException {
+    }
+
+    private static final class AgentRunTimedOutException extends RuntimeException {
     }
 }

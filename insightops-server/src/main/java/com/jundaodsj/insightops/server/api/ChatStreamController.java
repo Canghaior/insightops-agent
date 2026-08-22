@@ -14,6 +14,7 @@ import com.jundaodsj.insightops.model.application.ModelUsage;
 import com.jundaodsj.insightops.model.application.StreamingChatModelGateway;
 import com.jundaodsj.insightops.server.chat.AgentLoopService;
 import com.jundaodsj.insightops.server.chat.ChatStreamSessionRegistry;
+import com.jundaodsj.insightops.server.chat.ChatQuickReplyPolicy;
 import com.jundaodsj.insightops.server.chat.DurableChatRunCoordinator;
 import com.jundaodsj.insightops.server.chat.KnowledgeRagService;
 import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
@@ -43,6 +44,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -171,6 +173,11 @@ public class ChatStreamController {
                 traceId,
                 userMessage,
                 startedAt);
+        Optional<String> quickReply = ChatQuickReplyPolicy.answer(
+                userMessage, modelProperties.model());
+        if (quickReply.isPresent()) {
+            return quickReply(runUuid, sessionId, traceId, quickReply.orElseThrow(), startedAt);
+        }
         if (durableChatRuns != null && durableChatRuns.enabled() && agentLoopService != null) {
             try {
                 return durableChatRuns.enqueueAndOpen(
@@ -706,6 +713,29 @@ public class ChatStreamController {
                     HttpStatus.NOT_FOUND, "Agent run not found");
         }
         return durableChatRuns.open(CurrentAccount.actor(request), runUuid, afterSequence);
+    }
+
+    private SseEmitter quickReply(
+            UUID runId, UUID sessionId, String traceId,
+            String answer, Instant startedAt) {
+        Instant finishedAt = Instant.now();
+        ModelUsage usage = ModelUsage.unknown();
+        chatRunStore.succeedRunWithCitations(
+                runId, answer, "insightops", modelProperties.model(),
+                usage, List.of(), finishedAt);
+        SseEmitter emitter = new SseEmitter(15_000L);
+        send(emitter, ChatSseEvent.started(
+                runId.toString(), sessionId, 1, traceId));
+        send(emitter, ChatSseEvent.delta(
+                runId.toString(), sessionId, 2, traceId, answer));
+        send(emitter, ChatSseEvent.completed(
+                runId.toString(), sessionId, 3, traceId,
+                ChatStreamEvent.completed(
+                        "insightops", modelProperties.model(), usage,
+                        Duration.between(startedAt, finishedAt), Duration.ZERO),
+                List.of(), List.of()));
+        emitter.complete();
+        return emitter;
     }
 
     @PostMapping("/{runId}/cancel")

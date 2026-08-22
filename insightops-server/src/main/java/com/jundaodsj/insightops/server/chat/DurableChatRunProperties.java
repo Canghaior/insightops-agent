@@ -17,6 +17,7 @@ public class DurableChatRunProperties {
     private int heartbeatSeconds = 15;
     private int maxAttempts = 3;
     private int eventPollMs = 200;
+    private int runTimeoutSeconds = 90;
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -34,6 +35,10 @@ public class DurableChatRunProperties {
     public void setMaxAttempts(int maxAttempts) { this.maxAttempts = maxAttempts; }
     public int getEventPollMs() { return eventPollMs; }
     public void setEventPollMs(int eventPollMs) { this.eventPollMs = eventPollMs; }
+    public int getRunTimeoutSeconds() { return runTimeoutSeconds; }
+    public void setRunTimeoutSeconds(int runTimeoutSeconds) {
+        this.runTimeoutSeconds = runTimeoutSeconds;
+    }
 
     public int safeConcurrency() { return Math.max(1, Math.min(16, concurrency)); }
     public int safeMaxAttempts() { return Math.max(1, Math.min(20, maxAttempts)); }
@@ -44,5 +49,8 @@ public class DurableChatRunProperties {
     }
     public Duration eventPollInterval() {
         return Duration.ofMillis(Math.max(50, Math.min(2_000, eventPollMs)));
+    }
+    public Duration runTimeout() {
+        return Duration.ofSeconds(Math.max(1, Math.min(900, runTimeoutSeconds)));
     }
 }

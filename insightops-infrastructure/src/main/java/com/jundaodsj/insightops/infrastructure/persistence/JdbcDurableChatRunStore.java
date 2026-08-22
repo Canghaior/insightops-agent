@@ -116,6 +116,67 @@ public class JdbcDurableChatRunStore implements DurableChatRunStore {
 
     @Override
     @Transactional
+    public List<WorkLease> claimTimedOut(
+            String workerId, int limit, Duration maximumAge,
+            Duration leaseDuration, Instant now) {
+        Instant cutoff = now.minus(maximumAge);
+        List<Claimable> rows = jdbc.sql("""
+                        select run_id, workspace_id, owner_user_id, session_id, trace_id,
+                               system_admin, access_level, user_prompt, contextual_prompt,
+                               resume_checkpoint_id, recovery_checkpoint_id, status,
+                               attempt_count, max_attempts, lease_expires_at
+                        from agent_run_work
+                        where status in ('QUEUED', 'RUNNING') and created_at <= :cutoff
+                        order by created_at, run_id
+                        for update skip locked
+                        limit :limit
+                        """)
+                .param("cutoff", Timestamp.from(cutoff))
+                .param("limit", Math.max(1, Math.min(500, limit)))
+                .query((rs, row) -> new Claimable(
+                        rs.getObject("run_id", UUID.class),
+                        rs.getObject("workspace_id", UUID.class),
+                        rs.getObject("owner_user_id", UUID.class),
+                        rs.getObject("session_id", UUID.class), rs.getString("trace_id"),
+                        rs.getBoolean("system_admin"), rs.getString("access_level"),
+                        rs.getString("user_prompt"), rs.getString("contextual_prompt"),
+                        rs.getObject("resume_checkpoint_id", UUID.class),
+                        rs.getObject("recovery_checkpoint_id", UUID.class),
+                        rs.getString("status"), rs.getInt("attempt_count"),
+                        rs.getInt("max_attempts"),
+                        instant(rs.getTimestamp("lease_expires_at")))).list();
+        List<WorkLease> leases = new ArrayList<>();
+        for (Claimable row : rows) {
+            UUID token = UUID.randomUUID();
+            Instant expiresAt = now.plus(leaseDuration);
+            int updated = jdbc.sql("""
+                            update agent_run_work
+                            set status = 'RUNNING', claimed_by = :workerId,
+                                lease_token = :leaseToken, heartbeat_at = :now,
+                                lease_expires_at = :expiresAt, updated_at = :now
+                            where run_id = :runId and status in ('QUEUED', 'RUNNING')
+                              and created_at <= :cutoff
+                            """)
+                    .param("workerId", workerId).param("leaseToken", token)
+                    .param("now", Timestamp.from(now))
+                    .param("expiresAt", Timestamp.from(expiresAt))
+                    .param("runId", row.runId())
+                    .param("cutoff", Timestamp.from(cutoff)).update();
+            if (updated != 1) continue;
+            fenceTimedOutArtifacts(row.runId(), now);
+            leases.add(new WorkLease(
+                    row.runId(), row.workspaceId(), row.ownerUserId(), row.sessionId(),
+                    row.traceId(), row.systemAdmin(), row.accessLevel(), row.userPrompt(),
+                    row.contextualPrompt(), row.resumeCheckpointId(),
+                    row.recoveryCheckpointId(), token, workerId,
+                    Math.max(1, row.attemptCount()), Math.max(1, row.maxAttempts()),
+                    "RUNNING".equals(row.status()), Duration.ZERO, expiresAt));
+        }
+        return List.copyOf(leases);
+    }
+
+    @Override
+    @Transactional
     public LeaseControl renewLease(
             UUID runId, UUID leaseToken, Duration leaseDuration, Instant now) {
         int updated = jdbc.sql("""
@@ -326,6 +387,34 @@ public class JdbcDurableChatRunStore implements DurableChatRunStore {
                         rs.getLong("oldest_queued_age_seconds"),
                         rs.getLong("oldest_heartbeat_age_seconds")))
                 .single();
+    }
+
+    private void fenceTimedOutArtifacts(UUID runId, Instant now) {
+        Timestamp timestamp = Timestamp.from(now);
+        jdbc.sql("""
+                        update agent_plan set status = 'SUPERSEDED', finished_at = :now
+                        where run_id = :runId and status in ('ACTIVE', 'PAUSE_REQUESTED')
+                        """).param("runId", runId).param("now", timestamp).update();
+        jdbc.sql("""
+                        update agent_plan_node
+                        set status = 'CANCELLED', error_code = 'AGENT_RUN_TIMED_OUT',
+                            finished_at = :now, updated_at = :now
+                        where run_id = :runId
+                          and status in ('PENDING', 'BLOCKED', 'RUNNING', 'WAITING_APPROVAL')
+                        """).param("runId", runId).param("now", timestamp).update();
+        jdbc.sql("""
+                        update tool_call
+                        set status = 'FAILED', error_message = 'AGENT_RUN_TIMED_OUT',
+                            finished_at = :now
+                        where run_id = :runId and status in ('REQUESTED', 'RUNNING')
+                        """).param("runId", runId).param("now", timestamp).update();
+        jdbc.sql("""
+                        update agent_step
+                        set status = 'FAILED', finished_at = :now,
+                            output_payload = coalesce(output_payload, '{}'::jsonb)
+                                || '{"errorCode":"AGENT_RUN_TIMED_OUT"}'::jsonb
+                        where run_id = :runId and status = 'RUNNING'
+                        """).param("runId", runId).param("now", timestamp).update();
     }
 
     private long nextEventSequence(UUID runId) {

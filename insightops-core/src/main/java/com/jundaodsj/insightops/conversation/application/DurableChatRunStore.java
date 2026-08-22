@@ -16,6 +16,10 @@ public interface DurableChatRunStore {
     List<WorkLease> claim(
             String workerId, int limit, int maxAttempts, Duration leaseDuration, Instant now);
 
+    List<WorkLease> claimTimedOut(
+            String workerId, int limit, Duration maximumAge,
+            Duration leaseDuration, Instant now);
+
     LeaseControl renewLease(
             UUID runId, UUID leaseToken, Duration leaseDuration, Instant now);
 

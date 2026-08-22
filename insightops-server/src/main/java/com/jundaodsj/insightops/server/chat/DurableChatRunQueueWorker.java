@@ -54,6 +54,13 @@ public class DurableChatRunQueueWorker {
             fixedDelayString = "${insightops.agent.chat-queue.poll-interval-ms:500}")
     public void poll() {
         if (!properties.isEnabled()) return;
+        List<DurableChatRunStore.WorkLease> timedOut = store.claimTimedOut(
+                workerId + "-timeout", 100, properties.runTimeout(),
+                properties.leaseDuration(), Instant.now());
+        for (DurableChatRunStore.WorkLease lease : timedOut) {
+            service.timeout(lease);
+        }
+
         int capacity = properties.safeConcurrency() - inFlight.get();
         if (capacity <= 0) return;
         List<DurableChatRunStore.WorkLease> leases = store.claim(

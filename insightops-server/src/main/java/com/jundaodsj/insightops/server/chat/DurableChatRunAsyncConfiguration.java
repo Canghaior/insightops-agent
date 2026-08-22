@@ -22,6 +22,12 @@ public class DurableChatRunAsyncConfiguration {
                 .name("durable-chat-heartbeat-", 0).factory());
     }
 
+    @Bean(name = "durableChatAttemptExecutor", destroyMethod = "close")
+    ExecutorService durableChatAttemptExecutor() {
+        return Executors.newThreadPerTaskExecutor(Thread.ofVirtual()
+                .name("durable-chat-attempt-", 0).factory());
+    }
+
     @Bean(name = "durableChatStreamExecutor", destroyMethod = "close")
     ExecutorService durableChatStreamExecutor() {
         return Executors.newThreadPerTaskExecutor(Thread.ofVirtual()

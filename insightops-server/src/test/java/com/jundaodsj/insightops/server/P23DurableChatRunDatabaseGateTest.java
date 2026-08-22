@@ -203,6 +203,56 @@ class P23DurableChatRunDatabaseGateTest {
                 .containsExactly("started", "run_recovered", "cancelled");
     }
 
+    @Test
+    void forceClaimsRunAfterTotalTimeoutAndFencesTheOldWorker() {
+        JdbcClient jdbc = JdbcClient.create(dataSource);
+        JdbcDurableChatRunStore store = new JdbcDurableChatRunStore(jdbc);
+        UUID runId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        Instant started = Instant.parse("2026-08-22T12:00:00Z");
+
+        jdbc.sql("""
+                        insert into conversation_session
+                            (id, workspace_id, owner_user_id, title, status, created_at, updated_at)
+                        values (:id, :workspaceId, :userId, 'P2.3 timeout gate',
+                                'ACTIVE', :now, :now)
+                        """).param("id", sessionId).param("workspaceId", WORKSPACE)
+                .param("userId", USER).param("now", Timestamp.from(started)).update();
+        jdbc.sql("""
+                        insert into agent_run
+                            (id, workspace_id, owner_user_id, session_id, trace_id, status,
+                             question, started_at, created_at)
+                        values (:id, :workspaceId, :userId, :sessionId, :traceId, 'RUNNING',
+                                'timeout gate', :now, :now)
+                        """).param("id", runId).param("workspaceId", WORKSPACE)
+                .param("userId", USER).param("sessionId", sessionId)
+                .param("traceId", "p23-timeout-" + runId)
+                .param("now", Timestamp.from(started)).update();
+        tx(() -> {
+            store.enqueue(new DurableChatRunStore.WorkDraft(
+                            runId, WORKSPACE, USER, sessionId, "p23-timeout-" + runId,
+                            true, "SYSTEM_ADMIN", "question", "context", null, 3, started),
+                    "{\"type\":\"started\"}");
+            return null;
+        });
+
+        DurableChatRunStore.WorkLease first = tx(() -> store.claim(
+                "server-a", 1, 3, Duration.ofSeconds(120), started).getFirst());
+        DurableChatRunStore.WorkLease timedOut = tx(() -> store.claimTimedOut(
+                "timeout-sweeper", 1, Duration.ofSeconds(90),
+                Duration.ofSeconds(30), started.plusSeconds(91)).getFirst());
+
+        assertThat(timedOut.runId()).isEqualTo(runId);
+        assertThat(timedOut.reclaimed()).isTrue();
+        assertThat(timedOut.leaseToken()).isNotEqualTo(first.leaseToken());
+        assertThat(tx(() -> store.appendEvent(runId, first.leaseToken(),
+                "delta", "{\"content\":\"stale\"}", started.plusSeconds(92)))).isEmpty();
+        assertThat(tx(() -> store.markTerminal(
+                runId, timedOut.leaseToken(), "FAILED", "TIMED_OUT",
+                "", "{\"type\":\"error\"}", started.plusSeconds(92)))).isTrue();
+        assertThat(store.findOwned(ACTOR, runId).orElseThrow().status()).isEqualTo("FAILED");
+    }
+
     private static <T> T tx(Supplier<T> action) {
         return transactions.execute(status -> action.get());
     }

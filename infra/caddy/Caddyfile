@@ -3,7 +3,15 @@
 }
 
 {$APP_ADDRESS:http://localhost} {
-    encode zstd gzip
+    @not_chat_stream not path /api/v1/chat/streams*
+    encode @not_chat_stream zstd gzip
+
+    @chat_stream path /api/v1/chat/streams*
+    handle @chat_stream {
+        reverse_proxy server:18080 {
+            flush_interval -1
+        }
+    }
 
     @api path /api/*
     handle @api {

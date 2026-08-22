@@ -61,6 +61,30 @@ class ChatStreamControllerTest {
     }
 
     @Test
+    void shouldAnswerModelIdentityWithoutUsingTheCongestedAgentQueue() {
+        RecordingChatRunStore store = new RecordingChatRunStore();
+        AtomicBoolean modelCalled = new AtomicBoolean();
+        ChatStreamController controller = new ChatStreamController(
+                (request, listener) -> {
+                    modelCalled.set(true);
+                    return session(new AtomicBoolean());
+                },
+                new ChatStreamSessionRegistry(),
+                properties(),
+                store,
+                noTool(),
+                new P0ChatGuardrail(), noMemory());
+
+        controller.stream(
+                new ChatStreamController.ChatStreamRequest("你是什么模型"),
+                request("trace-quick-reply"));
+
+        assertThat(modelCalled).isFalse();
+        assertThat(store.status).isEqualTo("SUCCEEDED");
+        assertThat(store.answer).contains("deepseek-v4-flash");
+    }
+
+    @Test
     void shouldRejectNonOfficialReleaseCitationBeforeCallingTheModel() {
         RecordingChatRunStore store = new RecordingChatRunStore();
         AtomicBoolean modelCalled = new AtomicBoolean();

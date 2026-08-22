@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createSseParser, parseSseEnvelope, streamChat } from './agentStream'
+import { CHAT_RUN_ID_HEADER, createSseParser, parseSseEnvelope, streamChat } from './agentStream'
 
 const started = '{"type":"started","runId":"run-1","sessionId":"session-1","sequence":1}'
 const delta = '{"type":"delta","runId":"run-1","sequence":2,"content":"Spring AI"}'
@@ -137,6 +137,32 @@ describe('createSseParser', () => {
       ['run_recovered', 2],
       ['delta', 3],
       ['completed', 4],
+    ])
+  })
+
+  it('replays from sequence zero when the accepted initial stream has no events', async () => {
+    const resumedWire = [
+      'data: {"type":"started","runId":"run-from-header","sessionId":"session-2","sequence":1}\n\n',
+      'data: {"type":"delta","runId":"run-from-header","sequence":2,"content":"restored"}\n\n',
+      'data: {"type":"completed","runId":"run-from-header","sequence":3}\n\n',
+    ].join('')
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', {
+        status: 200,
+        headers: { [CHAT_RUN_ID_HEADER]: 'run-from-header' },
+      }))
+      .mockResolvedValueOnce(new Response(resumedWire, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const events: ReturnType<typeof parseSseEnvelope>[] = []
+
+    await streamChat('question', (event) => events.push(event), new AbortController().signal)
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1]?.[0]).toContain(
+      '/chat/streams/run-from-header?afterSequence=0',
+    )
+    expect(events.map((event) => [event.type, event.sequence])).toEqual([
+      ['started', 1], ['delta', 2], ['completed', 3],
     ])
   })
 })

@@ -7,6 +7,7 @@ import com.jundaodsj.insightops.conversation.application.DurableChatRunStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -20,6 +21,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Replays database-backed chat events; subscribers may connect to any Server instance. */
 @Service
 public class DurableChatStreamService {
+
+    static final String RUN_ID_HEADER = "X-InsightOps-Run-Id";
 
     private final DurableChatRunStore store;
     private final DurableChatRunProperties properties;
@@ -45,7 +48,8 @@ public class DurableChatStreamService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Agent run not found");
         }
         metrics.streamOpened(afterSequence > 0);
-        SseEmitter emitter = new SseEmitter(Duration.ofMinutes(15).toMillis());
+        SseEmitter emitter = new RunAwareSseEmitter(
+                runId, Duration.ofMinutes(15).toMillis());
         AtomicBoolean connected = new AtomicBoolean(true);
         emitter.onCompletion(() -> connected.set(false));
         emitter.onError(error -> connected.set(false));
@@ -91,6 +95,24 @@ public class DurableChatStreamService {
         catch (RuntimeException exception) {
             metrics.streamDisconnected();
             if (connected.get()) emitter.completeWithError(exception);
+        }
+    }
+
+    static final class RunAwareSseEmitter extends SseEmitter {
+
+        private final UUID runId;
+
+        RunAwareSseEmitter(UUID runId, long timeout) {
+            super(timeout);
+            this.runId = runId;
+        }
+
+        @Override
+        protected void extendResponse(ServerHttpResponse outputMessage) {
+            super.extendResponse(outputMessage);
+            outputMessage.getHeaders().set(RUN_ID_HEADER, runId.toString());
+            outputMessage.getHeaders().setCacheControl("no-cache, no-store, max-age=0");
+            outputMessage.getHeaders().set("X-Accel-Buffering", "no");
         }
     }
 

@@ -494,6 +494,8 @@ async function sendQuestion() {
         (item) => item.id !== userMessageId && item.id !== currentAssistantId,
       )
       question.value = message
+      historyError.value = error instanceof Error
+        ? error.message : '无法连接聊天服务，请稍后重试。'
     } else if (assistant) {
       assistant.status = 'error'
       assistant.errorMessage = error instanceof Error ? error.message : '无法连接聊天服务。'

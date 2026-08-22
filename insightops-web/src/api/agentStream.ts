@@ -78,6 +78,8 @@ const eventTypes = new Set<ChatStreamEvent['type']>([
   'error',
 ])
 
+export const CHAT_RUN_ID_HEADER = 'X-InsightOps-Run-Id'
+
 export function parseSseEnvelope(raw: string): ChatStreamEvent {
   const parsed = JSON.parse(raw) as ChatStreamEvent
   if (!eventTypes.has(parsed.type) || !parsed.runId || !Number.isInteger(parsed.sequence)) {
@@ -188,7 +190,16 @@ export async function streamChat(
     credentials: 'include',
     signal,
   })
-  await consumeSseResponse(initial, forward)
+  if (initial.ok) {
+    activeRunId = initial.headers.get(CHAT_RUN_ID_HEADER)?.trim() ?? ''
+  }
+  try {
+    await consumeSseResponse(initial, forward)
+  } catch (error) {
+    if (!activeRunId || signal.aborted) throw error
+    // The durable Run was accepted but the initial SSE body broke before its first event.
+    // Reconnect below using the response-header identity and replay from sequence zero.
+  }
   while (activeRunId && !terminal && !signal.aborted) {
     await reconnectDelay(signal)
     try {

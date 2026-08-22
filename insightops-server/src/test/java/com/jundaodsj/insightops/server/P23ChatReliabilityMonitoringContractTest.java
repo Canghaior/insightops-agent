@@ -67,6 +67,29 @@ class P23ChatReliabilityMonitoringContractTest {
     }
 
     @Test
+    void productionAcceptanceCreatesOnlyAMarkedRunAndUsesTheGuardedDrill() throws IOException {
+        String acceptance = Files.readString(root().resolve(
+                "scripts/p2-3-production-takeover-acceptance.sh"));
+        String workflow = Files.readString(root().resolve(
+                ".github/workflows/p2-3-takeover-drill.yml"));
+
+        assertThat(acceptance).contains(
+                "^P23-TAKEOVER-[0-9]+-[0-9]+$",
+                "AUTH_BOOTSTRAP_PASSWORD",
+                "agent_plan_checkpoint",
+                "status = 'RESERVED'",
+                "p2-3-chat-takeover-drill.sh",
+                "--confirm-production-restart");
+        assertThat(acceptance).doesNotContain("set -x", "down -v", "rm -rf");
+        assertThat(workflow).contains(
+                "workflow_dispatch:",
+                "P2.3-C-TAKEOVER-DRILL",
+                "environment: production",
+                "P23-TAKEOVER-${{ github.run_id }}-${{ github.run_attempt }}",
+                "p2-3-production-takeover-acceptance.sh");
+    }
+
+    @Test
     void applicationConfigurationMapsSnapshotIntervalToTheChatQueue() throws IOException {
         Map<String, Object> document = new Yaml().load(Files.readString(
                 root().resolve("insightops-server/src/main/resources/application.yml")));

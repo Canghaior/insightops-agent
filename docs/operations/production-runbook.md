@@ -134,6 +134,19 @@ bash scripts/p2-3-chat-takeover-drill.sh \
 4. Run 到达可计费终态。
 5. `agent_cost_ledger` 只有一条 `SETTLE` 或 `RELEASE`。
 
+正式关闭 P2.3-C 时，优先从 GitHub Actions 手动运行
+`P2.3-C production takeover drill`，并在 `confirmation` 输入
+`P2.3-C-TAKEOVER-DRILL`。工作流复用 production Environment 的部署 SSH
+凭据，在服务器内部完成以下动作，任何前置失败都发生在 `SIGKILL` 之前：
+
+1. 核对当前租约短于 Run 总时限。
+2. 使用 `.env.prod` 的现有管理员账号登录，但不输出账号密码或 Cookie。
+3. 创建带唯一 `P23-TAKEOVER-<workflow-run>-<attempt>` 标记的非关键测试 Run。
+4. 只在该 Run 已持有租约、存在可用安全点并只有一条成本预留时调用演练脚本。
+5. 由演练脚本验证 Server 恢复、跨实例接管、`run_recovered` 和单次成本终态。
+
+自动验收脚本不会删除测试会话，确保生产审计链可回看。
+
 任何前置条件不满足都会在 `SIGKILL` 前退出。若脚本在终止后意外中断，退出 Trap 会尝试重新拉起 Server；仍须立即执行：
 
 ```bash

@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.server.evaluation;
 
 import com.jundaodsj.insightops.agent.application.AgentEvaluationStore;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -22,6 +23,7 @@ public class AgentEvaluationQueueWorker {
     private final AtomicInteger inFlight = new AtomicInteger();
     private final String workerId;
 
+    @Autowired
     public AgentEvaluationQueueWorker(
             AgentEvaluationStore store,
             AgentEvaluationService service,

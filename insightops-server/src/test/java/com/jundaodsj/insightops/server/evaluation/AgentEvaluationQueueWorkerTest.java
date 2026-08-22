@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.server.evaluation;
 import com.jundaodsj.insightops.agent.application.AgentEvaluationStore;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import java.time.Instant;
 import java.util.List;
@@ -20,6 +21,23 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AgentEvaluationQueueWorkerTest {
+
+    @Test
+    void springCanSelectTheProductionConstructor() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(AgentEvaluationStore.class, () -> mock(AgentEvaluationStore.class));
+            context.registerBean(AgentEvaluationService.class, () -> mock(AgentEvaluationService.class));
+            context.registerBean(AgentEvaluationQueueProperties.class, AgentEvaluationQueueProperties::new);
+            context.registerBean("agentEvaluationExecutor", Executor.class, () -> Runnable::run);
+            context.registerBean(AgentEvaluationMetrics.class,
+                    () -> new AgentEvaluationMetrics(new SimpleMeterRegistry()));
+            context.register(AgentEvaluationQueueWorker.class);
+
+            context.refresh();
+
+            assertThat(context.getBean(AgentEvaluationQueueWorker.class)).isNotNull();
+        }
+    }
 
     @Test
     void claimsExpiredEvaluationWithinCapacityAndDispatchesIt() {

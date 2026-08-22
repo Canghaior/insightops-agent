@@ -163,6 +163,7 @@ export async function streamChat(
   signal: AbortSignal,
   sessionId?: string,
   resumeCheckpointId?: string,
+  onRunAccepted?: (runId: string) => void,
 ): Promise<void> {
   const baseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
   let activeRunId = ''
@@ -192,6 +193,7 @@ export async function streamChat(
   })
   if (initial.ok) {
     activeRunId = initial.headers.get(CHAT_RUN_ID_HEADER)?.trim() ?? ''
+    if (activeRunId) onRunAccepted?.(activeRunId)
   }
   try {
     await consumeSseResponse(initial, forward)

@@ -154,10 +154,15 @@ describe('createSseParser', () => {
       .mockResolvedValueOnce(new Response(resumedWire, { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     const events: ReturnType<typeof parseSseEnvelope>[] = []
+    const accepted = vi.fn()
 
-    await streamChat('question', (event) => events.push(event), new AbortController().signal)
+    await streamChat(
+      'question', (event) => events.push(event), new AbortController().signal,
+      undefined, undefined, accepted,
+    )
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(accepted).toHaveBeenCalledWith('run-from-header')
     expect(fetchMock.mock.calls[1]?.[0]).toContain(
       '/chat/streams/run-from-header?afterSequence=0',
     )

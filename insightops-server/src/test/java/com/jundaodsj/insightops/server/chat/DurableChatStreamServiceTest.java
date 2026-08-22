@@ -28,5 +28,6 @@ class DurableChatStreamServiceTest {
         assertEquals("no", headers.getFirst("X-Accel-Buffering"));
         assertTrue(headers.getCacheControl().contains("no-cache"));
         assertTrue(headers.getCacheControl().contains("no-store"));
+        assertTrue(headers.getCacheControl().contains("no-transform"));
     }
 }

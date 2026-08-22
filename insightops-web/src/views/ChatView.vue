@@ -476,6 +476,11 @@ async function sendQuestion() {
     resumeCheckpointId.value = ''
     await streamChat(
       message, handleEvent, streamController.signal, sessionId.value, checkpointId || undefined,
+      (acceptedRunId) => {
+        runId.value = acceptedRunId
+        const assistant = currentAssistant()
+        if (assistant) assistant.runId = acceptedRunId
+      },
     )
     const assistant = currentAssistant()
     if (assistant && (status.value === 'connecting' || status.value === 'streaming')) {

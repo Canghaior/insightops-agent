@@ -111,7 +111,8 @@ public class DurableChatStreamService {
         protected void extendResponse(ServerHttpResponse outputMessage) {
             super.extendResponse(outputMessage);
             outputMessage.getHeaders().set(RUN_ID_HEADER, runId.toString());
-            outputMessage.getHeaders().setCacheControl("no-cache, no-store, max-age=0");
+            outputMessage.getHeaders().setCacheControl(
+                    "no-cache, no-store, max-age=0, no-transform");
             outputMessage.getHeaders().set("X-Accel-Buffering", "no");
         }
     }

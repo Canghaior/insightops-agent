@@ -85,7 +85,7 @@ class AgentEvaluationServiceTest {
                         1, 1, 150, new BigDecimal("0.010000"), "ACTIVE", null)));
         when(fixture.store.inspectAgentRun(any())).thenReturn(
                 new AgentEvaluationStore.RunFacts(
-                        List.of("knowledge_hybrid_search"), "SUCCEEDED", 0, 0));
+                        List.of("knowledge_hybrid_search"), "COMPLETED", 0, 0));
 
         fixture.service.startEvaluation(WORKSPACE, USER, datasetId, candidateId);
 

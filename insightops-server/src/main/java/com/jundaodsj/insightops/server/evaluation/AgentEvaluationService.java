@@ -267,7 +267,8 @@ public class AgentEvaluationService {
         List<String> forbidden = item.forbiddenTools().stream()
                 .filter(facts.actualTools()::contains).toList();
         boolean toolsCorrect = missing.isEmpty() && forbidden.isEmpty();
-        boolean planCompleted = "SUCCEEDED".equals(facts.planStatus());
+        boolean planCompleted = "COMPLETED".equals(facts.planStatus())
+                || "SUCCEEDED".equals(facts.planStatus());
         boolean recoveryObserved = facts.retryCount() > 0 || facts.failedToolCalls() > 0;
         boolean recoveryMet = !item.expectRecovery() || recoveryObserved;
         boolean citationMet = domainsMet(item.requiredSourceDomains(), sources);

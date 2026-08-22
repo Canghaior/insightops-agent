@@ -25,22 +25,26 @@ public class DurableChatStreamService {
     private final DurableChatRunProperties properties;
     private final Executor executor;
     private final ObjectMapper json;
+    private final DurableChatRunMetrics metrics;
 
     public DurableChatStreamService(
             DurableChatRunStore store,
             DurableChatRunProperties properties,
             @Qualifier("durableChatStreamExecutor") Executor executor,
-            ObjectMapper json) {
+            ObjectMapper json,
+            DurableChatRunMetrics metrics) {
         this.store = store;
         this.properties = properties;
         this.executor = executor;
         this.json = json;
+        this.metrics = metrics;
     }
 
     public SseEmitter open(ActorContext actor, UUID runId, long afterSequence) {
         if (store.findOwned(actor, runId).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Agent run not found");
         }
+        metrics.streamOpened(afterSequence > 0);
         SseEmitter emitter = new SseEmitter(Duration.ofMinutes(15).toMillis());
         AtomicBoolean connected = new AtomicBoolean(true);
         emitter.onCompletion(() -> connected.set(false));
@@ -68,6 +72,7 @@ public class DurableChatStreamService {
                             .data(payload));
                     cursor = event.sequence();
                 }
+                metrics.replayed(events.size());
                 DurableChatRunStore.WorkView work = store.findOwned(actor, runId).orElse(null);
                 if (work == null || (work.terminal() && events.isEmpty())) break;
                 Thread.sleep(properties.eventPollInterval().toMillis());
@@ -76,12 +81,15 @@ public class DurableChatStreamService {
         }
         catch (IOException | IllegalStateException ignored) {
             connected.set(false);
+            metrics.streamDisconnected();
         }
         catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             connected.set(false);
+            metrics.streamDisconnected();
         }
         catch (RuntimeException exception) {
+            metrics.streamDisconnected();
             if (connected.get()) emitter.completeWithError(exception);
         }
     }

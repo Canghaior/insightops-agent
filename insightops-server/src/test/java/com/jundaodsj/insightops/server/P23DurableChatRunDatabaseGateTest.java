@@ -103,8 +103,12 @@ class P23DurableChatRunDatabaseGateTest {
                     "{\"type\":\"started\"}");
             return null;
         });
+        assertThat(store.queueSnapshot(started.plusSeconds(1)))
+                .isEqualTo(new DurableChatRunStore.QueueSnapshot(1, 0, 0, 1, 0));
         DurableChatRunStore.WorkLease first = tx(() -> store.claim(
                 "server-a", 1, 3, Duration.ofSeconds(30), started).getFirst());
+        assertThat(store.queueSnapshot(started.plusSeconds(10)))
+                .isEqualTo(new DurableChatRunStore.QueueSnapshot(0, 1, 0, 0, 10));
 
         jdbc.sql("""
                         insert into agent_plan (id, run_id, version, status, max_parallelism, created_at)
@@ -149,6 +153,8 @@ class P23DurableChatRunDatabaseGateTest {
                 .param("now", Timestamp.from(started.plusSeconds(2))).update();
 
         Instant takeoverAt = started.plusSeconds(31);
+        assertThat(store.queueSnapshot(takeoverAt))
+                .isEqualTo(new DurableChatRunStore.QueueSnapshot(0, 1, 1, 0, 31));
         DurableChatRunStore.WorkLease second = tx(() -> store.claim(
                 "server-b", 1, 3, Duration.ofSeconds(30), takeoverAt).getFirst());
         DurableChatRunStore.AttemptPreparation preparation = tx(() -> store.prepareAttempt(
@@ -157,7 +163,10 @@ class P23DurableChatRunDatabaseGateTest {
         assertThat(second.reclaimed()).isTrue();
         assertThat(second.attemptCount()).isEqualTo(2);
         assertThat(preparation.recovered()).isTrue();
+        assertThat(second.reclaimDelay()).isEqualTo(Duration.ofSeconds(1));
         assertThat(preparation.recoveryCheckpointId()).isEqualTo(checkpointId);
+        assertThat(store.queueSnapshot(takeoverAt))
+                .isEqualTo(new DurableChatRunStore.QueueSnapshot(0, 1, 0, 0, 0));
         assertThat(jdbc.sql("select status from agent_plan where id = :id")
                 .param("id", planId).query(String.class).single()).isEqualTo("SUPERSEDED");
         assertThat(jdbc.sql("select status from agent_plan_node where id = :id")

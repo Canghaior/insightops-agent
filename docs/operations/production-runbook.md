@@ -111,3 +111,33 @@ docker stats --no-stream
 4. Worker 不健康：聊天仍可能可用，暂停采集并检查任务日志。
 5. Ollama 不可用：RAG 检索会降级；检查内存、模型卷和 `ollama list`。
 6. DeepSeek 不可用：保留已采集证据与执行记录，检查额度和 Provider 状态，不循环重试消耗预算。
+
+## P2.3-C 普通聊天接管演练
+
+该演练会向生产 Server 容器发送一次 `SIGKILL`，可能造成短暂 5xx；它不停止 PostgreSQL、不删除卷，也不会自动选择或创建 Run。只应在低峰期对明确的非关键测试 Run 执行，并提前确认 Grafana 和日志可观察。
+
+先在管理端确认目标 Run 正在执行且至少产生一个安全点，再在服务器执行：
+
+```bash
+cd /opt/insightops-agent
+bash scripts/p2-3-chat-takeover-drill.sh \
+  目标AgentRun完整UUID --confirm-production-restart
+```
+
+脚本会在终止进程前验证 Run、可用安全点和成本预留；随后验证：
+
+1. Server 恢复健康。
+2. 租约过期后领取次数增加、Worker 身份改变。
+3. 新增 `run_recovered`。
+4. Run 到达可计费终态。
+5. `agent_cost_ledger` 只有一条 `SETTLE` 或 `RELEASE`。
+
+任何前置条件不满足都会在 `SIGKILL` 前退出。若脚本在终止后意外中断，退出 Trap 会尝试重新拉起 Server；仍须立即执行：
+
+```bash
+docker compose --env-file .env.prod -f infra/compose.prod.yml up -d server
+docker compose --env-file .env.prod -f infra/compose.prod.yml ps server
+docker compose --env-file .env.prod -f infra/compose.prod.yml logs --tail=200 server
+```
+
+不要移除强确认参数，不要把该脚本放入定时任务，也不要对真实用户的重要 Run 演练。

@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -60,6 +61,9 @@ class DurableChatRunQueueWorkerTest {
         assertThat(worker.inFlight()).isZero();
         assertThat(registry.counter("insightops.agent.chat.queue.claimed").count()).isEqualTo(1);
         assertThat(registry.counter("insightops.agent.chat.queue.reclaimed").count()).isEqualTo(1);
+        assertThat(registry.timer("insightops.agent.chat.queue.reclaim_delay").count()).isEqualTo(1);
+        assertThat(registry.timer("insightops.agent.chat.queue.reclaim_delay")
+                .totalTime(java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(5);
     }
 
     @Test
@@ -99,6 +103,7 @@ class DurableChatRunQueueWorkerTest {
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 "trace-chat-worker", true, "SYSTEM_ADMIN", "question", "context",
                 null, null, UUID.randomUUID(), "chat-worker", reclaimed ? 2 : 1, 3,
-                reclaimed, Instant.now().plusSeconds(120));
+                reclaimed, reclaimed ? Duration.ofSeconds(5) : Duration.ZERO,
+                Instant.now().plusSeconds(120));
     }
 }

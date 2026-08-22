@@ -56,7 +56,7 @@ public class JdbcDurableChatRunStore implements DurableChatRunStore {
                         select run_id, workspace_id, owner_user_id, session_id, trace_id,
                                system_admin, access_level, user_prompt, contextual_prompt,
                                resume_checkpoint_id, recovery_checkpoint_id, status,
-                               attempt_count, max_attempts
+                               attempt_count, max_attempts, lease_expires_at
                         from agent_run_work
                         where status = 'QUEUED'
                            or (status = 'RUNNING' and lease_expires_at <= :now)
@@ -76,7 +76,8 @@ public class JdbcDurableChatRunStore implements DurableChatRunStore {
                         rs.getObject("resume_checkpoint_id", UUID.class),
                         rs.getObject("recovery_checkpoint_id", UUID.class),
                         rs.getString("status"), rs.getInt("attempt_count"),
-                        rs.getInt("max_attempts"))).list();
+                        rs.getInt("max_attempts"),
+                        instant(rs.getTimestamp("lease_expires_at")))).list();
         List<WorkLease> leases = new ArrayList<>();
         for (Claimable row : rows) {
             UUID token = UUID.randomUUID();
@@ -98,12 +99,16 @@ public class JdbcDurableChatRunStore implements DurableChatRunStore {
                     .param("now", Timestamp.from(now)).param("expiresAt", Timestamp.from(expiresAt))
                     .param("runId", row.runId()).update();
             if (updated == 1) {
+                boolean reclaimed = "RUNNING".equals(row.status());
+                Duration reclaimDelay = reclaimed && row.leaseExpiresAt() != null
+                        ? nonNegative(Duration.between(row.leaseExpiresAt(), now))
+                        : Duration.ZERO;
                 leases.add(new WorkLease(
                         row.runId(), row.workspaceId(), row.ownerUserId(), row.sessionId(),
                         row.traceId(), row.systemAdmin(), row.accessLevel(), row.userPrompt(),
                         row.contextualPrompt(), row.resumeCheckpointId(),
                         row.recoveryCheckpointId(), token, workerId, attempt, configuredMax,
-                        "RUNNING".equals(row.status()), expiresAt));
+                        reclaimed, reclaimDelay, expiresAt));
             }
         }
         return List.copyOf(leases);
@@ -295,6 +300,34 @@ public class JdbcDurableChatRunStore implements DurableChatRunStore {
         return true;
     }
 
+    @Override
+    public QueueSnapshot queueSnapshot(Instant now) {
+        return jdbc.sql("""
+                        select count(*) filter (where status = 'QUEUED') as queued,
+                               count(*) filter (where status = 'RUNNING') as running,
+                               count(*) filter (
+                                   where status = 'RUNNING' and lease_expires_at <= :now
+                               ) as expired_leases,
+                               coalesce(greatest(0, extract(epoch from (
+                                   :now - min(created_at) filter (where status = 'QUEUED')
+                               )))::bigint, 0) as oldest_queued_age_seconds,
+                               coalesce(greatest(0, extract(epoch from (
+                                   :now - min(heartbeat_at) filter (
+                                       where status = 'RUNNING' and heartbeat_at is not null
+                                   )
+                               )))::bigint, 0) as oldest_heartbeat_age_seconds
+                        from agent_run_work
+                        """)
+                .param("now", Timestamp.from(now))
+                .query((rs, row) -> new QueueSnapshot(
+                        rs.getLong("queued"),
+                        rs.getLong("running"),
+                        rs.getLong("expired_leases"),
+                        rs.getLong("oldest_queued_age_seconds"),
+                        rs.getLong("oldest_heartbeat_age_seconds")))
+                .single();
+    }
+
     private long nextEventSequence(UUID runId) {
         return jdbc.sql("""
                         select coalesce(max(sequence), 0) + 1
@@ -316,11 +349,15 @@ public class JdbcDurableChatRunStore implements DurableChatRunStore {
         return value == null ? null : value.toInstant();
     }
 
+    private static Duration nonNegative(Duration value) {
+        return value.isNegative() ? Duration.ZERO : value;
+    }
+
     private record Claimable(
             UUID runId, UUID workspaceId, UUID ownerUserId, UUID sessionId, String traceId,
             boolean systemAdmin, String accessLevel, String userPrompt, String contextualPrompt,
             UUID resumeCheckpointId, UUID recoveryCheckpointId, String status,
-            int attemptCount, int maxAttempts) {
+            int attemptCount, int maxAttempts, Instant leaseExpiresAt) {
     }
 
     private record Attempt(int count) {

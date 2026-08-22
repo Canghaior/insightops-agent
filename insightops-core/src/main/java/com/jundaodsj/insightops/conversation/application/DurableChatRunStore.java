@@ -36,6 +36,8 @@ public interface DurableChatRunStore {
             UUID runId, UUID leaseToken, String status, String failureCode,
             String terminalEventType, String terminalEventJson, Instant finishedAt);
 
+    QueueSnapshot queueSnapshot(Instant now);
+
     record WorkDraft(
             UUID runId,
             UUID workspaceId,
@@ -68,6 +70,7 @@ public interface DurableChatRunStore {
             int attemptCount,
             int maxAttempts,
             boolean reclaimed,
+            Duration reclaimDelay,
             Instant leaseExpiresAt) {
     }
 
@@ -103,5 +106,13 @@ public interface DurableChatRunStore {
             return "PAUSED".equals(status) || "SUCCEEDED".equals(status)
                     || "FAILED".equals(status) || "CANCELLED".equals(status);
         }
+    }
+
+    record QueueSnapshot(
+            long queued,
+            long running,
+            long expiredLeases,
+            long oldestQueuedAgeSeconds,
+            long oldestHeartbeatAgeSeconds) {
     }
 }

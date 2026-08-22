@@ -48,6 +48,43 @@
       "type": "timeseries", "title": "Agent upstream circuit state", "id": 8,
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
       "targets": [{"expr": "max by (group) (insightops_agent_tool_circuit_state)", "legendFormat": "{{group}} (0 closed / 1 half / 2 open)"}]
+    },
+    {
+      "type": "timeseries", "title": "Durable chat queue state", "id": 9,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+      "targets": [
+        {"expr": "insightops_agent_chat_queue_queued", "legendFormat": "queued"},
+        {"expr": "insightops_agent_chat_queue_running", "legendFormat": "running"},
+        {"expr": "insightops_agent_chat_queue_expired_leases", "legendFormat": "expired leases"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Durable chat queue age", "id": 10,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+      "targets": [
+        {"expr": "insightops_agent_chat_queue_oldest_queued_age_seconds", "legendFormat": "oldest queued"},
+        {"expr": "insightops_agent_chat_queue_oldest_heartbeat_age_seconds", "legendFormat": "oldest heartbeat"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Durable chat recovery", "id": 11,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40},
+      "targets": [
+        {"expr": "sum(rate(insightops_agent_chat_queue_reclaimed_total[5m]))", "legendFormat": "reclaimed"},
+        {"expr": "sum(rate(insightops_agent_chat_queue_recovered_total[5m]))", "legendFormat": "safe-point recovered"},
+        {"expr": "sum(rate(insightops_agent_chat_queue_lease_lost_total[5m]))", "legendFormat": "lease lost"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(insightops_agent_chat_queue_reclaim_delay_seconds_bucket[5m])))", "legendFormat": "reclaim p95 seconds"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Durable chat SSE resume", "id": 12,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40},
+      "targets": [
+        {"expr": "sum(rate(insightops_agent_chat_stream_connections_total[5m]))", "legendFormat": "connections"},
+        {"expr": "sum(rate(insightops_agent_chat_stream_reconnects_total[5m]))", "legendFormat": "reconnects"},
+        {"expr": "sum(rate(insightops_agent_chat_stream_replayed_events_total[5m]))", "legendFormat": "replayed events"},
+        {"expr": "sum(rate(insightops_agent_chat_stream_disconnects_total[5m]))", "legendFormat": "disconnects"}
+      ]
     }
   ],
   "refresh": "15s",
@@ -58,5 +95,5 @@
   "timezone": "browser",
   "title": "InsightOps Overview",
   "uid": "insightops-overview",
-  "version": 1
+  "version": 2
 }

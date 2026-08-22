@@ -61,7 +61,7 @@ public class DurableChatRunQueueWorker {
                 properties.leaseDuration(), Instant.now());
         for (DurableChatRunStore.WorkLease lease : leases) {
             inFlight.incrementAndGet();
-            metrics.claimed(lease.reclaimed());
+            metrics.claimed(lease);
             try {
                 executor.execute(() -> {
                     try { service.execute(lease); }

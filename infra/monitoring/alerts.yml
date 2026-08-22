@@ -49,3 +49,51 @@ groups:
         labels: { severity: critical }
         annotations:
           summary: "An Agent tool upstream circuit has remained open"
+      - alert: AgentChatQueueBacklog
+        expr: insightops_agent_chat_queue_queued > 20
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Durable chat queue has more than 20 waiting runs"
+      - alert: AgentChatQueueOldestWaitHigh
+        expr: insightops_agent_chat_queue_oldest_queued_age_seconds > 30
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Oldest durable chat run has waited more than 30 seconds"
+      - alert: AgentChatQueueExpiredLease
+        expr: insightops_agent_chat_queue_expired_leases > 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "A durable chat run lease is expired and awaiting takeover"
+      - alert: AgentChatRecoveryStalled
+        expr: increase(insightops_agent_chat_queue_reclaimed_total[10m]) - increase(insightops_agent_chat_queue_recovered_total[10m]) > 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "A reclaimed durable chat run has not restored its safe point"
+      - alert: AgentChatReclaimLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(insightops_agent_chat_queue_reclaim_delay_seconds_bucket[10m]))) > 30
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Durable chat reclaim p95 delay is above 30 seconds"
+      - alert: AgentChatLeaseLostBurst
+        expr: increase(insightops_agent_chat_queue_lease_lost_total[10m]) > 3
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "More than three durable chat workers lost their lease in ten minutes"
+      - alert: AgentChatDispatchErrors
+        expr: increase(insightops_agent_chat_queue_dispatch_errors_total[10m]) > 3
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Durable chat executor rejected more than three dispatches"
+      - alert: AgentChatSloSnapshotErrors
+        expr: increase(insightops_agent_chat_queue_snapshot_errors_total[10m]) > 0
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Durable chat queue SLO sampling is failing"

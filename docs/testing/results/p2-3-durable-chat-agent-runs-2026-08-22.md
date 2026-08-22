@@ -2,7 +2,7 @@
 
 ## 1. 当前结论
 
-P2.3-B 功能实现和本地全量自动化门禁通过；尚未提交、推送或部署生产，因此当前状态为“本地完成、生产验收待关闭”。
+P2.3-B 已完成实现、全量自动化门禁、提交、CI、不可变镜像部署和生产健康验收，当前状态为“生产可用”。
 
 已验证：
 
@@ -51,10 +51,12 @@ npm run build
 - `vue-tsc`：PASS。
 - Vite production build：PASS。
 
-## 4. 生产验收待办
+## 4. 生产验收
 
-- 提交并推送 P2.3-B，等待 CI 全绿。
-- 部署后确认 Flyway 当前版本为 34，Server/Worker/Web 健康。
-- 发起普通聊天 Run，在执行中重启当前 Server，等待租约过期并确认第二实例/重启实例接管。
-- 验证页面自动续流、`run_recovered`、最终答案、引用、Run Trace、预算和成本账本一致。
-- 验证用户明确停止能取消，单纯刷新/关闭页面不会取消。
+- 生产提交：`b2b5df3d2fa239e2f2697461ec9bd8fe8f4253f4`。
+- GitHub Actions CI：Run `32577494585`，后端、前端、Server/Worker/Web 三份镜像全部成功。
+- GitHub Actions 生产部署：Run `32577695797`，成功。
+- 部署脚本完成生产预检、一致性备份、不可变 SHA 镜像拉取，以及 PostgreSQL、Ollama、Server、Worker、Web、Caddy 六服务健康门禁；包含 V34 的 Server 成功通过启动和数据库健康检查。
+- 公网首页返回 HTTP 200，新 Web 资产为 `index-BJYW0MZd.js`；未登录访问 Server 管理端点返回 HTTP 401，认证边界正常。
+
+P2.3-B 的生产发布闭环已关闭。运行中强制杀进程、等待租约过期、观察 `run_recovered` 和核对成本账本的真实故障注入属于 P2.3-C 可靠性演练；当前实现已由真实 PostgreSQL 接管/fencing 门禁覆盖，不以绕过终端或浏览器安全边界的方式执行生产破坏性试验。

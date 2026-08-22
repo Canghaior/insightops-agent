@@ -68,8 +68,8 @@ insightops:
       concurrency: ${AGENT_CHAT_QUEUE_CONCURRENCY:2}
       poll-interval-ms: ${AGENT_CHAT_QUEUE_POLL_INTERVAL_MS:500}
       initial-delay-ms: ${AGENT_CHAT_QUEUE_INITIAL_DELAY_MS:1000}
-      lease-seconds: ${AGENT_CHAT_QUEUE_LEASE_SECONDS:120}
-      heartbeat-seconds: ${AGENT_CHAT_QUEUE_HEARTBEAT_SECONDS:15}
+      lease-seconds: ${AGENT_CHAT_QUEUE_LEASE_SECONDS:30}
+      heartbeat-seconds: ${AGENT_CHAT_QUEUE_HEARTBEAT_SECONDS:5}
       max-attempts: ${AGENT_CHAT_QUEUE_MAX_ATTEMPTS:3}
       event-poll-ms: ${AGENT_CHAT_QUEUE_EVENT_POLL_MS:200}
       run-timeout-seconds: ${AGENT_CHAT_QUEUE_RUN_TIMEOUT_SECONDS:${AGENT_RUN_TIMEOUT_SECONDS:90}}

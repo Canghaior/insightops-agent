@@ -64,9 +64,9 @@ Flyway V34 新增两张表：
 | `AGENT_CHAT_QUEUE_CONCURRENCY` | `2` | 单实例并发 Run 数，限制 1～16 |
 | `AGENT_CHAT_QUEUE_POLL_INTERVAL_MS` | `500` | 队列轮询间隔 |
 | `AGENT_CHAT_QUEUE_INITIAL_DELAY_MS` | `1000` | 启动后首次轮询延迟 |
-| `AGENT_CHAT_QUEUE_LEASE_SECONDS` | `120` | 租约时长，最小 30 秒 |
+| `AGENT_CHAT_QUEUE_LEASE_SECONDS` | `30` | 租约时长；必须短于 Run 总时限，最小 30 秒 |
 | `AGENT_CHAT_QUEUE_RUN_TIMEOUT_SECONDS` | `90` | 从入队开始计算的总时限；超时 Run 会被围栏并终止 |
-| `AGENT_CHAT_QUEUE_HEARTBEAT_SECONDS` | `15` | 心跳间隔，不超过租约三分之一 |
+| `AGENT_CHAT_QUEUE_HEARTBEAT_SECONDS` | `5` | 心跳间隔，不超过租约三分之一 |
 | `AGENT_CHAT_QUEUE_MAX_ATTEMPTS` | `3` | 最大领取次数 |
 | `AGENT_CHAT_QUEUE_EVENT_POLL_MS` | `200` | SSE 持久事件轮询间隔 |
 

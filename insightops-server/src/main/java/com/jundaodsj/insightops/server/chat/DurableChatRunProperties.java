@@ -13,8 +13,8 @@ public class DurableChatRunProperties {
     private int concurrency = 2;
     private int pollIntervalMs = 500;
     private int initialDelayMs = 1_000;
-    private int leaseSeconds = 120;
-    private int heartbeatSeconds = 15;
+    private int leaseSeconds = 30;
+    private int heartbeatSeconds = 5;
     private int maxAttempts = 3;
     private int eventPollMs = 200;
     private int runTimeoutSeconds = 90;

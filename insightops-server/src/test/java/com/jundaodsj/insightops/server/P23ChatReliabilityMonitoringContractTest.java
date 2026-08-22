@@ -60,6 +60,8 @@ class P23ChatReliabilityMonitoringContractTest {
                 "agent_plan_checkpoint",
                 "event_type = 'run_recovered'",
                 "entry_type in ('SETTLE', 'RELEASE')",
+                "AGENT_CHAT_QUEUE_RUN_TIMEOUT_SECONDS",
+                "LEASE_SECONDS >= RUN_TIMEOUT_SECONDS",
                 "terminal_ledger_after\" != \"1\"");
         assertThat(drill).doesNotContain("down -v", "rm -rf");
     }
@@ -74,6 +76,12 @@ class P23ChatReliabilityMonitoringContractTest {
 
         assertThat(chatQueue.get("snapshot-interval-ms").toString())
                 .isEqualTo("${AGENT_CHAT_QUEUE_SNAPSHOT_INTERVAL_MS:15000}");
+        assertThat(chatQueue.get("lease-seconds").toString())
+                .isEqualTo("${AGENT_CHAT_QUEUE_LEASE_SECONDS:30}");
+        assertThat(chatQueue.get("heartbeat-seconds").toString())
+                .isEqualTo("${AGENT_CHAT_QUEUE_HEARTBEAT_SECONDS:5}");
+        assertThat(chatQueue.get("run-timeout-seconds").toString())
+                .isEqualTo("${AGENT_CHAT_QUEUE_RUN_TIMEOUT_SECONDS:${AGENT_RUN_TIMEOUT_SECONDS:90}}");
         assertThat(map(insightops, "report")).doesNotContainKey("snapshot-interval-ms");
     }
 

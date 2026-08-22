@@ -26,13 +26,20 @@ bash "$ROOT_DIR/scripts/preflight-prod.sh" "$ENV_FILE" >/dev/null
 POSTGRES_USER="$(prod_env_get POSTGRES_USER "$ENV_FILE")"
 POSTGRES_DB="$(prod_env_get POSTGRES_DB "$ENV_FILE")"
 LEASE_SECONDS="$(prod_env_get AGENT_CHAT_QUEUE_LEASE_SECONDS "$ENV_FILE")"
-RUN_TIMEOUT_SECONDS="$(prod_env_get AGENT_RUN_TIMEOUT_SECONDS "$ENV_FILE")"
+RUN_TIMEOUT_SECONDS="$(prod_env_get AGENT_CHAT_QUEUE_RUN_TIMEOUT_SECONDS "$ENV_FILE")"
+if [[ -z "$RUN_TIMEOUT_SECONDS" ]]; then
+  RUN_TIMEOUT_SECONDS="$(prod_env_get AGENT_RUN_TIMEOUT_SECONDS "$ENV_FILE")"
+fi
 POSTGRES_USER="${POSTGRES_USER:-insightops}"
 POSTGRES_DB="${POSTGRES_DB:-insightops}"
-LEASE_SECONDS="${LEASE_SECONDS:-120}"
+LEASE_SECONDS="${LEASE_SECONDS:-30}"
 RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-90}"
 if ! [[ "$LEASE_SECONDS" =~ ^[0-9]+$ && "$RUN_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
   echo "Lease and run timeout settings must be integer seconds" >&2
+  exit 1
+fi
+if (( LEASE_SECONDS >= RUN_TIMEOUT_SECONDS )); then
+  echo "Chat lease must be shorter than the total run timeout; refusing fault injection" >&2
   exit 1
 fi
 

@@ -104,6 +104,10 @@ export interface EvaluationRun {
   summary: EvaluationSummary | null
   baselineSummary: EvaluationSummary | null
   failureCode: string | null
+  attemptCount: number
+  claimedBy: string | null
+  heartbeatAt: string | null
+  leaseExpiresAt: string | null
   startedAt: string | null
   finishedAt: string | null
   createdAt: string

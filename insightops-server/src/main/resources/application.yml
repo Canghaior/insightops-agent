@@ -55,6 +55,14 @@ insightops:
       warning-percent: ${AGENT_COST_WARNING_PERCENT:80}
       hard-limit-enabled: ${AGENT_COST_HARD_LIMIT_ENABLED:true}
       timezone: ${AGENT_COST_TIMEZONE:Asia/Shanghai}
+    evaluation-queue:
+      enabled: ${AGENT_EVALUATION_QUEUE_ENABLED:true}
+      concurrency: ${AGENT_EVALUATION_QUEUE_CONCURRENCY:1}
+      poll-interval-ms: ${AGENT_EVALUATION_QUEUE_POLL_INTERVAL_MS:2000}
+      initial-delay-ms: ${AGENT_EVALUATION_QUEUE_INITIAL_DELAY_MS:1000}
+      lease-seconds: ${AGENT_EVALUATION_QUEUE_LEASE_SECONDS:180}
+      heartbeat-seconds: ${AGENT_EVALUATION_QUEUE_HEARTBEAT_SECONDS:30}
+      max-attempts: ${AGENT_EVALUATION_QUEUE_MAX_ATTEMPTS:3}
   report:
     pdf-font-path: ${REPORT_PDF_FONT_PATH:}
   knowledge:

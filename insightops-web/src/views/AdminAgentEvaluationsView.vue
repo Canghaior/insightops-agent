@@ -247,6 +247,11 @@ function formatDuration(value: number | undefined): string {
   return value == null ? '—' : `${(value / 1000).toFixed(2)} s`
 }
 
+function formatTime(value: string | null): string {
+  if (!value) return '—'
+  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium' }).format(new Date(value))
+}
+
 function statusLabel(status: string): string {
   return ({ QUEUED: '排队中', RUNNING: '执行中', PASSED: '通过', FAILED: '失败',
     DRAFT: '草稿', ACTIVE: '生产中', RETIRED: '已退役' } as Record<string, string>)[status] ?? status
@@ -319,7 +324,7 @@ onBeforeUnmount(() => { if (pollHandle) globalThis.clearTimeout(pollHandle) })
       </div>
 
       <article class="run-table-panel evaluation-run-panel">
-        <div class="detail-block-heading"><div><span class="eyebrow">P2.2-C</span><h3>运行、基线和趋势</h3></div><small>{{ running ? '实时轮询中' : '当前无运行任务' }}</small></div>
+        <div class="detail-block-heading"><div><span class="eyebrow">P2.2-C · P2.3-A</span><h3>运行、基线和持久队列</h3></div><small>{{ running ? '实时轮询中' : '当前无运行任务' }}</small></div>
         <div class="evaluation-launch">
           <select v-model="selectedDatasetId"><option value="" disabled>选择评测集</option><option v-for="dataset in overview.governance.datasets" :key="dataset.id" :value="dataset.id">{{ dataset.name }} v{{ dataset.version }} · {{ dataset.cases.length }} 题</option></select>
           <select v-model="selectedCandidateId"><option value="" disabled>选择候选版本</option><option v-for="candidate in overview.governance.candidates" :key="candidate.id" :value="candidate.id">v{{ candidate.version }} · {{ candidate.name }}</option></select>
@@ -328,7 +333,12 @@ onBeforeUnmount(() => { if (pollHandle) globalThis.clearTimeout(pollHandle) })
         <div v-if="overview.governance.recentRuns.length === 0" class="detail-placeholder">尚无 Agent 评测 Run。</div>
         <button v-for="run in overview.governance.recentRuns" :key="run.id" class="evaluation-run-row" @click="expandedRun = run">
           <i class="status-pill" :class="`status-${run.status.toLowerCase()}`">{{ statusLabel(run.status) }}</i>
-          <div><strong>{{ run.datasetName }} v{{ run.datasetVersion }} → 候选 v{{ run.candidateVersion }}</strong><small>Run {{ run.id.slice(0, 8) }} · {{ run.failureCode || `${run.results.length}/${run.summary?.caseCount || '…'} 案例` }}</small></div>
+          <div>
+            <strong>{{ run.datasetName }} v{{ run.datasetVersion }} → 候选 v{{ run.candidateVersion }}</strong>
+            <small>Run {{ run.id.slice(0, 8) }} · {{ run.failureCode || `${run.results.length}/${run.summary?.caseCount || '…'} 案例` }} · 第 {{ run.attemptCount }} 次执行</small>
+            <small v-if="run.status === 'RUNNING'">Worker {{ run.claimedBy || '领取中' }} · 心跳 {{ formatTime(run.heartbeatAt) }} · 租约到期 {{ formatTime(run.leaseExpiresAt) }}</small>
+            <small v-else-if="run.status === 'QUEUED'">等待可用 Worker 领取；服务重启后任务仍会保留。</small>
+          </div>
           <span>{{ percent(run.summary?.successRate) }}<small>成功率</small></span>
           <span>{{ percent(run.summary?.toolAccuracy) }}<small>工具准确率</small></span>
           <span>{{ formatDuration(run.summary?.averageDurationMs) }}<small>平均耗时</small></span>
@@ -338,6 +348,7 @@ onBeforeUnmount(() => { if (pollHandle) globalThis.clearTimeout(pollHandle) })
 
       <article v-if="expandedRun" class="run-table-panel evaluation-detail">
         <div class="detail-block-heading"><div><span class="eyebrow">Run {{ expandedRun.id.slice(0, 8) }}</span><h3>逐案例 Trace 断言</h3></div><button class="text-button" @click="expandedRun = null">关闭</button></div>
+        <div v-if="expandedRun.status === 'QUEUED' || expandedRun.status === 'RUNNING'" class="queue-note"><strong>{{ statusLabel(expandedRun.status) }} · 第 {{ expandedRun.attemptCount }} 次执行</strong><span>Worker {{ expandedRun.claimedBy || '尚未领取' }}</span><span>最近心跳 {{ formatTime(expandedRun.heartbeatAt) }}</span><span>租约到期 {{ formatTime(expandedRun.leaseExpiresAt) }}</span><small>Worker 异常退出后，租约到期任务会由其他实例接管，并从未完成案例继续。</small></div>
         <div v-if="expandedRun.baselineSummary" class="baseline-note">生产基线：成功率 {{ percent(expandedRun.baselineSummary.successRate) }} · 工具准确率 {{ percent(expandedRun.baselineSummary.toolAccuracy) }} · 平均费用 {{ formatCost(expandedRun.baselineSummary.averageCostCny) }}</div>
         <div v-for="item in expandedRun.results" :key="item.id" class="case-result-row">
           <i class="status-pill" :class="`status-${item.status.toLowerCase()}`">{{ statusLabel(item.status) }}</i>
@@ -385,5 +396,7 @@ onBeforeUnmount(() => { if (pollHandle) globalThis.clearTimeout(pollHandle) })
 .evaluation-run-row small,.case-result-row small { display:block;color:var(--muted);margin-top:4px }
 .case-result-row { display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:start;border-top:1px solid var(--line);padding:14px 0 }
 .baseline-note { padding:12px;border-radius:12px;background:rgba(74,222,128,.08);margin-bottom:10px }
+.queue-note { display:flex;flex-wrap:wrap;gap:8px 16px;padding:12px;border:1px solid rgba(103,212,180,.2);border-radius:12px;background:rgba(103,212,180,.06);margin-bottom:10px }
+.queue-note small { flex-basis:100%;color:var(--muted) }
 @media (max-width:1100px) { .evaluation-grid{grid-template-columns:1fr}.evaluation-summary{grid-template-columns:repeat(2,1fr)}.evaluation-run-row{grid-template-columns:auto 1fr}.evaluation-run-row>span{display:none}.derive-form,.evaluation-launch{grid-template-columns:1fr} }
 </style>

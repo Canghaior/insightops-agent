@@ -19,12 +19,17 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -62,7 +67,7 @@ class AgentEvaluationServiceTest {
     }
 
     @Test
-    void runsRealLoopInReadOnlyEvaluationModeAndPersistsPassingSummary() {
+    void queuesThenExecutesClaimInReadOnlyModeAndPersistsPassingSummary() {
         Fixture fixture = fixture();
         UUID datasetId = UUID.randomUUID();
         UUID candidateId = UUID.randomUUID();
@@ -77,6 +82,22 @@ class AgentEvaluationServiceTest {
                 .thenReturn(queued);
         when(fixture.store.findEvaluation(WORKSPACE, evaluationId)).thenReturn(Optional.of(queued));
         when(fixture.store.findDataset(WORKSPACE, datasetId)).thenReturn(Optional.of(dataset));
+        UUID leaseToken = UUID.randomUUID();
+        AgentEvaluationStore.EvaluationLease lease = new AgentEvaluationStore.EvaluationLease(
+                evaluationId, WORKSPACE, USER, leaseToken, "test-worker", 1,
+                Instant.now().plusSeconds(180));
+        when(fixture.store.renewEvaluationLease(
+                org.mockito.ArgumentMatchers.eq(evaluationId),
+                org.mockito.ArgumentMatchers.eq(leaseToken), any(), any())).thenReturn(true);
+        when(fixture.store.prepareEvaluationAttempt(
+                org.mockito.ArgumentMatchers.eq(evaluationId), org.mockito.ArgumentMatchers.eq(leaseToken), any()))
+                .thenReturn(List.of());
+        when(fixture.store.startAgentRun(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(true);
+        when(fixture.store.completeAgentRun(any(), any(), any(), any(), anyInt(), anyInt(), any(), any(), any()))
+                .thenReturn(true);
+        when(fixture.store.saveCaseResult(any(), any(), any(), any())).thenReturn(true);
+        when(fixture.store.completeEvaluation(any(), any(), any(), any())).thenReturn(true);
         when(fixture.loopProvider.getIfAvailable()).thenReturn(fixture.loop);
         when(fixture.loop.run(any(), any(), any())).thenReturn(new AgentLoopService.LoopResult(
                 "evidence", List.of("https://spring.io/projects/spring-ai"), List.of(),
@@ -88,6 +109,9 @@ class AgentEvaluationServiceTest {
                         List.of("knowledge_hybrid_search"), "COMPLETED", 0, 0));
 
         fixture.service.startEvaluation(WORKSPACE, USER, datasetId, candidateId);
+        verify(fixture.loop, never()).run(any(), any(), any());
+
+        fixture.service.executeClaim(lease);
 
         ArgumentCaptor<AgentLoopService.LoopRequest> request =
                 ArgumentCaptor.forClass(AgentLoopService.LoopRequest.class);
@@ -97,9 +121,58 @@ class AgentEvaluationServiceTest {
         ArgumentCaptor<AgentEvaluationStore.Summary> summary =
                 ArgumentCaptor.forClass(AgentEvaluationStore.Summary.class);
         verify(fixture.store).completeEvaluation(
-                org.mockito.ArgumentMatchers.eq(evaluationId), summary.capture(), any());
+                org.mockito.ArgumentMatchers.eq(evaluationId),
+                org.mockito.ArgumentMatchers.eq(leaseToken), summary.capture(), any());
         assertThat(summary.getValue().passed()).isTrue();
         assertThat(summary.getValue().successRate()).isEqualTo(1.0);
+    }
+
+    @Test
+    void reclaimedEvaluationReusesCompletedCaseWithoutCallingModelAgain() {
+        Fixture fixture = fixture();
+        UUID datasetId = UUID.randomUUID();
+        UUID candidateId = UUID.randomUUID();
+        UUID evaluationId = UUID.randomUUID();
+        UUID leaseToken = UUID.randomUUID();
+        AgentEvaluationStore.Dataset dataset = dataset(datasetId);
+        AgentEvaluationStore.EvaluationCase item = dataset.cases().getFirst();
+        AgentEvaluationStore.Candidate candidate = candidate(
+                candidateId, fixture.service.defaults().toolContractHash());
+        AgentEvaluationStore.CaseResult completed = new AgentEvaluationStore.CaseResult(
+                UUID.randomUUID(), item.id(), item.caseKey(), item.question(), UUID.randomUUID(),
+                "PASSED", List.of("knowledge_hybrid_search"), List.of(), List.of(),
+                List.of("https://spring.io/projects/spring-ai"), true, true, false, true,
+                1_000, 150, new BigDecimal("0.010000"), null, "{}");
+        Instant now = Instant.now();
+        AgentEvaluationStore.EvaluationRun running = new AgentEvaluationStore.EvaluationRun(
+                evaluationId, WORKSPACE, datasetId, dataset.name(), dataset.version(),
+                candidateId, candidate.name(), candidate.version(), null, "RUNNING",
+                null, null, null, USER, 2, "worker-two", now, now.plusSeconds(180),
+                now.minusSeconds(180), null, now.minusSeconds(180), List.of(completed));
+        AgentEvaluationStore.EvaluationLease lease = new AgentEvaluationStore.EvaluationLease(
+                evaluationId, WORKSPACE, USER, leaseToken, "worker-two", 2,
+                now.plusSeconds(180));
+        when(fixture.loopProvider.getIfAvailable()).thenReturn(fixture.loop);
+        when(fixture.store.renewEvaluationLease(
+                org.mockito.ArgumentMatchers.eq(evaluationId),
+                org.mockito.ArgumentMatchers.eq(leaseToken), any(), any())).thenReturn(true);
+        when(fixture.store.prepareEvaluationAttempt(
+                org.mockito.ArgumentMatchers.eq(evaluationId),
+                org.mockito.ArgumentMatchers.eq(leaseToken), any())).thenReturn(List.of());
+        when(fixture.store.findEvaluation(WORKSPACE, evaluationId)).thenReturn(Optional.of(running));
+        when(fixture.store.findDataset(WORKSPACE, datasetId)).thenReturn(Optional.of(dataset));
+        when(fixture.store.findCandidate(WORKSPACE, candidateId)).thenReturn(Optional.of(candidate));
+        when(fixture.store.completeEvaluation(any(), any(), any(), any())).thenReturn(true);
+
+        fixture.service.executeClaim(lease);
+
+        verify(fixture.loop, never()).run(any(), any(), any());
+        ArgumentCaptor<AgentEvaluationStore.Summary> summary =
+                ArgumentCaptor.forClass(AgentEvaluationStore.Summary.class);
+        verify(fixture.store).completeEvaluation(
+                org.mockito.ArgumentMatchers.eq(evaluationId),
+                org.mockito.ArgumentMatchers.eq(leaseToken), summary.capture(), any());
+        assertThat(summary.getValue().passed()).isTrue();
     }
 
     private static Fixture fixture() {
@@ -108,7 +181,12 @@ class AgentEvaluationServiceTest {
         @SuppressWarnings("unchecked")
         ObjectProvider<AgentLoopService> provider = mock(ObjectProvider.class);
         AgentLoopService loop = mock(AgentLoopService.class);
-        Executor direct = Runnable::run;
+        ScheduledExecutorService heartbeat = mock(ScheduledExecutorService.class);
+        @SuppressWarnings("unchecked")
+        ScheduledFuture<Object> heartbeatFuture = mock(ScheduledFuture.class);
+        when(heartbeat.scheduleWithFixedDelay(any(), anyLong(), anyLong(), any(TimeUnit.class)))
+                .thenAnswer(invocation -> heartbeatFuture);
+        AgentEvaluationQueueProperties properties = new AgentEvaluationQueueProperties();
         AgentEvaluationService service = new AgentEvaluationService(
                 store, runQuery,
                 new AgentToolRegistry(AgentToolRegistryConfiguration.definitions(true)),
@@ -116,7 +194,7 @@ class AgentEvaluationServiceTest {
                 new DeepSeekModelProperties(
                         true, "https://api.deepseek.com", "deepseek-v4-flash", false,
                         0.2, 4096, 4, 90, 2, false),
-                direct, new AgentEvaluationMetrics(new SimpleMeterRegistry()));
+                heartbeat, properties, new AgentEvaluationMetrics(new SimpleMeterRegistry()));
         return new Fixture(store, provider, loop, service);
     }
 
@@ -156,7 +234,8 @@ class AgentEvaluationServiceTest {
             UUID id, UUID datasetId, UUID candidateId, String status) {
         return new AgentEvaluationStore.EvaluationRun(
                 id, WORKSPACE, datasetId, "agent-core", 1, candidateId, "candidate", 1,
-                null, status, null, null, null, USER, null, null,
+                null, status, null, null, null, USER,
+                0, null, null, null, null, null,
                 Instant.parse("2026-08-22T00:00:00Z"), List.of());
     }
 

@@ -4,10 +4,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentEvaluationStore;
 import com.jundaodsj.insightops.agent.application.AgentEvaluationStore.CaseDraft;
+import com.jundaodsj.insightops.agent.application.AgentEvaluationStore.CaseResult;
 import com.jundaodsj.insightops.agent.application.AgentEvaluationStore.CaseResultDraft;
 import com.jundaodsj.insightops.agent.application.AgentEvaluationStore.Candidate;
 import com.jundaodsj.insightops.agent.application.AgentEvaluationStore.Dataset;
 import com.jundaodsj.insightops.agent.application.AgentEvaluationStore.EvaluationCase;
+import com.jundaodsj.insightops.agent.application.AgentEvaluationStore.EvaluationLease;
 import com.jundaodsj.insightops.agent.application.AgentEvaluationStore.EvaluationRun;
 import com.jundaodsj.insightops.agent.application.AgentEvaluationStore.RuntimeProfile;
 import com.jundaodsj.insightops.agent.application.AgentEvaluationStore.Summary;
@@ -33,6 +35,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -41,7 +44,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 @Service
@@ -57,7 +63,8 @@ public class AgentEvaluationService {
     private final ObjectMapper json;
     private final ObjectProvider<AgentLoopService> loopProvider;
     private final DeepSeekModelProperties modelProperties;
-    private final Executor executor;
+    private final ScheduledExecutorService heartbeatExecutor;
+    private final AgentEvaluationQueueProperties queueProperties;
     private final AgentEvaluationMetrics metrics;
 
     public AgentEvaluationService(
@@ -67,7 +74,8 @@ public class AgentEvaluationService {
             ObjectMapper json,
             ObjectProvider<AgentLoopService> loopProvider,
             DeepSeekModelProperties modelProperties,
-            @Qualifier("agentEvaluationExecutor") Executor executor,
+            @Qualifier("agentEvaluationHeartbeatExecutor") ScheduledExecutorService heartbeatExecutor,
+            AgentEvaluationQueueProperties queueProperties,
             AgentEvaluationMetrics metrics) {
         this.store = store;
         this.runQuery = runQuery;
@@ -75,7 +83,8 @@ public class AgentEvaluationService {
         this.json = json;
         this.loopProvider = loopProvider;
         this.modelProperties = modelProperties;
-        this.executor = executor;
+        this.heartbeatExecutor = heartbeatExecutor;
+        this.queueProperties = queueProperties;
         this.metrics = metrics;
     }
 
@@ -140,7 +149,6 @@ public class AgentEvaluationService {
         }
         EvaluationRun run = store.queueEvaluation(
                 workspaceId, userId, datasetId, candidateId, Instant.now());
-        executor.execute(() -> execute(run.id(), workspaceId, userId));
         return run;
     }
 
@@ -178,53 +186,88 @@ public class AgentEvaluationService {
         }
     }
 
-    private void execute(UUID evaluationRunId, UUID workspaceId, UUID userId) {
+    void executeClaim(EvaluationLease lease) {
         Instant evaluationStarted = Instant.now();
         metrics.started();
         boolean passed = false;
-        try {
+        boolean terminal = false;
+        try (LeaseGuard guard = new LeaseGuard(lease)) {
             AgentLoopService loop = loopProvider.getIfAvailable();
             if (loop == null) throw new EvaluationUnavailableException("AGENT_MODEL_UNAVAILABLE");
-            EvaluationRun queued = store.findEvaluation(workspaceId, evaluationRunId).orElseThrow();
-            Dataset dataset = store.findDataset(workspaceId, queued.datasetId()).orElseThrow();
-            Candidate candidate = store.findCandidate(workspaceId, queued.candidateId()).orElseThrow();
-            store.markEvaluationRunning(evaluationRunId, Instant.now());
+            guard.renewNow();
+            for (UUID orphanedRunId : store.prepareEvaluationAttempt(
+                    lease.evaluationRunId(), lease.leaseToken(), Instant.now())) {
+                try {
+                    loop.releaseCost(orphanedRunId, "EVALUATION_WORKER_LOST");
+                }
+                catch (RuntimeException ignored) {
+                    // Cost reconciliation is idempotent and will be retried by operations if needed.
+                }
+            }
+            EvaluationRun queued = store.findEvaluation(
+                    lease.workspaceId(), lease.evaluationRunId()).orElseThrow();
+            Dataset dataset = store.findDataset(lease.workspaceId(), queued.datasetId()).orElseThrow();
+            Candidate candidate = store.findCandidate(
+                    lease.workspaceId(), queued.candidateId()).orElseThrow();
+            if (lease.requestedBy() == null) {
+                throw new EvaluationUnavailableException("EVALUATION_REQUESTER_MISSING");
+            }
             RuntimeProfile profile = new RuntimeProfile(
                     candidate.id(), candidate.version(), candidate.name(),
                     candidate.plannerPromptAppendix(), candidate.modelName(), candidate.temperature(),
                     candidate.maxOutputTokens(), candidate.toolContractHash(), candidate.createdAt());
+            Map<UUID, CaseResultDraft> completed = new HashMap<>();
+            for (CaseResult result : queued.results()) {
+                completed.put(result.caseId(), persisted(result));
+            }
             List<CaseOutcome> outcomes = new ArrayList<>();
             for (EvaluationCase item : dataset.cases()) {
-                outcomes.add(executeCase(loop, evaluationRunId, workspaceId, userId, profile, item));
+                CaseResultDraft result = completed.get(item.id());
+                if (result == null) {
+                    result = executeCase(loop, lease, guard, profile, item);
+                }
+                outcomes.add(new CaseOutcome(item, result));
             }
+            guard.renewNow();
             Summary summary = summarize(dataset, outcomes);
-            store.completeEvaluation(evaluationRunId, summary, Instant.now());
+            terminal = store.completeEvaluation(
+                    lease.evaluationRunId(), lease.leaseToken(), summary, Instant.now());
+            if (!terminal) throw new EvaluationLeaseLostException();
             passed = summary.passed();
         }
+        catch (EvaluationLeaseLostException exception) {
+            metrics.leaseLost();
+        }
         catch (RuntimeException exception) {
-            store.failEvaluation(evaluationRunId, failureCode(exception), Instant.now());
+            terminal = store.failEvaluation(
+                    lease.evaluationRunId(), lease.leaseToken(), failureCode(exception), Instant.now());
+            if (!terminal) metrics.leaseLost();
         }
         finally {
-            metrics.finished(passed, Duration.between(evaluationStarted, Instant.now()));
+            metrics.finished(passed, terminal, Duration.between(evaluationStarted, Instant.now()));
         }
     }
 
-    private CaseOutcome executeCase(
-            AgentLoopService loop, UUID evaluationRunId, UUID workspaceId, UUID userId,
+    private CaseResultDraft executeCase(
+            AgentLoopService loop, EvaluationLease lease, LeaseGuard guard,
             RuntimeProfile profile, EvaluationCase item) {
         UUID runId = UUID.randomUUID();
         Instant started = Instant.now();
-        String traceId = "agent-eval-" + evaluationRunId.toString().substring(0, 8)
+        String traceId = "agent-eval-" + lease.evaluationRunId().toString().substring(0, 8)
                 + "-" + runId.toString().substring(0, 8);
-        store.startAgentRun(new ActorContext(userId, workspaceId), runId, traceId,
-                item.question(), started);
-        CaseResultDraft result;
+        guard.renewNow();
+        if (!store.startAgentRun(
+                new ActorContext(lease.requestedBy(), lease.workspaceId()),
+                lease.evaluationRunId(), item.id(), lease.leaseToken(), runId, traceId,
+                item.question(), started)) {
+            throw new EvaluationLeaseLostException();
+        }
         try {
             AgentLoopService.LoopResult loopResult = loop.run(
                     new AgentLoopService.LoopRequest(
-                            runId, workspaceId, userId, true,
+                            runId, lease.workspaceId(), lease.requestedBy(), true,
                             AgentToolDefinition.AccessLevel.SYSTEM_ADMIN, item.question(),
-                            null, profile, true), NOOP_LISTENER, () -> true);
+                            null, profile, true), NOOP_LISTENER, guard::isActive);
             ModelUsage usage = loopResult.planningUsage();
             int inputTokens = positive(usage.inputTokens());
             int outputTokens = positive(usage.outputTokens());
@@ -232,17 +275,35 @@ public class AgentEvaluationService {
             BigDecimal cost = loopResult.budget() == null
                     || loopResult.budget().estimatedCostCny() == null
                     ? ZERO_COST : loopResult.budget().estimatedCostCny();
+            guard.renewNow();
             loop.settleCost(runId, usage);
-            store.completeAgentRun(runId, profile.modelName(), inputTokens, outputTokens,
-                    cost, loopResult.sourceUrls(), Instant.now());
+            if (!store.completeAgentRun(
+                    lease.evaluationRunId(), lease.leaseToken(), runId,
+                    profile.modelName(), inputTokens, outputTokens,
+                    cost, loopResult.sourceUrls(), Instant.now())) {
+                throw new EvaluationLeaseLostException();
+            }
             AgentEvaluationStore.RunFacts facts = store.inspectAgentRun(runId);
-            result = evaluate(item, runId, facts, loopResult.sourceUrls(), loopResult.toolRounds(),
+            CaseResultDraft result = evaluate(
+                    item, runId, facts, loopResult.sourceUrls(), loopResult.toolRounds(),
                     Duration.between(started, Instant.now()).toMillis(), totalTokens, cost, null);
+            if (!store.saveCaseResult(
+                    lease.evaluationRunId(), lease.leaseToken(), result, Instant.now())) {
+                throw new EvaluationLeaseLostException();
+            }
+            return result;
         }
         catch (RuntimeException exception) {
-            loop.releaseCost(runId, "EVALUATION_CASE_FAILED");
+            releaseCostSafely(loop, runId, "EVALUATION_CASE_FAILED");
+            if (exception instanceof EvaluationLeaseLostException || !guard.isActive()) {
+                throw new EvaluationLeaseLostException();
+            }
+            guard.renewNow();
             String code = failureCode(exception);
-            store.failAgentRun(runId, code, Instant.now());
+            if (!store.failAgentRun(
+                    lease.evaluationRunId(), lease.leaseToken(), runId, code, Instant.now())) {
+                throw new EvaluationLeaseLostException();
+            }
             AgentEvaluationStore.RunFacts facts;
             try {
                 facts = store.inspectAgentRun(runId);
@@ -250,12 +311,34 @@ public class AgentEvaluationService {
             catch (RuntimeException ignored) {
                 facts = new AgentEvaluationStore.RunFacts(List.of(), "FAILED", 0, 0);
             }
-            result = evaluate(item, runId, facts, List.of(), Integer.MAX_VALUE,
+            CaseResultDraft result = evaluate(item, runId, facts, List.of(), Integer.MAX_VALUE,
                     Duration.between(started, Instant.now()).toMillis(), 0, ZERO_COST, code);
+            if (!store.saveCaseResult(
+                    lease.evaluationRunId(), lease.leaseToken(), result, Instant.now())) {
+                throw new EvaluationLeaseLostException();
+            }
             metrics.caseError();
+            return result;
         }
-        store.saveCaseResult(evaluationRunId, result, Instant.now());
-        return new CaseOutcome(item, result);
+    }
+
+    private static void releaseCostSafely(AgentLoopService loop, UUID runId, String reason) {
+        try {
+            loop.releaseCost(runId, reason);
+        }
+        catch (RuntimeException ignored) {
+            // The cost ledger can reconcile a still-reserved orphan independently.
+        }
+    }
+
+    private static CaseResultDraft persisted(CaseResult result) {
+        return new CaseResultDraft(
+                result.id(), result.caseId(), result.agentRunId(), result.status(),
+                result.actualTools(), result.missingTools(), result.forbiddenToolsUsed(),
+                result.sourceUrls(), result.toolSelectionCorrect(), result.planCompleted(),
+                result.recoveryObserved(), result.citationRequirementsMet(), result.durationMs(),
+                result.totalTokens(), result.estimatedCostCny(), result.failureCode(),
+                result.detailsJson());
     }
 
     private CaseResultDraft evaluate(
@@ -463,6 +546,59 @@ public class AgentEvaluationService {
         return name.length() > 64 ? name.substring(0, 64) : name;
     }
 
+    private final class LeaseGuard implements AutoCloseable {
+        private final EvaluationLease lease;
+        private final AtomicBoolean lost = new AtomicBoolean();
+        private volatile Instant validUntil;
+        private final ScheduledFuture<?> heartbeat;
+
+        private LeaseGuard(EvaluationLease lease) {
+            this.lease = lease;
+            this.validUntil = lease.leaseExpiresAt();
+            long intervalMs = Math.max(1_000, queueProperties.heartbeatInterval().toMillis());
+            heartbeat = heartbeatExecutor.scheduleWithFixedDelay(
+                    this::heartbeat, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+        }
+
+        private void heartbeat() {
+            if (lost.get()) return;
+            Instant now = Instant.now();
+            try {
+                if (!store.renewEvaluationLease(
+                        lease.evaluationRunId(), lease.leaseToken(),
+                        queueProperties.leaseDuration(), now)) {
+                    lost.set(true);
+                    return;
+                }
+                validUntil = now.plus(queueProperties.leaseDuration());
+            }
+            catch (RuntimeException exception) {
+                if (!now.isBefore(validUntil)) lost.set(true);
+            }
+        }
+
+        private void renewNow() {
+            if (lost.get()) throw new EvaluationLeaseLostException();
+            Instant now = Instant.now();
+            if (!store.renewEvaluationLease(
+                    lease.evaluationRunId(), lease.leaseToken(),
+                    queueProperties.leaseDuration(), now)) {
+                lost.set(true);
+                throw new EvaluationLeaseLostException();
+            }
+            validUntil = now.plus(queueProperties.leaseDuration());
+        }
+
+        private boolean isActive() {
+            return !lost.get() && Instant.now().isBefore(validUntil);
+        }
+
+        @Override
+        public void close() {
+            heartbeat.cancel(false);
+        }
+    }
+
     public record Defaults(
             String modelName,
             double temperature,
@@ -471,6 +607,10 @@ public class AgentEvaluationService {
     }
 
     private record CaseOutcome(EvaluationCase item, CaseResultDraft result) { }
+
+    private static final class EvaluationLeaseLostException extends RuntimeException {
+        private EvaluationLeaseLostException() { super("EVALUATION_LEASE_LOST"); }
+    }
 
     private static final class EvaluationUnavailableException extends RuntimeException {
         private final String code;

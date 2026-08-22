@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.agent.application;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -27,23 +28,38 @@ public interface AgentEvaluationStore {
     EvaluationRun queueEvaluation(
             UUID workspaceId, UUID userId, UUID datasetId, UUID candidateId, Instant now);
 
-    void markEvaluationRunning(UUID evaluationRunId, Instant now);
+    List<EvaluationLease> claimEvaluations(
+            String workerId, int limit, int maxAttempts, Duration leaseDuration, Instant now);
 
-    void startAgentRun(ActorContext actor, UUID runId, String traceId, String question, Instant now);
+    boolean renewEvaluationLease(
+            UUID evaluationRunId, UUID leaseToken, Duration leaseDuration, Instant now);
 
-    void completeAgentRun(
-            UUID runId, String modelName, int inputTokens, int outputTokens,
+    List<UUID> prepareEvaluationAttempt(
+            UUID evaluationRunId, UUID leaseToken, Instant now);
+
+    boolean startAgentRun(
+            ActorContext actor, UUID evaluationRunId, UUID evaluationCaseId, UUID leaseToken,
+            UUID runId, String traceId, String question, Instant now);
+
+    boolean completeAgentRun(
+            UUID evaluationRunId, UUID leaseToken, UUID runId,
+            String modelName, int inputTokens, int outputTokens,
             BigDecimal estimatedCostCny, List<String> sourceUrls, Instant finishedAt);
 
-    void failAgentRun(UUID runId, String failureCode, Instant finishedAt);
+    boolean failAgentRun(
+            UUID evaluationRunId, UUID leaseToken, UUID runId,
+            String failureCode, Instant finishedAt);
 
     RunFacts inspectAgentRun(UUID runId);
 
-    void saveCaseResult(UUID evaluationRunId, CaseResultDraft result, Instant now);
+    boolean saveCaseResult(
+            UUID evaluationRunId, UUID leaseToken, CaseResultDraft result, Instant now);
 
-    EvaluationRun completeEvaluation(UUID evaluationRunId, Summary summary, Instant now);
+    boolean completeEvaluation(
+            UUID evaluationRunId, UUID leaseToken, Summary summary, Instant now);
 
-    void failEvaluation(UUID evaluationRunId, String failureCode, Instant now);
+    boolean failEvaluation(
+            UUID evaluationRunId, UUID leaseToken, String failureCode, Instant now);
 
     Optional<EvaluationRun> findEvaluation(UUID workspaceId, UUID evaluationRunId);
 
@@ -58,6 +74,16 @@ public interface AgentEvaluationStore {
             List<Candidate> candidates,
             List<EvaluationRun> recentRuns,
             RuntimeProfile activeProfile) {
+    }
+
+    record EvaluationLease(
+            UUID evaluationRunId,
+            UUID workspaceId,
+            UUID requestedBy,
+            UUID leaseToken,
+            String workerId,
+            int attemptCount,
+            Instant leaseExpiresAt) {
     }
 
     record DatasetDraft(
@@ -239,6 +265,10 @@ public interface AgentEvaluationStore {
             Summary baselineSummary,
             String failureCode,
             UUID requestedBy,
+            int attemptCount,
+            String claimedBy,
+            Instant heartbeatAt,
+            Instant leaseExpiresAt,
             Instant startedAt,
             Instant finishedAt,
             Instant createdAt,

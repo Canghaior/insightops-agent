@@ -13,6 +13,7 @@ import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -216,58 +217,187 @@ public class JdbcAgentEvaluationStore implements AgentEvaluationStore {
     }
 
     @Override
-    public void markEvaluationRunning(UUID evaluationRunId, Instant now) {
+    @Transactional
+    public List<EvaluationLease> claimEvaluations(
+            String workerId, int limit, int maxAttempts, Duration leaseDuration, Instant now) {
+        int safeLimit = Math.max(1, limit);
+        int safeMaxAttempts = Math.max(1, maxAttempts);
+        Timestamp claimedAt = Timestamp.from(now);
+        Timestamp expiresAt = Timestamp.from(now.plus(leaseDuration));
         jdbc.sql("""
-                        update agent_evaluation_run set status = 'RUNNING', started_at = :now
-                        where id = :id and status = 'QUEUED'
+                        with exhausted as (
+                            update agent_evaluation_run
+                            set status = 'FAILED', failure_code = 'EVALUATION_ATTEMPTS_EXHAUSTED',
+                                finished_at = :now, lease_token = null, lease_expires_at = null
+                            where status = 'RUNNING'
+                              and (lease_expires_at is null or lease_expires_at <= :now)
+                              and attempt_count >= :maxAttempts
+                            returning candidate_id
+                        )
+                        update agent_release_candidate candidate
+                        set status = case when candidate.status = 'ACTIVE'
+                                then candidate.status else 'FAILED' end,
+                            evaluated_at = :now
+                        where candidate.id in (select candidate_id from exhausted)
                         """)
-                .param("id", evaluationRunId).param("now", Timestamp.from(now)).update();
+                .param("now", claimedAt).param("maxAttempts", safeMaxAttempts).update();
+        List<ClaimableEvaluation> claimable = jdbc.sql("""
+                        select id, workspace_id, requested_by, attempt_count
+                        from agent_evaluation_run
+                        where (status = 'QUEUED' or (status = 'RUNNING'
+                               and (lease_expires_at is null or lease_expires_at <= :now)))
+                          and attempt_count < :maxAttempts
+                        order by created_at, id
+                        for update skip locked
+                        limit :limit
+                        """)
+                .param("now", claimedAt).param("maxAttempts", safeMaxAttempts)
+                .param("limit", safeLimit)
+                .query((rs, row) -> new ClaimableEvaluation(
+                        rs.getObject("id", UUID.class),
+                        rs.getObject("workspace_id", UUID.class),
+                        rs.getObject("requested_by", UUID.class),
+                        rs.getInt("attempt_count"))).list();
+        List<EvaluationLease> leases = new ArrayList<>();
+        for (ClaimableEvaluation item : claimable) {
+            UUID token = UUID.randomUUID();
+            int updated = jdbc.sql("""
+                            update agent_evaluation_run
+                            set status = 'RUNNING', attempt_count = attempt_count + 1,
+                                claimed_by = :workerId, lease_token = :leaseToken,
+                                heartbeat_at = :now, lease_expires_at = :expiresAt,
+                                started_at = coalesce(started_at, :now), failure_code = null
+                            where id = :id
+                            """)
+                    .param("id", item.id()).param("workerId", workerId)
+                    .param("leaseToken", token).param("now", claimedAt)
+                    .param("expiresAt", expiresAt).update();
+            if (updated == 1) {
+                leases.add(new EvaluationLease(
+                        item.id(), item.workspaceId(), item.requestedBy(), token,
+                        workerId, item.attemptCount() + 1, expiresAt.toInstant()));
+            }
+        }
+        return List.copyOf(leases);
     }
 
     @Override
-    public void startAgentRun(
-            ActorContext actor, UUID runId, String traceId, String question, Instant now) {
-        jdbc.sql("""
+    public boolean renewEvaluationLease(
+            UUID evaluationRunId, UUID leaseToken, Duration leaseDuration, Instant now) {
+        return jdbc.sql("""
+                        update agent_evaluation_run
+                        set heartbeat_at = :now, lease_expires_at = :expiresAt
+                        where id = :id and status = 'RUNNING' and lease_token = :leaseToken
+                          and lease_expires_at > :now
+                        """)
+                .param("id", evaluationRunId).param("leaseToken", leaseToken)
+                .param("now", Timestamp.from(now))
+                .param("expiresAt", Timestamp.from(now.plus(leaseDuration))).update() == 1;
+    }
+
+    @Override
+    @Transactional
+    public List<UUID> prepareEvaluationAttempt(
+            UUID evaluationRunId, UUID leaseToken, Instant now) {
+        List<UUID> orphaned = jdbc.sql("""
+                        select run.id from agent_run run
+                        join agent_evaluation_run evaluation
+                          on evaluation.id = run.evaluation_run_id
+                        where evaluation.id = :evaluationRunId
+                          and evaluation.status = 'RUNNING'
+                          and evaluation.lease_token = :leaseToken
+                          and evaluation.lease_expires_at > :now
+                          and run.status = 'RUNNING'
+                        for update of run
+                        """)
+                .param("evaluationRunId", evaluationRunId).param("leaseToken", leaseToken)
+                .param("now", Timestamp.from(now))
+                .query(UUID.class).list();
+        for (UUID runId : orphaned) {
+            jdbc.sql("""
+                            update agent_run
+                            set status = 'FAILED', failure_code = 'EVALUATION_WORKER_LOST',
+                                finished_at = :now
+                            where id = :id and status = 'RUNNING'
+                            """)
+                    .param("id", runId).param("now", Timestamp.from(now)).update();
+        }
+        return List.copyOf(orphaned);
+    }
+
+    @Override
+    public boolean startAgentRun(
+            ActorContext actor, UUID evaluationRunId, UUID evaluationCaseId, UUID leaseToken,
+            UUID runId, String traceId, String question, Instant now) {
+        return jdbc.sql("""
                         insert into agent_run
                             (id, workspace_id, owner_user_id, session_id, trace_id, status,
-                             question, started_at, created_at, run_kind)
-                        values
-                            (:id, :workspaceId, :userId, null, :traceId, 'RUNNING',
-                             :question, :now, :now, 'EVALUATION')
+                             question, started_at, created_at, run_kind,
+                             evaluation_run_id, evaluation_case_id)
+                        select :id, :workspaceId, :userId, null, :traceId, 'RUNNING',
+                               :question, :now, :now, 'EVALUATION',
+                               :evaluationRunId, :evaluationCaseId
+                        from agent_evaluation_run evaluation
+                        where evaluation.id = :evaluationRunId
+                          and evaluation.status = 'RUNNING'
+                          and evaluation.lease_token = :leaseToken
+                          and evaluation.lease_expires_at > :now
                         """)
                 .param("id", runId).param("workspaceId", actor.workspaceId())
                 .param("userId", actor.userId()).param("traceId", traceId)
-                .param("question", question).param("now", Timestamp.from(now)).update();
+                .param("question", question).param("now", Timestamp.from(now))
+                .param("evaluationRunId", evaluationRunId)
+                .param("evaluationCaseId", evaluationCaseId)
+                .param("leaseToken", leaseToken).update() == 1;
     }
 
     @Override
-    public void completeAgentRun(
-            UUID runId, String modelName, int inputTokens, int outputTokens,
+    public boolean completeAgentRun(
+            UUID evaluationRunId, UUID leaseToken, UUID runId,
+            String modelName, int inputTokens, int outputTokens,
             BigDecimal estimatedCostCny, List<String> sourceUrls, Instant finishedAt) {
-        jdbc.sql("""
-                        update agent_run
+        return jdbc.sql("""
+                        update agent_run run
                         set status = 'SUCCEEDED', answer = '[agent evaluation completed]',
                             citations = cast(:citations as jsonb), model_provider = 'deepseek',
                             model_name = :modelName, prompt_tokens = :inputTokens,
                             completion_tokens = :outputTokens, estimated_cost_cny = :cost,
                             finished_at = :finishedAt
-                        where id = :id and status = 'RUNNING' and run_kind = 'EVALUATION'
+                        from agent_evaluation_run evaluation
+                        where run.id = :id and run.status = 'RUNNING'
+                          and run.run_kind = 'EVALUATION'
+                          and evaluation.id = :evaluationRunId
+                          and evaluation.lease_token = :leaseToken
+                          and evaluation.status = 'RUNNING'
+                          and evaluation.lease_expires_at > :finishedAt
                         """)
                 .param("id", runId).param("citations", json(sourceUrls))
                 .param("modelName", modelName).param("inputTokens", inputTokens)
                 .param("outputTokens", outputTokens).param("cost", estimatedCostCny)
-                .param("finishedAt", Timestamp.from(finishedAt)).update();
+                .param("finishedAt", Timestamp.from(finishedAt))
+                .param("evaluationRunId", evaluationRunId)
+                .param("leaseToken", leaseToken).update() == 1;
     }
 
     @Override
-    public void failAgentRun(UUID runId, String failureCode, Instant finishedAt) {
-        jdbc.sql("""
-                        update agent_run
+    public boolean failAgentRun(
+            UUID evaluationRunId, UUID leaseToken, UUID runId,
+            String failureCode, Instant finishedAt) {
+        return jdbc.sql("""
+                        update agent_run run
                         set status = 'FAILED', failure_code = :failureCode, finished_at = :finishedAt
-                        where id = :id and status = 'RUNNING' and run_kind = 'EVALUATION'
+                        from agent_evaluation_run evaluation
+                        where run.id = :id and run.status = 'RUNNING'
+                          and run.run_kind = 'EVALUATION'
+                          and evaluation.id = :evaluationRunId
+                          and evaluation.lease_token = :leaseToken
+                          and evaluation.status = 'RUNNING'
+                          and evaluation.lease_expires_at > :finishedAt
                         """)
                 .param("id", runId).param("failureCode", failureCode)
-                .param("finishedAt", Timestamp.from(finishedAt)).update();
+                .param("finishedAt", Timestamp.from(finishedAt))
+                .param("evaluationRunId", evaluationRunId)
+                .param("leaseToken", leaseToken).update() == 1;
     }
 
     @Override
@@ -293,7 +423,8 @@ public class JdbcAgentEvaluationStore implements AgentEvaluationStore {
     }
 
     @Override
-    public void saveCaseResult(UUID evaluationRunId, CaseResultDraft result, Instant now) {
+    public boolean saveCaseResult(
+            UUID evaluationRunId, UUID leaseToken, CaseResultDraft result, Instant now) {
         Map<String, Object> params = new HashMap<>();
         params.put("id", result.id());
         params.put("evaluationRunId", evaluationRunId);
@@ -314,37 +445,48 @@ public class JdbcAgentEvaluationStore implements AgentEvaluationStore {
         params.put("failureCode", result.failureCode());
         params.put("details", result.detailsJson());
         params.put("createdAt", Timestamp.from(now));
-        jdbc.sql("""
+        params.put("leaseToken", leaseToken);
+        return jdbc.sql("""
                         insert into agent_evaluation_case_result
                             (id, evaluation_run_id, case_id, agent_run_id, status,
                              actual_tools, missing_tools, forbidden_tools_used, source_urls,
                              tool_selection_correct, plan_completed, recovery_observed,
                              citation_requirements_met, duration_ms, total_tokens,
                              estimated_cost_cny, failure_code, details, created_at)
-                        values
-                            (:id, :evaluationRunId, :caseId, :agentRunId, :status,
+                        select :id, :evaluationRunId, :caseId, :agentRunId, :status,
                              cast(:actualTools as jsonb), cast(:missingTools as jsonb),
                              cast(:forbiddenToolsUsed as jsonb), cast(:sourceUrls as jsonb),
                              :toolCorrect, :planCompleted, :recoveryObserved,
                              :citationsMet, :durationMs, :totalTokens,
-                             :cost, :failureCode, cast(:details as jsonb), :createdAt)
-                        """).params(params).update();
+                             :cost, :failureCode, cast(:details as jsonb), :createdAt
+                        from agent_evaluation_run evaluation
+                        where evaluation.id = :evaluationRunId
+                          and evaluation.status = 'RUNNING'
+                          and evaluation.lease_token = :leaseToken
+                          and evaluation.lease_expires_at > :createdAt
+                        on conflict (evaluation_run_id, case_id) do nothing
+                        """).params(params).update() == 1;
     }
 
     @Override
     @Transactional
-    public EvaluationRun completeEvaluation(UUID evaluationRunId, Summary summary, Instant now) {
-        jdbc.sql("""
+    public boolean completeEvaluation(
+            UUID evaluationRunId, UUID leaseToken, Summary summary, Instant now) {
+        int updated = jdbc.sql("""
                         update agent_evaluation_run
                         set status = :status, passed_case_count = :passedCaseCount,
                             success_rate = :successRate, tool_accuracy = :toolAccuracy,
                             recovery_rate = :recoveryRate, citation_rate = :citationRate,
                             average_duration_ms = :averageDurationMs,
                             average_tokens = :averageTokens, average_cost_cny = :averageCostCny,
-                            finished_at = :finishedAt
+                            finished_at = :finishedAt, heartbeat_at = :finishedAt,
+                            lease_token = null, lease_expires_at = null
                         where id = :id and status = 'RUNNING'
+                          and lease_token = :leaseToken
+                          and lease_expires_at > :finishedAt
                         """)
                 .param("id", evaluationRunId).param("status", summary.passed() ? "PASSED" : "FAILED")
+                .param("leaseToken", leaseToken)
                 .param("passedCaseCount", summary.passedCaseCount())
                 .param("successRate", summary.successRate()).param("toolAccuracy", summary.toolAccuracy())
                 .param("recoveryRate", summary.recoveryRate()).param("citationRate", summary.citationRate())
@@ -352,6 +494,9 @@ public class JdbcAgentEvaluationStore implements AgentEvaluationStore {
                 .param("averageTokens", summary.averageTokens())
                 .param("averageCostCny", summary.averageCostCny())
                 .param("finishedAt", Timestamp.from(now)).update();
+        if (updated != 1) {
+            return false;
+        }
         jdbc.sql("""
                         update agent_release_candidate candidate
                         set status = case when candidate.status = 'ACTIVE'
@@ -363,19 +508,26 @@ public class JdbcAgentEvaluationStore implements AgentEvaluationStore {
                 .param("evaluationRunId", evaluationRunId)
                 .param("status", summary.passed() ? "PASSED" : "FAILED")
                 .param("now", Timestamp.from(now)).update();
-        UUID workspaceId = workspaceForEvaluation(evaluationRunId);
-        return findEvaluation(workspaceId, evaluationRunId).orElseThrow();
+        return true;
     }
 
     @Override
     @Transactional
-    public void failEvaluation(UUID evaluationRunId, String failureCode, Instant now) {
-        jdbc.sql("""
+    public boolean failEvaluation(
+            UUID evaluationRunId, UUID leaseToken, String failureCode, Instant now) {
+        int updated = jdbc.sql("""
                         update agent_evaluation_run
-                        set status = 'FAILED', failure_code = :failureCode, finished_at = :now
-                        where id = :id and status in ('QUEUED', 'RUNNING')
+                        set status = 'FAILED', failure_code = :failureCode,
+                            finished_at = :now, heartbeat_at = :now,
+                            lease_token = null, lease_expires_at = null
+                        where id = :id and status = 'RUNNING' and lease_token = :leaseToken
+                          and lease_expires_at > :now
                         """).param("id", evaluationRunId).param("failureCode", failureCode)
+                .param("leaseToken", leaseToken)
                 .param("now", Timestamp.from(now)).update();
+        if (updated != 1) {
+            return false;
+        }
         jdbc.sql("""
                         update agent_release_candidate candidate
                         set status = case when candidate.status = 'ACTIVE'
@@ -385,6 +537,7 @@ public class JdbcAgentEvaluationStore implements AgentEvaluationStore {
                         where evaluation.id = :evaluationRunId and candidate.id = evaluation.candidate_id
                         """).param("evaluationRunId", evaluationRunId)
                 .param("now", Timestamp.from(now)).update();
+        return true;
     }
 
     @Override
@@ -586,7 +739,9 @@ public class JdbcAgentEvaluationStore implements AgentEvaluationStore {
                 rs.getInt("dataset_version"), rs.getObject("candidate_id", UUID.class),
                 rs.getString("candidate_name"), rs.getInt("candidate_version"), baselineId,
                 rs.getString("status"), summary(rs), baseline, rs.getString("failure_code"),
-                rs.getObject("requested_by", UUID.class), instant(rs, "started_at"),
+                rs.getObject("requested_by", UUID.class), rs.getInt("attempt_count"),
+                rs.getString("claimed_by"), instant(rs, "heartbeat_at"),
+                instant(rs, "lease_expires_at"), instant(rs, "started_at"),
                 instant(rs, "finished_at"), instant(rs, "created_at"), results);
     }
 
@@ -616,11 +771,6 @@ public class JdbcAgentEvaluationStore implements AgentEvaluationStore {
                 rs.getString("details"));
     }
 
-    private UUID workspaceForEvaluation(UUID evaluationRunId) {
-        return jdbc.sql("select workspace_id from agent_evaluation_run where id = :id")
-                .param("id", evaluationRunId).query(UUID.class).single();
-    }
-
     private List<String> strings(String value) {
         try {
             return value == null ? List.of() : List.copyOf(json.readValue(value, STRING_LIST));
@@ -643,4 +793,8 @@ public class JdbcAgentEvaluationStore implements AgentEvaluationStore {
         Timestamp value = rs.getTimestamp(column);
         return value == null ? null : value.toInstant();
     }
+
+    private record ClaimableEvaluation(
+            UUID id, UUID workspaceId, UUID requestedBy, int attemptCount) { }
+
 }

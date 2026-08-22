@@ -24,10 +24,11 @@
 
 ## 3. 生产发布与演练
 
-- Git 提交：待提交。
-- CI：待执行。
-- 不可变镜像部署：待执行。
-- 公网健康：待执行。
+- Git 提交：`501849eef423da7111392b765e342c7c7f730fc3`。
+- CI：GitHub Actions Run `32581592908`，后端、前端及 Server/Worker/Web 三个不可变镜像任务全部成功。
+- 不可变镜像部署：GitHub Actions Run `32581830244` 成功，目标镜像 Tag 为完整提交 SHA；PostgreSQL、Ollama、Server、Worker、Web、Caddy 六服务健康门禁通过。
+- 公网健康：`https://insightops.canghaior.com/` 返回 `200`；未登录访问 `/api/v1/auth/me` 返回 `401`，鉴权边界保持有效。
+- Actuator 未通过公网 Caddy 暴露；后端健康以部署脚本的容器内健康检查为准。
 - 生产 `SIGKILL` 接管演练：必须由用户对具体非关键 Run 单独确认后执行；实现和部署授权不等于生产故障注入授权。
 
 ## 4. 验收口径

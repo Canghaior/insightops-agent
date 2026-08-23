@@ -63,6 +63,12 @@ const router = createRouter({
       component: () => import('@/views/AdminAgentEvaluationsView.vue'),
       meta: { manager: true },
     },
+    {
+      path: '/admin/agent-workflows',
+      name: 'admin-agent-workflows',
+      component: () => import('@/views/AdminAgentWorkflowsView.vue'),
+      meta: { manager: true },
+    },
   ],
 })
 

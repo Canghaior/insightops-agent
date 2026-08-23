@@ -51,7 +51,7 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 |---|---:|---|
 | 固定三项目的封闭 Alpha | 约 94% | 三项目生产知识库、50 题及反馈版本化 RAG 门禁、统一事件流、真实引用问答、采集可观测性和备份链路已验收 |
 | 用户可自由配置的技术情报产品 | 约 86% | 项目、知识源、RSS、Roadmap、用户资料、关注规则、反馈复核、报告导出和 Webhook 已产品化；邮件、专用协作渠道及十项目长期稳定性观察仍待完成 |
-| 通用多工具自主 Agent | 约 91% | P2.0 已完成 Function Calling、可靠性和写工具治理；P2.1-A/B/C、P2.2-A/B/C、P2.3-A/B/C 已实现并部署；下一步是经单独授权完成真实生产故障注入，并进入更完整的工作流表达与工具生态 |
+| 通用多工具自主 Agent | 约 94% | P2.0 已完成 Function Calling、可靠性和写工具治理；P2.1-A/B/C、P2.2-A/B/C、P2.3-A/B/C 已关闭生产验收；P2.4-A 已实现工作流模板与可视化预检，下一步是模板绑定真实 Run 与依赖结果表达式 |
 | 可公开运营的 SaaS | 约 40% | 已有上传配额、应用指标、关键告警和含文件卷备份；仍缺注册、找回密码、计费、合规、异地副本和完整容灾演练 |
 
 当前最准确的阶段判断是：
@@ -268,16 +268,18 @@ P2.3-A 已完成持久评测队列并关闭生产验收：V33 增加评测领取
 P2.3-B 已完成普通聊天跨实例持久执行并关闭生产发布验收：V34 增加 `agent_run_work` 和单调事件日志；浏览器连接只观察持久 SSE，页面刷新不会取消后台 Run；多实例使用租约、心跳和 fencing token 接管，旧 Worker 不能追加事件、提交终态或释放成本预留；接管时清理孤儿 Plan/Node/Tool/Step，并从同一 Run 最近安全点恢复证据、引用、工具签名和预算。真实 PostgreSQL 全仓 243/243、Flyway 34/34 及前端 48/48 均通过；生产提交 `b2b5df3d2fa239e2f2697461ec9bd8fe8f4253f4` 经 CI Run `32577494585` 和部署 Run `32577695797` 验证，六服务健康门禁通过。运行中进程终止、租约接管和成本账本核对的真实故障注入纳入 P2.3-C。
 
 
-P2.3-C 已完成可靠性 SLO、告警与安全演练能力并部署生产：队列采样器持续汇总排队、运行、过期租约、最老等待和最老心跳；接管延迟、租约丢失、调度错误及 SSE 重连/回放进入 Micrometer、Prometheus 八条告警和 Grafana 四个面板。生产演练脚本要求具体 Run、显式强确认、可用安全点与成本预留前置条件，并核对 Worker 身份切换、恢复计数、旧 token 隔离和单次 SETTLE/RELEASE。后端全仓 250/250、Flyway 34/34、前端 48/48、Prometheus 16 条规则及 Grafana 12 面板均通过；提交 `501849eef423da7111392b765e342c7c7f730fc3` 经 CI Run `32581592908` 和部署 Run `32581830244` 验证，六服务健康门禁通过。真实生产 `SIGKILL` 演练仍需用户为具体非关键 Run 单独授权，不能由实现或部署授权替代。
+P2.3-C 已完成可靠性 SLO、告警与安全演练能力并关闭真实生产故障验收：队列采样器持续汇总排队、运行、过期租约、最老等待和最老心跳；接管延迟、租约丢失、调度错误及 SSE 重连/回放进入 Micrometer、Prometheus 八条告警和 Grafana 四个面板。生产演练脚本要求具体 Run、显式强确认、可用安全点与成本预留前置条件，并核对 Worker 身份切换、恢复计数、旧 token 隔离和单次 SETTLE/RELEASE。后端全仓 250/250、Flyway 34/34、前端 48/48、Prometheus 16 条规则及 Grafana 12 面板均通过；提交 `501849eef423da7111392b765e342c7c7f730fc3` 经 CI Run `32581592908` 和部署 Run `32581830244` 验证，六服务健康门禁通过。2026-08-23 在用户对唯一测试 Run 明确授权后，受保护工作流 Run `32619069324` 对 Run `65989f2a-b8ec-420d-893b-9a4506f8ed3c` 完成一次真实 Server `SIGKILL`：attempt `1→2`、Worker 切换、`run_recovered` 追加、旧 token 隔离和成本单次 `SETTLED` 全部通过，服务自动恢复为 `UP`，真实生产故障注入闭环已关闭。
+
+P2.4-A 已实现工作流模板与运行前可视化预检：V35 提供 Workspace 模板、不可变版本、单活动版本和激活审计；保存与激活前复用 P2.1 条件 DAG 校验，并增加工具启用状态、输入合同和写节点独占门禁。Owner/系统管理员页面支持四类内置研究模板、节点/依赖/条件编辑、分层 DAG 预览、版本创建与激活，并可将入口问题带入研究问答。真实 PostgreSQL Flyway 35/35、模板版本切换与审计门禁、后端 263 个测试槽以及前端 53/53 均通过。P2.4-A 只关闭模板与预检闭环，活动模板直接驱动持久 Run 留给 P2.4-B。
 
 当前仍缺少：
 
-- 工作流可视化编辑器和依赖结果表达式；聊天与评测均已持久执行，SLO、告警和接管运行手册已部署，但真实生产故障注入仍待对具体非关键 Run 单独授权，当前动态参数通过下一轮 Planner 修订。
+- 活动工作流模板直接绑定聊天 Run、依赖结果表达式和失败节点定点重跑；模板持久化、不可变版本、激活审计和分层可视化预检已在 P2.4-A 完成。
 - 超出用户记忆的更多写工具及其差异化审批、幂等和补偿策略。
 - 认证型/会话型 MCP、合同发现、健康探测与更完整的租户级工具包策略。
 - 套餐、订单、支付、退款、发票和财务级用量对账。
 
-P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md` 和 `docs/testing/results/p2-0-agent-tool-resilience-2026-08-22.md`；P2.0-D 见 `docs/architecture/p2-0-agent-tool-governance.md` 和 `docs/testing/results/p2-0-agent-tool-governance-2026-08-22.md`。P2.1-A/B/C 设计与测试见 `docs/architecture/p2-1-agent-orchestration-cost-governance.md` 和 `docs/testing/results/p2-1-agent-orchestration-cost-governance-2026-08-22.md`；P2.2-A/B/C 见 `docs/architecture/p2-2-agent-evaluation-release-governance.md` 和 `docs/testing/results/p2-2-agent-evaluation-release-governance-2026-08-22.md`；P2.3-A 见 `docs/architecture/p2-3-durable-agent-evaluation-queue.md` 和 `docs/testing/results/p2-3-durable-agent-evaluation-queue-2026-08-22.md`；P2.3-B 见 `docs/architecture/p2-3-durable-chat-agent-runs.md` 和 `docs/testing/results/p2-3-durable-chat-agent-runs-2026-08-22.md`；P2.3-C 见 `docs/architecture/p2-3-chat-reliability-slo.md` 和 `docs/testing/results/p2-3-chat-reliability-slo-2026-08-22.md`。
+P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md` 和 `docs/testing/results/p2-0-agent-tool-resilience-2026-08-22.md`；P2.0-D 见 `docs/architecture/p2-0-agent-tool-governance.md` 和 `docs/testing/results/p2-0-agent-tool-governance-2026-08-22.md`。P2.1-A/B/C 设计与测试见 `docs/architecture/p2-1-agent-orchestration-cost-governance.md` 和 `docs/testing/results/p2-1-agent-orchestration-cost-governance-2026-08-22.md`；P2.2-A/B/C 见 `docs/architecture/p2-2-agent-evaluation-release-governance.md` 和 `docs/testing/results/p2-2-agent-evaluation-release-governance-2026-08-22.md`；P2.3-A 见 `docs/architecture/p2-3-durable-agent-evaluation-queue.md` 和 `docs/testing/results/p2-3-durable-agent-evaluation-queue-2026-08-22.md`；P2.3-B 见 `docs/architecture/p2-3-durable-chat-agent-runs.md` 和 `docs/testing/results/p2-3-durable-chat-agent-runs-2026-08-22.md`；P2.3-C 见 `docs/architecture/p2-3-chat-reliability-slo.md` 和 `docs/testing/results/p2-3-chat-reliability-slo-2026-08-22.md`；P2.4-A 见 `docs/architecture/p2-4-agent-workflow-templates.md` 和 `docs/testing/results/p2-4-agent-workflow-templates-2026-08-23.md`。
 
 ### 5.3 RAG 重排与评测仍是基础版本
 
@@ -620,7 +622,8 @@ P2.1-C 已实现 Workspace Agent Token/成本/并发配额、用量聚合、硬�
 - [x] Owner/系统管理员可运行评测、比较趋势、查看逐案例 Trace，并从失败 Run 沉淀回归案例（P2.2-C，生产已验收）。
 - [x] 评测 Run 已支持持久队列、租约心跳、过期接管、fencing 和案例级断点续跑（P2.3-A，生产已验收）。
 - [x] 普通聊天 Agent Run 已支持持久队列、跨实例事件续流、租约接管、旧 Worker fencing 和同 Run 安全点恢复（P2.3-B，生产已验收）。
-- [x] 普通聊天可靠性队列 SLO、接管延迟、SSE 恢复指标、Prometheus 告警、Grafana 面板及强确认演练脚本已部署（P2.3-C；真实生产故障注入待单独授权）。
+- [x] Workspace 工作流模板、不可变版本、激活审计、工具合同门禁和分层 DAG 可视化预检已完成（P2.4-A）。
+- [x] 普通聊天可靠性队列 SLO、接管延迟、SSE 恢复指标、Prometheus 告警、Grafana 面板及强确认演练脚本已部署，并完成唯一测试 Run 的真实生产 `SIGKILL` 接管验收（P2.3-C）。
 
 ### 9.4 公开 SaaS 完成标准
 
@@ -668,7 +671,8 @@ P2.1-C 已实现 Workspace Agent Token/成本/并发配额、用量聚合、硬�
 9. [x] 实现版本化评测集、真实 AgentLoop 离线评测、质量/成本门槛、候选版本和生产激活审计（P2.2-A/B/C，生产已验收）。
 10. [x] 实现评测持久队列、心跳租约、过期接管、旧 Worker fencing 和案例级断点续跑（P2.3-A，生产已验收）。
 11. [x] 实现普通聊天持久工作单元、跨实例 SSE 回放、租约接管、旧 Worker fencing 和同 Run 安全点恢复（P2.3-B，生产已验收）。
-12. [x] 实现普通聊天队列与接管 SLO、SSE 恢复指标、可靠性告警、Grafana 面板及受保护的生产接管演练工具（P2.3-C，已部署；真实故障注入待单独授权）。
+13. [x] 实现工作流模板库、不可变版本、活动版本审计、运行前合同校验和分层 DAG 预览（P2.4-A）。
+12. [x] 实现普通聊天队列与接管 SLO、SSE 恢复指标、可靠性告警、Grafana 面板及受保护的生产接管演练工具，并完成真实生产 `SIGKILL` 接管闭环（P2.3-C，已验收）。
 
 ### 阶段 D：补齐公开运营能力
 

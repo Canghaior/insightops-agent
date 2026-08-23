@@ -1,7 +1,7 @@
 # P2.4-B 模板驱动 Agent Run 验收记录
 
 日期：2026-08-23
-状态：本地全链路通过，生产发布验收待补记
+状态：本地全链路、CI、生产部署与公开 Smoke 通过
 
 ## 1. 验收范围
 
@@ -83,4 +83,12 @@ npm run build
 
 ## 4. 生产发布验收
 
-待代码提交、CI、部署和生产 Smoke 完成后补记提交、GitHub Actions Run、生产 Flyway、页面/API 状态和真实模板 Run。
+- 生产代码提交：`d130d49bb3b9ecebe8c504e11ab2066aea258edc`。
+- CI Run：`32651837086`，backend、frontend 与三个生产镜像任务全部成功。
+- Deploy Run：`32652032226`，部署作业 `97225038238` 的密钥校验、SSH 配置、部署与健康门禁全部成功。
+- 部署日志确认镜像标签 `d130d49bb3b9ecebe8c504e11ab2066aea258edc` 整体健康；V36 已随 Server 启动并通过健康门禁。
+- 公网 `/`、`/agent-workflows`、`/admin/agent-workflows` 均返回 HTTP 200。
+- 公网 `/api/v1/system/status` 返回 `UP`，DeepSeek `deepseek-v4-flash` 的 `ready=true`。
+- 未登录 `/api/v1/agent-workflows` 返回 HTTP 401，认证边界生效。
+
+本机未保存可用的生产验收账号；对本地开发凭据的唯一一次生产登录校验返回 HTTP 401 后立即停止，未触发限流也未绕过认证。因此本记录不声称已完成认证态真实模板业务 Run；该项需在获得生产授权会话后另行补测。

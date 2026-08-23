@@ -80,6 +80,8 @@ class P23ChatReliabilityMonitoringContractTest {
                 "status = 'RESERVED'",
                 "p2-3-chat-takeover-drill.sh",
                 "--confirm-production-restart");
+        assertThat(acceptance).contains(
+                "waiting up to 5 minutes for an authenticated user submission");
         assertThat(acceptance).doesNotContain("set -x", "down -v", "rm -rf");
         assertThat(workflow).contains(
                 "workflow_dispatch:",

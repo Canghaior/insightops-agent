@@ -47,10 +47,6 @@ if (( LEASE_SECONDS >= RUN_TIMEOUT_SECONDS )); then
   echo "Chat lease must be shorter than the total run timeout; refusing fault injection" >&2
   exit 1
 fi
-if [[ -z "$AUTH_PASSWORD" || -z "$APP_ADDRESS" ]]; then
-  echo "Production acceptance login or APP_ADDRESS is unavailable" >&2
-  exit 1
-fi
 echo "Effective chat queue: lease=${LEASE_SECONDS}s heartbeat=${HEARTBEAT_SECONDS}s timeout=${RUN_TIMEOUT_SECONDS}s"
 
 compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
@@ -61,6 +57,7 @@ psql_scalar() {
 cookie_jar="$(mktemp)"
 sse_output="$(mktemp)"
 curl_pid=""
+auto_submitted=false
 cleanup() {
   if [[ -n "$curl_pid" ]] && kill -0 "$curl_pid" 2>/dev/null; then
     kill "$curl_pid" 2>/dev/null || true
@@ -72,25 +69,31 @@ cleanup() {
 }
 trap cleanup EXIT
 
-login_body="$(AUTH_USERNAME="$AUTH_USERNAME" AUTH_PASSWORD="$AUTH_PASSWORD" python3 -c \
-  'import json,os; print(json.dumps({"username":os.environ["AUTH_USERNAME"],"password":os.environ["AUTH_PASSWORD"]}))')"
-printf '%s' "$login_body" | \
-  curl --fail --silent --show-error --cookie-jar "$cookie_jar" \
-    --header 'Content-Type: application/json' --data-binary @- \
-    "https://${APP_ADDRESS}/api/v1/auth/login" >/dev/null
-unset AUTH_PASSWORD login_body
+if [[ -n "$AUTH_PASSWORD" && -n "$APP_ADDRESS" ]]; then
+  login_body="$(AUTH_USERNAME="$AUTH_USERNAME" AUTH_PASSWORD="$AUTH_PASSWORD" python3 -c \
+    'import json,os; print(json.dumps({"username":os.environ["AUTH_USERNAME"],"password":os.environ["AUTH_PASSWORD"]}))')"
+  printf '%s' "$login_body" | \
+    curl --fail --silent --show-error --cookie-jar "$cookie_jar" \
+      --header 'Content-Type: application/json' --data-binary @- \
+      "https://${APP_ADDRESS}/api/v1/auth/login" >/dev/null
+  unset AUTH_PASSWORD login_body
 
-chat_message="${MARKER}：分别检索 Spring AI、LangChain4j 和 Dify 的 Agent 工具调用机制，比较执行流程与失败恢复，并为每个框架给出官方来源。"
-chat_body="$(CHAT_MESSAGE="$chat_message" python3 -c \
-  'import json,os; print(json.dumps({"message":os.environ["CHAT_MESSAGE"],"sessionId":None,"resumeCheckpointId":None}))')"
-curl --fail --silent --show-error --no-buffer --max-time "$((RUN_TIMEOUT_SECONDS + 240))" \
-  --cookie "$cookie_jar" --header 'Accept: text/event-stream' \
-  --header 'Content-Type: application/json' --header "X-Trace-Id: ${MARKER}" \
-  --data-binary "$chat_body" "https://${APP_ADDRESS}/api/v1/chat/streams" >"$sse_output" &
-curl_pid=$!
-unset chat_body
+  chat_message="${MARKER}：分别检索 Spring AI、LangChain4j 和 Dify 的 Agent 工具调用机制，比较执行流程与失败恢复，并为每个框架给出官方来源。"
+  chat_body="$(CHAT_MESSAGE="$chat_message" python3 -c \
+    'import json,os; print(json.dumps({"message":os.environ["CHAT_MESSAGE"],"sessionId":None,"resumeCheckpointId":None}))')"
+  curl --fail --silent --show-error --no-buffer --max-time "$((RUN_TIMEOUT_SECONDS + 240))" \
+    --cookie "$cookie_jar" --header 'Accept: text/event-stream' \
+    --header 'Content-Type: application/json' --header "X-Trace-Id: ${MARKER}" \
+    --data-binary "$chat_body" "https://${APP_ADDRESS}/api/v1/chat/streams" >"$sse_output" &
+  curl_pid=$!
+  auto_submitted=true
+  unset chat_body
+else
+  unset AUTH_PASSWORD
+  echo "Automatic login unavailable; waiting up to 5 minutes for an authenticated user submission containing marker $MARKER"
+fi
 
-deadline=$((SECONDS + 150))
+deadline=$((SECONDS + 300))
 run_id=""
 while (( SECONDS < deadline )); do
   candidates="$(psql_scalar "
@@ -118,7 +121,7 @@ while (( SECONDS < deadline )); do
     run_id="$(printf '%s' "$candidates" | tr -d '[:space:]')"
     break
   fi
-  if ! kill -0 "$curl_pid" 2>/dev/null; then
+  if [[ "$auto_submitted" == "true" ]] && ! kill -0 "$curl_pid" 2>/dev/null; then
     break
   fi
   sleep 0.25

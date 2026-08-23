@@ -29,3 +29,11 @@
 ## 4. 阶段边界
 
 P2.4-A 关闭“模板持久化 + 可视化预检”闭环。活动模板直接驱动真实 Run、依赖结果表达式和失败节点重跑明确留给 P2.4-B。
+
+## 5. 生产发布结果
+
+- 生产提交：`ca9c2fcfd8525c5c328907c4ca21f6a392706fee`。
+- GitHub CI Run `32621114400`：PASS，后端、前端与 Server/Worker/Web 镜像构建全绿。
+- GitHub Deploy Run `32621259016`：PASS，生产迁移、镜像更新与健康检查成功。
+- 公网 `/api/v1/system/status`：`UP`，DeepSeek `deepseek-v4-flash` `ready=true`。
+- 公网 `/admin/agent-workflows`：HTTP 200；未登录访问管理 API 返回 HTTP 401，权限边界生效。

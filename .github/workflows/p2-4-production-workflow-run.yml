@@ -1,0 +1,61 @@
+name: P2.4-B production workflow Run acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type P2.4-B-READ-ONLY-RUN to authorize one production read-only template Run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: insightops-production
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Validate confirmation and production secrets
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test "$CONFIRMATION" = "P2.4-B-READ-ONLY-RUN"
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_PATH"
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+      - name: Execute one guarded read-only template Run
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          ACCEPTANCE_MARKER: P24B-RUN-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          printf -v remote_command \
+            'cd %q && git fetch origin main && git checkout main && git pull --ff-only origin main && bash scripts/p2-4-production-workflow-run-acceptance.sh %q --confirm-read-only-template-run' \
+            "$DEPLOY_PATH" "$ACCEPTANCE_MARKER"
+          ssh -i ~/.ssh/deploy_key \
+            -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "$remote_command"

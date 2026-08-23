@@ -63,6 +63,9 @@ public class DurableChatRunExecutionService {
     private final DurableChatRunMetrics metrics;
     private final ObjectMapper json;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.jundaodsj.insightops.server.workflow.AgentWorkflowFixedGraphService workflowGraphs;
+
     public DurableChatRunExecutionService(
             DurableChatRunStore store,
             AgentLoopService agentLoop,
@@ -136,6 +139,10 @@ public class DurableChatRunExecutionService {
             if ("CANCELLED".equals(exception.errorCode())) cancel(lease, answer);
             else fail(lease, answer, exception.errorCode(), null);
         }
+        catch (com.jundaodsj.insightops.server.workflow.AgentWorkflowFixedGraphService.WorkflowExecutionException exception) {
+            if ("CANCELLED".equals(exception.getMessage())) cancel(lease, answer);
+            else fail(lease, answer, failureCode(exception), null);
+        }
         catch (RuntimeException exception) {
             LOGGER.error("Durable chat run {} failed", lease.runId(), exception);
             fail(lease, answer, failureCode(exception), null);
@@ -155,13 +162,24 @@ public class DurableChatRunExecutionService {
                 append(lease, runRecovered(lease, preparation.recoveryCheckpointId()));
             }
             UUID recoveryCheckpointId = preparation.recoveryCheckpointId();
-            AgentLoopService.LoopResult loopResult = agentLoop.run(
-                    new AgentLoopService.LoopRequest(
-                            lease.runId(), lease.workspaceId(), lease.ownerUserId(),
-                            lease.systemAdmin(), AgentToolDefinition.AccessLevel.valueOf(lease.accessLevel()),
-                            lease.contextualPrompt(), lease.resumeCheckpointId(), null, false,
-                            recoveryCheckpointId),
-                    progress(lease), guard::isActive);
+            AgentToolDefinition.AccessLevel accessLevel =
+                    AgentToolDefinition.AccessLevel.valueOf(lease.accessLevel());
+            AgentLoopService.LoopResult loopResult;
+            if (workflowGraphs != null && workflowGraphs.isWorkflow(lease.runId())) {
+                loopResult = workflowGraphs.execute(
+                        new com.jundaodsj.insightops.server.workflow.AgentWorkflowFixedGraphService.Request(
+                                lease.runId(), lease.workspaceId(), lease.ownerUserId(),
+                                lease.systemAdmin(), accessLevel, lease.leaseToken(),
+                                lease.attemptCount(), lease.workerId(), recoveryCheckpointId),
+                        progress(lease), guard::isActive);
+            }
+            else {
+                loopResult = agentLoop.run(new AgentLoopService.LoopRequest(
+                                lease.runId(), lease.workspaceId(), lease.ownerUserId(),
+                                lease.systemAdmin(), accessLevel, lease.contextualPrompt(),
+                                lease.resumeCheckpointId(), null, false, recoveryCheckpointId),
+                        progress(lease), guard::isActive);
+            }
             guard.renewNow();
             verifySources(loopResult.citations());
 
@@ -491,6 +509,11 @@ public class DurableChatRunExecutionService {
     }
 
     private static String failureCode(RuntimeException exception) {
+        if (exception instanceof com.jundaodsj.insightops.server.workflow.AgentWorkflowFixedGraphService.WorkflowExecutionException
+                && exception.getMessage() != null && !exception.getMessage().isBlank()) {
+            String workflowCode = exception.getMessage().strip();
+            return workflowCode.length() <= 64 ? workflowCode : workflowCode.substring(0, 64);
+        }
         String code = exception.getClass().getSimpleName()
                 .replaceAll("([a-z])([A-Z])", "$1_$2").toUpperCase(java.util.Locale.ROOT);
         return code.length() <= 64 ? code : code.substring(0, 64);

@@ -23,6 +23,7 @@ const navigation = [
   { path: '/digests', label: '情报摘要', icon: Operation, noticeBadge: true },
   { path: '/reports', label: '报告交付', icon: DataAnalysis },
   { path: '/chat', label: '研究问答', icon: ChatDotRound },
+  { path: '/agent-workflows', label: '研究工作流', icon: Operation },
   { path: '/knowledge-files', label: '知识文件', icon: Document },
   { path: '/memory', label: '长期记忆', icon: User },
   { path: '/approvals', label: '操作审批', icon: Operation },

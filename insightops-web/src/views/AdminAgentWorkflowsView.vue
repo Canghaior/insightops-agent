@@ -21,6 +21,7 @@ interface EditableNode {
   argumentsJson: string
   dependsOn: string
   condition: string
+  exposeOutputs: string
   required: boolean
 }
 
@@ -34,9 +35,10 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const success = ref('')
+const inputSchemaPlaceholder = '{"topic":{"type":"string","required":true,"maxLength":200}}'
 const form = reactive({
   name: '', description: '', category: 'TECH_RESEARCH', summary: '',
-  entryQuestion: '', reason: '',
+  entryQuestion: '', reason: '', inputsJson: '{}',
 })
 
 const selectedTemplate = computed(() => overview.value.templates.find(
@@ -66,10 +68,11 @@ function resetEditor() {
   form.summary = ''
   form.entryQuestion = ''
   form.reason = ''
+  form.inputsJson = '{}'
   const toolName = overview.value.tools[0]?.name ?? 'knowledge_hybrid_search'
   nodes.value = [{
     id: 'research_1', toolName, argumentsJson: defaultArguments(toolName),
-    dependsOn: '', condition: 'ALWAYS', required: true,
+    dependsOn: '', condition: 'ALWAYS', exposeOutputs: '', required: true,
   }]
   preview.value = null
   error.value = ''
@@ -79,20 +82,24 @@ function resetEditor() {
 function parseVersion(item: WorkflowVersion) {
   const graph = JSON.parse(item.graphSpecJson) as {
     reason?: string
+    inputs?: Record<string, unknown>
     nodes?: Array<{
       id?: string; toolName?: string; arguments?: Record<string, unknown>
-      dependsOn?: string[]; condition?: string; required?: boolean
+      dependsOn?: string[]; condition?: string; exposeOutputs?: string[]
+      required?: boolean
     }>
   }
   form.summary = item.summary
   form.entryQuestion = item.entryQuestion
   form.reason = graph.reason ?? ''
+  form.inputsJson = JSON.stringify(graph.inputs ?? {}, null, 2)
   nodes.value = (graph.nodes ?? []).map((node) => ({
     id: node.id ?? '',
     toolName: node.toolName ?? overview.value.tools[0]?.name ?? '',
     argumentsJson: JSON.stringify(node.arguments ?? {}, null, 2),
     dependsOn: (node.dependsOn ?? []).join(', '),
     condition: node.condition ?? 'ALL_SUCCESS',
+    exposeOutputs: (node.exposeOutputs ?? []).join(', '),
     required: node.required !== false,
   }))
   preview.value = null
@@ -141,12 +148,14 @@ function dependencies(value: string) {
 function graph(): Record<string, unknown> {
   return {
     reason: form.reason.trim(),
+    inputs: JSON.parse(form.inputsJson) as Record<string, unknown>,
     nodes: nodes.value.map((node) => ({
       id: node.id.trim(),
       toolName: node.toolName,
       arguments: JSON.parse(node.argumentsJson) as Record<string, unknown>,
       dependsOn: dependencies(node.dependsOn),
       condition: node.condition,
+      exposeOutputs: dependencies(node.exposeOutputs),
       required: node.required,
     })),
   }
@@ -172,7 +181,8 @@ function addNode() {
   nodes.value.push({
     id: `research_${nodes.value.length + 1}`, toolName,
     argumentsJson: defaultArguments(toolName), dependsOn: '',
-    condition: nodes.value.length ? 'ALL_SUCCESS' : 'ALWAYS', required: true,
+    condition: nodes.value.length ? 'ALL_SUCCESS' : 'ALWAYS',
+    exposeOutputs: '', required: true,
   })
   preview.value = null
 }
@@ -223,7 +233,7 @@ async function activate() {
   if (!globalThis.confirm(`激活“${template.name}”v${version.version}？`)) return
   saving.value = true
   try {
-    await activateAgentWorkflowVersion(template.id, version.id, 'P2.4-A visual review passed')
+    await activateAgentWorkflowVersion(template.id, version.id, 'P2.4-B contract and graph review passed')
     await load(template.id, version.id)
     success.value = `v${version.version} 已激活，旧活动版本已自动退役。`
   } catch {
@@ -290,6 +300,7 @@ onMounted(() => load())
             </label>
             <label class="wide">入口研究问题<textarea v-model="form.entryQuestion" maxlength="4000" required /></label>
             <label class="wide">规划理由<textarea v-model="form.reason" maxlength="500" /></label>
+            <label class="wide">入口参数定义 JSON<textarea v-model="form.inputsJson" spellcheck="false" :placeholder="inputSchemaPlaceholder" /></label>
           </div>
 
           <div class="node-heading"><div><span class="eyebrow">DAG Nodes</span><h3>任务节点</h3></div><button type="button" class="secondary-button" @click="addNode">增加节点</button></div>
@@ -300,6 +311,7 @@ onMounted(() => load())
               <label>工具<select v-model="node.toolName" @change="changeTool(node)"><option v-for="tool in overview.tools" :key="tool.name" :value="tool.name">{{ tool.name }} · {{ tool.riskLevel }}</option></select></label>
               <label>依赖节点（逗号分隔）<input v-model="node.dependsOn" placeholder="research_1, research_2" /></label>
               <label>条件<select v-model="node.condition"><option>ALWAYS</option><option>ALL_SUCCESS</option><option>ANY_SUCCESS</option><option>ANY_FAILED</option><option>ALL_TERMINAL</option></select></label>
+              <label class="wide">允许下游读取的输出字段（逗号分隔）<input v-model="node.exposeOutputs" placeholder="resultCount, sources" /></label>
               <label class="wide">工具参数 JSON<textarea v-model="node.argumentsJson" spellcheck="false" /></label>
               <label class="checkbox"><input v-model="node.required" type="checkbox" /> 必须成功节点</label>
             </div>

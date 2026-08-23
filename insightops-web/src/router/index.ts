@@ -12,6 +12,7 @@ const router = createRouter({
     { path: '/watch-rules', name: 'watch-rules', component: () => import('@/views/WatchRulesView.vue') },
     { path: '/intelligence', name: 'intelligence', component: () => import('@/views/IntelligenceView.vue') },
     { path: '/intelligence/:analysisId', name: 'intelligence-detail', component: () => import('@/views/IntelligenceView.vue') },
+    { path: '/agent-workflows', name: 'agent-workflows', component: () => import('@/views/AgentWorkflowsView.vue') },
     { path: '/digests', name: 'digests', component: () => import('@/views/DigestsView.vue') },
     { path: '/reports', name: 'reports', component: () => import('@/views/ReportsView.vue') },
     { path: '/chat', name: 'chat', component: () => import('@/views/ChatView.vue') },

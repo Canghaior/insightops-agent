@@ -34,6 +34,28 @@ public class DurableChatRunCoordinator {
 
     public boolean enabled() { return properties.isEnabled(); }
 
+    public void enqueue(
+            ActorContext actor,
+            UUID runId,
+            UUID sessionId,
+            String traceId,
+            boolean systemAdmin,
+            AgentToolDefinition.AccessLevel accessLevel,
+            String userPrompt,
+            String contextualPrompt,
+            UUID resumeCheckpointId,
+            Instant createdAt) {
+        ChatSseEvent started = new ChatSseEvent(
+                "started", runId.toString(), sessionId, 0, createdAt, traceId,
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, List.of(), List.of(), null);
+        store.enqueue(new DurableChatRunStore.WorkDraft(
+                        runId, actor.workspaceId(), actor.userId(), sessionId, traceId,
+                        systemAdmin, accessLevel.name(), userPrompt, contextualPrompt,
+                        resumeCheckpointId, properties.safeMaxAttempts(), createdAt),
+                json(started));
+    }
+
     public SseEmitter enqueueAndOpen(
             ActorContext actor,
             UUID runId,

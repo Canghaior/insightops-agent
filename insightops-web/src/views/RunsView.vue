@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import {
@@ -13,6 +13,12 @@ import {
 } from '@/api/runs'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import { getLatestAgentCheckpoint, pauseAgentRun, type AgentCheckpoint } from '@/api/checkpoints'
+import {
+  getWorkflowRun,
+  retryWorkflowRun,
+  type WorkflowRunDetail,
+  type WorkflowRunNode,
+} from '@/api/workflowRuns'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,8 +34,10 @@ const total = ref(0)
 const totalPages = ref(0)
 const status = ref<RunStatus | ''>('')
 const checkpoint = ref<AgentCheckpoint | null>(null)
+const workflowRun = ref<WorkflowRunDetail | null>(null)
 const runActionLoading = ref(false)
 const runActionError = ref('')
+let detailPoll: ReturnType<typeof globalThis.setInterval> | undefined
 
 const rangeLabel = computed(() => {
   if (total.value === 0) return '0 条记录'
@@ -53,21 +61,48 @@ async function loadRuns() {
   }
 }
 
-async function loadDetail(runId: string) {
-  detailLoading.value = true
-  detailError.value = null
-  selectedRun.value = null
-  checkpoint.value = null
-  runActionError.value = ''
+function stopDetailPolling() {
+  if (detailPoll) globalThis.clearInterval(detailPoll)
+  detailPoll = undefined
+}
+
+function startDetailPolling(runId: string) {
+  if (detailPoll) return
+  detailPoll = globalThis.setInterval(() => void loadDetail(runId, true), 2_000)
+}
+
+async function loadDetail(runId: string, quiet = false) {
+  if (!quiet) {
+    detailLoading.value = true
+    detailError.value = null
+    selectedRun.value = null
+    checkpoint.value = null
+    workflowRun.value = null
+    runActionError.value = ''
+  }
   try {
     selectedRun.value = await getRun(runId)
-    if (selectedRun.value.status === 'PAUSED') {
-      checkpoint.value = await getLatestAgentCheckpoint(runId)
+    try {
+      workflowRun.value = await getWorkflowRun(runId)
+    } catch {
+      workflowRun.value = null
+    }
+    if (selectedRun.value.status === 'PAUSED' || workflowRun.value) {
+      try {
+        checkpoint.value = await getLatestAgentCheckpoint(runId)
+      } catch {
+        checkpoint.value = null
+      }
     }
   } catch {
-    detailError.value = '该执行记录不存在或暂时无法读取。'
+    if (!quiet) detailError.value = '该执行记录不存在或暂时无法读取。'
   } finally {
-    detailLoading.value = false
+    if (!quiet) detailLoading.value = false
+    if (selectedRun.value?.id === runId && selectedRun.value.status === 'RUNNING') {
+      startDetailPolling(runId)
+    } else {
+      stopDetailPolling()
+    }
   }
 }
 
@@ -155,17 +190,41 @@ function budgetPercent(run: RunDetail): number {
 function nodeStatusLabel(status: string): string {
   return ({
     PENDING: '等待', RUNNING: '执行中', SUCCEEDED: '成功', FAILED: '失败',
-    SKIPPED: '跳过', BLOCKED: '条件未满足', WAITING_APPROVAL: '待审批', CANCELLED: '已取消',
+    SKIPPED: '跳过', REUSED: '已复用', BLOCKED: '条件未满足', WAITING_APPROVAL: '待审批', CANCELLED: '已取消',
   } as Record<string, string>)[status] ?? status
 }
 
 function pretty(value: unknown): string {
   return value == null ? '—' : JSON.stringify(value, null, 2)
 }
+async function retryWorkflow(node: WorkflowRunNode) {
+  if (!selectedRun.value || !workflowRun.value || node.status !== 'FAILED') return
+  runActionLoading.value = true
+  runActionError.value = ''
+  try {
+    const result = await retryWorkflowRun(selectedRun.value.id, node.logicalNodeId)
+    await router.push(`/runs/${result.runId}`)
+    await loadRuns()
+  } catch {
+    runActionError.value = '从失败节点重试失败，请确认 Run 状态和节点血缘。'
+  } finally {
+    runActionLoading.value = false
+  }
+}
+
+function workflowDuration(node: WorkflowRunNode): number | null {
+  if (!node.startedAt || !node.finishedAt) return null
+  return Math.max(0, new Date(node.finishedAt).getTime() - new Date(node.startedAt).getTime())
+}
+
+function workflowTokens(node: WorkflowRunNode): number {
+  return node.inputTokens + node.outputTokens
+}
 
 watch(
   () => route.params.runId,
   (value) => {
+    stopDetailPolling()
     const runId = Array.isArray(value) ? value[0] : value
     if (runId) void loadDetail(runId)
     else selectedRun.value = null
@@ -174,6 +233,7 @@ watch(
 )
 
 onMounted(loadRuns)
+onUnmounted(stopDetailPolling)
 </script>
 
 <template>
@@ -264,6 +324,51 @@ onMounted(loadRuns)
             <div><dt>Trace ID</dt><dd><code>{{ selectedRun.traceId }}</code></dd></div>
           </dl>
 
+          <section v-if="workflowRun" class="detail-block workflow-run-block">
+            <div class="detail-block-heading">
+              <span class="eyebrow">Workflow Snapshot · {{ workflowRun.templateName }} v{{ workflowRun.templateVersion }}</span>
+              <small>{{ workflowRun.nodes.length }} 节点 · 合同 {{ workflowRun.toolContractFingerprint.slice(0, 8) }}</small>
+            </div>
+            <p v-if="workflowRun.sourceRunId" class="checkpoint-notice">
+              从 Run
+              <RouterLink :to="`/runs/${workflowRun.sourceRunId}`">{{ shortId(workflowRun.sourceRunId) }}</RouterLink>
+              的失败节点 {{ workflowRun.retryFromNodeId }} 重试；成功节点直接复用。
+            </p>
+            <details><summary>固化入口参数</summary><pre>{{ pretty(workflowRun.inputs) }}</pre></details>
+            <div class="workflow-node-list">
+              <article
+                v-for="node in workflowRun.nodes"
+                :key="node.id"
+                class="workflow-runtime-node"
+                :class="`is-${node.status.toLowerCase()}`"
+              >
+                <header>
+                  <span><strong>{{ node.logicalNodeId }}</strong><code>{{ node.toolName }}@{{ node.toolVersion }}</code></span>
+                  <i class="status-pill" :class="`status-${node.status.toLowerCase()}`">{{ nodeStatusLabel(node.status) }}</i>
+                </header>
+                <p>
+                  {{ node.attemptCount }} 次节点执行 · {{ workflowTokens(node) }} Token ·
+                  {{ formatCost(node.estimatedCostCny) }} · {{ formatDuration(workflowDuration(node)) }}
+                </p>
+                <p v-if="node.errorCode" class="budget-warning">{{ node.errorCode }}</p>
+                <div class="workflow-node-actions">
+                  <button
+                    v-if="selectedRun.status === 'FAILED' && node.status === 'FAILED'"
+                    class="secondary-button"
+                    :disabled="runActionLoading"
+                    @click="retryWorkflow(node)"
+                  >
+                    从此失败节点重试
+                  </button>
+                  <a v-if="node.toolCallId" href="#execution-timeline">查看 Tool Call {{ shortId(node.toolCallId) }}</a>
+                </div>
+                <details><summary>解析后输入</summary><pre>{{ pretty(node.resolvedInput) }}</pre></details>
+                <details><summary>节点输出</summary><pre>{{ pretty(node.output) }}</pre></details>
+                <details><summary>允许下游读取</summary><pre>{{ pretty(node.exposedOutput) }}</pre></details>
+              </article>
+            </div>
+          </section>
+
           <section v-if="selectedRun.plan" class="detail-block run-plan-block">
             <div class="detail-block-heading">
               <span class="eyebrow">Task Graph · v{{ selectedRun.plan.version }}</span>
@@ -306,7 +411,7 @@ onMounted(loadRuns)
             <p>{{ selectedRun.failureCode }}<template v-if="selectedRun.failureMessage"> · {{ selectedRun.failureMessage }}</template></p>
           </section>
 
-          <section class="detail-block">
+          <section id="execution-timeline" class="detail-block">
             <div class="detail-block-heading"><span class="eyebrow">Execution Timeline</span><small>{{ selectedRun.steps.length }} Steps</small></div>
             <div v-if="selectedRun.steps.length === 0" class="detail-placeholder">本次执行没有调用工具。</div>
             <article v-for="step in selectedRun.steps" :key="step.id" class="step-card">

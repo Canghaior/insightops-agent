@@ -1,7 +1,6 @@
 package com.jundaodsj.insightops.server.workflow;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentWorkflowTemplateStore;
@@ -27,17 +26,25 @@ import java.util.UUID;
 public class AgentWorkflowService {
 
     private static final int MAX_NODES = 32;
-    private static final TypeReference<Map<String, Object>> JSON_OBJECT = new TypeReference<>() { };
 
     private final AgentWorkflowTemplateStore store;
     private final AgentToolRegistry registry;
     private final ObjectMapper json;
+    private final AgentWorkflowExpressionService expressions;
 
     public AgentWorkflowService(
             AgentWorkflowTemplateStore store, AgentToolRegistry registry, ObjectMapper json) {
+        this(store, registry, json, new AgentWorkflowExpressionService(json, registry));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AgentWorkflowService(
+            AgentWorkflowTemplateStore store, AgentToolRegistry registry, ObjectMapper json,
+            AgentWorkflowExpressionService expressions) {
         this.store = store;
         this.registry = registry;
         this.json = json;
+        this.expressions = expressions;
     }
 
     public Overview overview(UUID workspaceId, UUID userId) {
@@ -84,6 +91,8 @@ public class AgentWorkflowService {
 
     public Preview preview(String graphSpecJson) {
         String canonical = canonicalGraph(graphSpecJson);
+        AgentWorkflowExpressionService.Graph expressionGraph = expressions.validateGraph(canonical);
+        expressions.validateArgumentContracts(expressionGraph);
         ConditionalTaskGraph.Submission submission;
         try {
             submission = ConditionalTaskGraph.parse(
@@ -97,15 +106,6 @@ public class AgentWorkflowService {
         submission.nodes().forEach(node -> names.put(node.id(), node.logicalId()));
         List<NodePreview> nodes = new ArrayList<>();
         for (ConditionalTaskGraph.Node node : submission.nodes()) {
-            try {
-                Map<String, Object> arguments = json.readValue(node.argumentsJson(), JSON_OBJECT);
-                registry.validateInput(
-                        node.toolName(), AgentToolDefinition.AccessLevel.SYSTEM_ADMIN, arguments);
-            }
-            catch (JsonProcessingException | AgentToolRegistry.ToolRegistryException exception) {
-                throw new IllegalArgumentException(
-                        "WORKFLOW_TOOL_ARGUMENTS_INVALID:" + node.logicalId(), exception);
-            }
             nodes.add(new NodePreview(
                     node.logicalId(), node.toolName(), node.argumentsJson(),
                     node.dependencyIds().stream().map(names::get).toList(),
@@ -189,15 +189,19 @@ public class AgentWorkflowService {
             Map<String, Object> node = new LinkedHashMap<>();
             node.put("id", "research_" + (i + 1));
             node.put("toolName", "knowledge_hybrid_search");
-            node.put("arguments", Map.of("query", queries.get(i), "candidateLimit", 12));
+            node.put("arguments", Map.of(
+                    "query", "${inputs.topic} · " + queries.get(i), "candidateLimit", 12));
             node.put("dependsOn", List.of());
             node.put("condition", "ALWAYS");
             node.put("required", true);
+            node.put("exposeOutputs", List.of("resultCount", "sources"));
             nodes.add(node);
         }
+        Map<String, Object> inputs = Map.of("topic", Map.of(
+                "type", "string", "required", true, "maxLength", 240));
         return new TemplateDraft(name, description, category,
-                new VersionDraft("内置 P2.4-A 模板", question,
-                        write(Map.of("reason", description, "nodes", nodes))));
+                new VersionDraft("内置 P2.4-B 模板", question + "\n具体研究对象：${inputs.topic}",
+                        write(Map.of("reason", description, "inputs", inputs, "nodes", nodes))));
     }
 
     private String write(Object value) {
@@ -227,11 +231,12 @@ public class AgentWorkflowService {
 
     public record ToolSummary(
             String name, String description, String riskLevel,
-            String approvalPolicy, Map<String, Object> inputSchema) {
+            String approvalPolicy, Map<String, Object> inputSchema,
+            Map<String, Object> outputSchema) {
         static ToolSummary from(AgentToolDefinition definition) {
             return new ToolSummary(definition.name(), definition.description(),
                     definition.riskLevel().name(), definition.approvalPolicy().name(),
-                    definition.inputSchema());
+                    definition.inputSchema(), definition.outputSchema());
         }
     }
 

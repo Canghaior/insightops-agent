@@ -29,16 +29,22 @@ POSTGRES_USER="$(prod_env_get POSTGRES_USER "$ENV_FILE")"
 POSTGRES_DB="$(prod_env_get POSTGRES_DB "$ENV_FILE")"
 RUN_TIMEOUT_SECONDS="$(prod_env_get AGENT_CHAT_QUEUE_RUN_TIMEOUT_SECONDS "$ENV_FILE")"
 AUTH_USERNAME="$(prod_env_get AUTH_BOOTSTRAP_USERNAME "$ENV_FILE")"
-AUTH_PASSWORD="$(prod_env_get AUTH_BOOTSTRAP_PASSWORD "$ENV_FILE")"
+SERVER_AUTH_PASSWORD="$(prod_env_get AUTH_BOOTSTRAP_PASSWORD "$ENV_FILE")"
 APP_ADDRESS="$(prod_env_get APP_ADDRESS "$ENV_FILE")"
 POSTGRES_USER="${POSTGRES_USER:-insightops}"
 POSTGRES_DB="${POSTGRES_DB:-insightops}"
 RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-$(prod_env_get AGENT_RUN_TIMEOUT_SECONDS "$ENV_FILE")}"
 RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-90}"
 AUTH_USERNAME="${AUTH_USERNAME:-alpha-owner}"
+STDIN_AUTH_PASSWORD=""
+if [[ ! -t 0 ]]; then
+  IFS= read -r STDIN_AUTH_PASSWORD || true
+fi
+AUTH_PASSWORD="${STDIN_AUTH_PASSWORD:-$SERVER_AUTH_PASSWORD}"
+unset STDIN_AUTH_PASSWORD SERVER_AUTH_PASSWORD
 
 if [[ -z "$AUTH_PASSWORD" || -z "$APP_ADDRESS" ]]; then
-  echo "Production authentication or application address is unavailable" >&2
+  echo "Production authentication is unavailable; configure the P24B_ACCEPTANCE_PASSWORD production secret" >&2
   exit 1
 fi
 if ! [[ "$RUN_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then

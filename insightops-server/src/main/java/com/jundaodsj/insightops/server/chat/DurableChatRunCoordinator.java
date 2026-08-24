@@ -83,6 +83,11 @@ public class DurableChatRunCoordinator {
         return streams.open(actor, runId, afterSequence);
     }
 
+    public DurableChatStreamService.ReplayBatch readBatch(
+            ActorContext actor, UUID runId, long afterSequence) {
+        return streams.readBatch(actor, runId, afterSequence);
+    }
+
     public boolean requestCancel(ActorContext actor, UUID runId) {
         return store.requestCancel(actor, runId, Instant.now());
     }

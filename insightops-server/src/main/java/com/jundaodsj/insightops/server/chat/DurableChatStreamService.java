@@ -14,6 +14,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -23,6 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class DurableChatStreamService {
 
     static final String RUN_ID_HEADER = "X-InsightOps-Run-Id";
+    private static final int REPLAY_BATCH_SIZE = 200;
 
     private final DurableChatRunStore store;
     private final DurableChatRunProperties properties;
@@ -61,6 +63,21 @@ public class DurableChatStreamService {
         return emitter;
     }
 
+    public ReplayBatch readBatch(ActorContext actor, UUID runId, long afterSequence) {
+        DurableChatRunStore.WorkView work = store.findOwned(actor, runId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Agent run not found"));
+        List<ObjectNode> events = store.events(
+                        actor, runId, Math.max(0, afterSequence), REPLAY_BATCH_SIZE)
+                .stream()
+                .map(event -> payload(event, runId))
+                .toList();
+        long lastSequence = events.isEmpty()
+                ? Math.max(0, afterSequence)
+                : events.getLast().path("sequence").asLong(afterSequence);
+        return new ReplayBatch(events, work.status(), work.terminal(), lastSequence);
+    }
+
     void replay(
             ActorContext actor, UUID runId, long initialSequence,
             SseEmitter emitter, AtomicBoolean connected) {
@@ -69,7 +86,7 @@ public class DurableChatStreamService {
         long heartbeatNanos = properties.streamHeartbeatInterval().toNanos();
         try {
             while (connected.get()) {
-                var events = store.events(actor, runId, cursor, 200);
+                var events = store.events(actor, runId, cursor, REPLAY_BATCH_SIZE);
                 for (DurableChatRunStore.StoredEvent event : events) {
                     ObjectNode payload = payload(event, runId);
                     emitter.send(SseEmitter.event()
@@ -103,6 +120,13 @@ public class DurableChatStreamService {
             metrics.streamDisconnected();
             if (connected.get()) emitter.completeWithError(exception);
         }
+    }
+
+    public record ReplayBatch(
+            List<ObjectNode> events,
+            String status,
+            boolean terminal,
+            long lastSequence) {
     }
 
     static final class RunAwareSseEmitter extends SseEmitter {

@@ -72,4 +72,36 @@ class DurableChatStreamServiceTest {
 
         verify(emitter).send(any(SseEmitter.SseEventBuilder.class));
     }
+
+    @Test
+    void readsDurableEventsAsJsonBatchForNonStreamingRecovery() {
+        UUID runId = UUID.fromString("55555555-5555-4555-8555-555555555555");
+        ActorContext actor = new ActorContext(
+                UUID.fromString("66666666-6666-4666-8666-666666666666"),
+                UUID.fromString("77777777-7777-4777-8777-777777777777"));
+        DurableChatRunStore store = mock(DurableChatRunStore.class);
+        DurableChatRunProperties properties = new DurableChatRunProperties();
+        DurableChatRunMetrics metrics = mock(DurableChatRunMetrics.class);
+        DurableChatStreamService service = new DurableChatStreamService(
+                store, properties, Runnable::run, new ObjectMapper(), metrics);
+        DurableChatRunStore.WorkView succeeded = new DurableChatRunStore.WorkView(
+                runId, "SUCCEEDED", 1, 3, "server-1", Instant.now(),
+                null, null, null, null, Instant.now());
+        when(store.findOwned(actor, runId)).thenReturn(Optional.of(succeeded));
+        when(store.events(actor, runId, 0L, 200)).thenReturn(List.of(
+                new DurableChatRunStore.StoredEvent(
+                        1, "started", "{}", Instant.parse("2026-08-24T08:00:00Z")),
+                new DurableChatRunStore.StoredEvent(
+                        2, "completed", "{\"provider\":\"deepseek\"}",
+                        Instant.parse("2026-08-24T08:00:01Z"))));
+
+        DurableChatStreamService.ReplayBatch batch = service.readBatch(actor, runId, 0L);
+
+        assertEquals("SUCCEEDED", batch.status());
+        assertTrue(batch.terminal());
+        assertEquals(2L, batch.lastSequence());
+        assertEquals(List.of("started", "completed"), batch.events().stream()
+                .map(event -> event.path("type").asText()).toList());
+        assertEquals("deepseek", batch.events().getLast().path("provider").asText());
+    }
 }

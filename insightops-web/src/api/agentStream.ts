@@ -87,6 +87,18 @@ class StreamSilenceError extends Error {
   }
 }
 
+interface DurableEventBatch {
+  events: unknown[]
+  status: string
+  terminal: boolean
+  lastSequence: number
+}
+
+interface ApiResponse<T> {
+  traceId: string
+  data: T
+}
+
 export const CHAT_RUN_ID_HEADER = 'X-InsightOps-Run-Id'
 
 export function parseSseEnvelope(raw: string): ChatStreamEvent {
@@ -171,7 +183,7 @@ async function consumeSseResponse(
       parser.push(decoder.decode(value, { stream: true }))
     }
   } catch (error) {
-    await reader.cancel().catch(() => undefined)
+    void reader.cancel().catch(() => undefined)
     throw error
   }
 }
@@ -199,6 +211,7 @@ export async function streamChat(
   let lastSequence = 0
   let terminal = false
   const forward = (event: ChatStreamEvent) => {
+    if (event.sequence <= lastSequence) return
     activeRunId = event.runId
     lastSequence = Math.max(lastSequence, event.sequence)
     terminal = event.type === 'completed' || event.type === 'cancelled'
@@ -234,19 +247,24 @@ export async function streamChat(
   while (activeRunId && !terminal && !signal.aborted) {
     await reconnectDelay(signal)
     try {
-      const resumed = await fetch(
-        `${baseUrl}/chat/streams/${encodeURIComponent(activeRunId)}?afterSequence=${lastSequence}`,
+      const replay = await fetch(
+        `${baseUrl}/chat/streams/${encodeURIComponent(activeRunId)}/events?afterSequence=${lastSequence}`,
         {
           method: 'GET',
-          headers: { Accept: 'text/event-stream' },
+          headers: { Accept: 'application/json' },
           credentials: 'include',
           signal,
         },
       )
-      await consumeSseResponse(resumed, forward)
+      if (!replay.ok) throw new Error(`聊天事件恢复失败：HTTP ${replay.status}`)
+      const envelope = await replay.json() as ApiResponse<DurableEventBatch>
+      const events = Array.isArray(envelope.data?.events) ? envelope.data.events : []
+      for (const raw of events) {
+        forward(parseSseEnvelope(JSON.stringify(raw)))
+      }
     } catch (error) {
       if (signal.aborted) throw error
-      // A different Server instance may be taking over; retry from the durable event cursor.
+      // A different Server instance may be taking over; retry the durable event cursor.
     }
   }
 }

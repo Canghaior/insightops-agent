@@ -16,6 +16,7 @@ import com.jundaodsj.insightops.server.chat.AgentLoopService;
 import com.jundaodsj.insightops.server.chat.ChatStreamSessionRegistry;
 import com.jundaodsj.insightops.server.chat.ChatQuickReplyPolicy;
 import com.jundaodsj.insightops.server.chat.DurableChatRunCoordinator;
+import com.jundaodsj.insightops.server.chat.DurableChatStreamService;
 import com.jundaodsj.insightops.server.chat.KnowledgeRagService;
 import com.jundaodsj.insightops.server.chat.P0ChatGuardrail;
 import com.jundaodsj.insightops.server.chat.ProjectEventEvidenceService;
@@ -713,6 +714,27 @@ public class ChatStreamController {
                     HttpStatus.NOT_FOUND, "Agent run not found");
         }
         return durableChatRuns.open(CurrentAccount.actor(request), runUuid, afterSequence);
+    }
+
+    @GetMapping(value = "/{runId}/events", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ApiResponse<DurableChatStreamService.ReplayBatch> replayEvents(
+            @PathVariable String runId,
+            @RequestParam(defaultValue = "0") long afterSequence,
+            HttpServletRequest request) {
+        UUID runUuid;
+        try { runUuid = UUID.fromString(runId); }
+        catch (IllegalArgumentException exception) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.NOT_FOUND, "Agent run not found");
+        }
+        if (afterSequence < 0 || durableChatRuns == null || !durableChatRuns.enabled()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.NOT_FOUND, "Agent run not found");
+        }
+        return new ApiResponse<>(
+                (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE),
+                durableChatRuns.readBatch(
+                        CurrentAccount.actor(request), runUuid, afterSequence));
     }
 
     private SseEmitter quickReply(

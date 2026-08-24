@@ -112,7 +112,7 @@ workspace_count="$(sql_value "select count(*) from workspace")"
 user_count="$(sql_value "select count(*) from app_user")"
 upload_count="$(sql_value "select count(*) from knowledge_upload")"
 
-[[ "$flyway_version" =~ ^[0-9]+$ && "$flyway_version" -ge 37 ]] || {
+[[ "$flyway_version" =~ ^[0-9]+$ && "$flyway_version" -ge 38 ]] || {
   echo "Recovered Flyway version is invalid: $flyway_version" >&2
   exit 1
 }

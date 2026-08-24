@@ -2,6 +2,10 @@
 set -euo pipefail
 
 umask 077
+curl() {
+  command curl --header 'X-InsightOps-CSRF: 1' "$@"
+}
+
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.prod}"

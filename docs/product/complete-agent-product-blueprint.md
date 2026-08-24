@@ -52,7 +52,7 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 | 固定三项目的封闭 Alpha | 约 94% | 三项目生产知识库、50 题及反馈版本化 RAG 门禁、统一事件流、真实引用问答、采集可观测性和备份链路已验收 |
 | 用户可自由配置的技术情报产品 | 约 88% | 项目、知识源、RSS、Roadmap、用户资料、关注规则、反馈复核、报告导出和 Webhook 已产品化；10 项目 72 小时稳定性已关闭，邮件和专用协作渠道仍待完成 |
 | 通用多工具自主 Agent | 约 98% | P2.0 至 P2.3 已关闭生产验收；P2.4-A/B/C 已完成模板、真实持久 Run、节点恢复、拖拽编排、参数预设、可撤销分享和模板质量趋势 |
-| 可公开运营的 SaaS | 约 50% | 已有上传配额、应用指标、外部告警、AES-256 异地副本和隔离恢复；仍缺注册/验证/找回/MFA、计费、合规及完整团队 Workspace |
+| 可公开运营的 SaaS | 约 62% | P3.1 已补齐邀请制邮箱身份、找回、MFA、Session、注销申请和团队 Workspace；仍缺公开注册、计费、合规、安全供应链及公开 Beta 可用性硬门禁 |
 
 当前最准确的阶段判断是：
 
@@ -223,8 +223,8 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 
 ### 4.15 测试与持续集成
 
-- 后端当前真实 PostgreSQL 全仓 `verify` 为 283/283、0 失败、0 错误、0 跳过，PostgreSQL 18.4、Flyway 37/37。
-- 前端当前 23 个测试文件、63 个测试全部通过。
+- 后端当前真实 PostgreSQL 全仓 `verify` 为 290/290、0 失败、0 错误、0 跳过，PostgreSQL 18.4、Flyway 38/38。
+- 前端当前 25 个测试文件、67 个测试全部通过。
 - 前端 ESLint 通过。
 - 前端生产构建通过。
 - GitHub Actions 已配置后端验证、前端 lint/test/build 和三个镜像构建。
@@ -286,7 +286,7 @@ P2.3-B 持久聊天续流在 P2.4-B 之后又完成三轮生产缺陷修复：`6
 - 认证型/会话型 MCP、合同发现、健康探测与更完整的租户级工具包策略。
 - 套餐、订单、支付、退款、发票和财务级用量对账。
 
-P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md` 和 `docs/testing/results/p2-0-agent-tool-resilience-2026-08-22.md`；P2.0-D 见 `docs/architecture/p2-0-agent-tool-governance.md` 和 `docs/testing/results/p2-0-agent-tool-governance-2026-08-22.md`。P2.1-A/B/C 设计与测试见 `docs/architecture/p2-1-agent-orchestration-cost-governance.md` 和 `docs/testing/results/p2-1-agent-orchestration-cost-governance-2026-08-22.md`；P2.2-A/B/C 见 `docs/architecture/p2-2-agent-evaluation-release-governance.md` 和 `docs/testing/results/p2-2-agent-evaluation-release-governance-2026-08-22.md`；P2.3-A 见 `docs/architecture/p2-3-durable-agent-evaluation-queue.md` 和 `docs/testing/results/p2-3-durable-agent-evaluation-queue-2026-08-22.md`；P2.3-B 见 `docs/architecture/p2-3-durable-chat-agent-runs.md` 和 `docs/testing/results/p2-3-durable-chat-agent-runs-2026-08-22.md`；P2.3-C 见 `docs/architecture/p2-3-chat-reliability-slo.md` 和 `docs/testing/results/p2-3-chat-reliability-slo-2026-08-22.md`；P2.4-A 见 `docs/architecture/p2-4-agent-workflow-templates.md` 和 `docs/testing/results/p2-4-agent-workflow-templates-2026-08-23.md`；P2.4-B 见 `docs/architecture/p2-4-b-template-driven-agent-runs.md` 和 `docs/testing/results/p2-4-b-template-driven-agent-runs-2026-08-23.md`；P2.4-C 见 `docs/architecture/p2-4-c-workflow-productization.md` 和 `docs/testing/results/p2-4-c-workflow-productization-2026-08-24.md`。
+P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md` 和 `docs/testing/results/p2-0-agent-tool-resilience-2026-08-22.md`；P2.0-D 见 `docs/architecture/p2-0-agent-tool-governance.md` 和 `docs/testing/results/p2-0-agent-tool-governance-2026-08-22.md`。P2.1-A/B/C 设计与测试见 `docs/architecture/p2-1-agent-orchestration-cost-governance.md` 和 `docs/testing/results/p2-1-agent-orchestration-cost-governance-2026-08-22.md`；P2.2-A/B/C 见 `docs/architecture/p2-2-agent-evaluation-release-governance.md` 和 `docs/testing/results/p2-2-agent-evaluation-release-governance-2026-08-22.md`；P2.3-A 见 `docs/architecture/p2-3-durable-agent-evaluation-queue.md` 和 `docs/testing/results/p2-3-durable-agent-evaluation-queue-2026-08-22.md`；P2.3-B 见 `docs/architecture/p2-3-durable-chat-agent-runs.md` 和 `docs/testing/results/p2-3-durable-chat-agent-runs-2026-08-22.md`；P2.3-C 见 `docs/architecture/p2-3-chat-reliability-slo.md` 和 `docs/testing/results/p2-3-chat-reliability-slo-2026-08-22.md`；P2.4-A 见 `docs/architecture/p2-4-agent-workflow-templates.md` 和 `docs/testing/results/p2-4-agent-workflow-templates-2026-08-23.md`；P2.4-B 见 `docs/architecture/p2-4-b-template-driven-agent-runs.md` 和 `docs/testing/results/p2-4-b-template-driven-agent-runs-2026-08-23.md`；P2.4-C 见 `docs/architecture/p2-4-c-workflow-productization.md` 和 `docs/testing/results/p2-4-c-workflow-productization-2026-08-24.md`；P3.1 见 `docs/architecture/p3-1-identity-team-workspaces.md` 和 `docs/testing/results/p3-1-identity-team-workspaces-2026-08-25.md`。
 
 ### 5.3 RAG 重排与评测仍是基础版本
 
@@ -310,16 +310,11 @@ P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md
 - 冲突记忆处理。
 - 记忆有效期、来源和置信度。
 
-### 5.5 Workspace 只是隔离基础
+### 5.5 团队 Workspace 基础闭环已完成
 
-当前具有 Workspace ID 和角色，但实际仍是一个预置 Alpha Workspace。尚未形成完整团队工作空间：
+P3.1 已实现 Workspace 创建、资料、活动 Workspace 切换、一次性邀请、Owner/Member 角色、所有权移交、成员移除/退出和归档。Session 固化活动 Workspace；成员关系移除或 Workspace 归档时自动迁移到另一个活动 Workspace，没有替代项才撤销。
 
-- 用户不能创建 Workspace。
-- 用户不能切换 Workspace。
-- 没有邀请链接。
-- 没有团队资料和团队设置。
-- 没有项目级权限。
-- 没有所有权移交和成员退出流程。
+仍待后续完成的是 Admin/Viewer 细角色、项目级 ACL、企业组织目录、团队通知策略和商业套餐权益，不再是固定单 Workspace 产品。
 
 ### 5.6 监控外发与异地恢复已闭环
 
@@ -327,21 +322,21 @@ P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md
 - Server/Worker Target 均为 `up`，18 条告警规则已加载并接入 Alertmanager；唯一 Canary 已通过随机私密 ntfy 主题完成端到端到达验收。
 - 数据库与上传卷联合备份已在真实部署中生成并通过校验，每日 03:17 的 Cron 已配置，使用 `flock` 防止重入。
 - 数据库与上传文件的 AES-256 加密三件套已保存到 GitHub Actions Artifact 30 天，明文和口令不离开生产安全边界。
-- 已从删除首份 Runner 副本后的 Artifact 往返副本完成 PostgreSQL 18 隔离恢复，验证 Flyway 37、10 项目、Workspace、用户和上传摘要。
+- 已从删除首份 Runner 副本后的 Artifact 往返副本完成 PostgreSQL 18 隔离恢复，验证当时 Flyway 37、10 项目、Workspace、用户和上传摘要；P3.1 当前数据库版本为 Flyway 38。
 - GitHub 生产部署/可靠性 Workflow、专用部署密钥和所需 `production` Environment Secrets 已配置；Stage 3 最终部署、外部告警和隔离恢复验收成功。
 - 当前生产发布已以 GitHub Actions 为主，管理员 SSH 会话保留为故障处置通道。
 
-### 5.7 安全能力仍是封闭 Alpha 水平
+### 5.7 身份安全已增强，公开运营安全仍未闭环
 
-已有登录限流、Secure Cookie、可信来源限制、Markdown 安全渲染、非 root 容器等基础，但尚未完整覆盖：
+P3.1 已增加 TOTP/一次性恢复码、邮箱验证和枚举安全的密码找回、设备 Session 与全会话撤销、PostgreSQL 持久限流、一次性哈希令牌、AES-256-GCM Secret/邮件 Outbox、写 API CSRF/Origin 门禁和 HSTS。
 
-- MFA。
-- 找回密码。
+仍未完整覆盖：
+
 - Secret 定期轮换。
 - CodeQL 或其他 SAST。
 - 容器镜像漏洞扫描。
-- Secret 泄漏扫描。
-- WAF、CDN 和 DDoS 增强。
+- Secret 泄漏扫描与 SBOM/签名。
+- WAF、CDN、DDoS 和机器人增强。
 - 安全告警和安全事件处理流程。
 
 ## 6. 当前尚未完成的核心产品能力
@@ -407,19 +402,11 @@ Owner 和系统管理员已经可以通过页面管理 GitHub 仓库，系统也
 - 管理员模型路由页面和不暴露密钥的可用性测试。
 - 用户级套餐配额和商业用量边界。
 
-### 6.7 公开用户体系尚未实现
+### 6.7 邀请制身份体系已实现，公开注册与数据权利仍待完成
 
-封闭 Alpha 可以继续由管理员创建用户；若进入公开 Beta，则需要：
+P3.1 已完成邀请注册链接、邮箱验证、忘记密码/重置、TOTP MFA、登录设备和 Session 管理、账户删除宽限期与身份匿名化。产品继续保持邀请制，不开放陌生用户自主注册。
 
-- 自主注册或邀请注册链接。
-- 邮箱验证。
-- 忘记密码和密码重置。
-- MFA。
-- 用户资料。
-- 登录设备和 Session 管理。
-- 账户注销。
-- 数据导出和删除。
-- 用户协议和隐私政策。
+公开 Beta 前仍需要自主注册的滥用边界、完整用户资料、数据导出、项目/内容/备份的法律级删除流程，以及经专业审阅的用户协议和隐私政策。
 
 ### 6.8 基础配额已实现，商业化尚未实现
 
@@ -633,7 +620,7 @@ P2.1-C 已实现 Workspace Agent Token/成本/并发配额、用量聚合、硬�
 
 ### 9.4 公开 SaaS 完成标准
 
-- [ ] 注册、验证、找回密码、MFA 和账户注销完整。
+- [~] 邀请制验证、找回密码、MFA、Session 和账户注销申请已完成（P3.1）；陌生用户自主注册与法律级内容删除仍待 P3.2。
 - [ ] 套餐、配额、用量和计费完整。
 - [ ] 用户协议、隐私政策和数据删除流程完整。
 - [x] 异地备份、恢复演练和外部告警完整（Stage 3 生产验收已通过）。
@@ -687,8 +674,8 @@ P2.1-C 已实现 Workspace Agent Token/成本/并发配额、用量聚合、硬�
 
 2026-08-24 已完成首次正式 Go/No-Go：允许继续封闭 Alpha/受控 Beta，并按 P3.1 身份与团队开始补齐；在硬门禁关闭前不开放自主注册或收费。
 
-1. 注册、邀请、找回密码和 MFA。
-2. 完整团队 Workspace。
+1. [x] 完成邀请制邮箱身份、验证、找回密码、TOTP MFA、Session 和账户注销申请（P3.1；不开放自主注册）。
+2. [x] 完成 Workspace 创建/切换、资料、邀请、Owner/Member、所有权移交、成员退出和归档（P3.1）。
 3. [~] Agent 基础配额与用量已完成；套餐、订单、支付、退款、发票和财务计费待完成。
 4. [x] Prometheus、Grafana、18 条应用告警规则和 Alertmanager 外发正式启用，私密 ntfy Canary 已验收。
 5. [x] AES-256 异地备份和隔离恢复演练已通过 GitHub Actions Artifact 往返闭环。

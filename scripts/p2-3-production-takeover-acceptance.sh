@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+curl() {
+  command curl --header 'X-InsightOps-CSRF: 1' "$@"
+}
+
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.prod}"
 COMPOSE_FILE="$ROOT_DIR/infra/compose.prod.yml"
 MARKER="${1:-}"

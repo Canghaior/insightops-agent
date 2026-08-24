@@ -11,8 +11,8 @@ export interface Account {
   mustChangePassword: boolean
 }
 
-export async function login(username: string, password: string): Promise<Account> {
-  const response = await apiClient.post<{ data: Account }>('/auth/login', { username, password })
+export async function login(username: string, password: string, mfaCode?: string): Promise<Account> {
+  const response = await apiClient.post<{ data: Account }>('/auth/login', { username, password, mfaCode })
   return response.data.data
 }
 

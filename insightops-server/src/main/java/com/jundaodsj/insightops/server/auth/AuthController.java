@@ -41,11 +41,15 @@ public class AuthController {
         String remoteAddress = request.getRemoteAddr();
         try {
             loginRateLimiter.check(body.username(), remoteAddress);
-            AuthService.LoginResult result = authService.login(body.username(), body.password());
+            AuthService.LoginResult result = authService.login(
+                    body.username(), body.password(), body.mfaCode(),
+                    request.getHeader(HttpHeaders.USER_AGENT), remoteAddress);
             loginRateLimiter.succeeded(body.username(), remoteAddress);
             response.addHeader(HttpHeaders.SET_COOKIE, cookie(result.token(), authService.cookieMaxAgeSeconds()));
             accountAdminService.auditSelf(result.account(), "LOGIN_SUCCEEDED");
             return new ApiResponse<>(traceId(request), view(result.account()));
+        } catch (AuthService.MfaRequiredException exception) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, "MFA_REQUIRED");
         } catch (AuthService.InvalidCredentialsException exception) {
             loginRateLimiter.failed(body.username(), remoteAddress);
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, exception.getMessage());
@@ -106,7 +110,8 @@ public class AuthController {
         return (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE);
     }
 
-    public record LoginRequest(@NotBlank String username, @NotBlank @Size(max = 72) String password) {
+    public record LoginRequest(@NotBlank String username, @NotBlank @Size(max = 72) String password,
+                               @Size(max = 32) String mfaCode) {
     }
 
     public record ChangePasswordRequest(

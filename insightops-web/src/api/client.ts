@@ -24,5 +24,8 @@ apiClient.interceptors.response.use(
 
 apiClient.interceptors.request.use((config) => {
   config.headers.set('X-Trace-Id', crypto.randomUUID())
+  if (!['get', 'head', 'options'].includes(String(config.method).toLowerCase())) {
+    config.headers.set('X-InsightOps-CSRF', '1')
+  }
   return config
 })

@@ -31,6 +31,7 @@ public class JdbcAccountWorkspaceStore implements AccountWorkspaceStore {
         Optional<AccountRecord> account = account("""
                 join auth_session auth on auth.user_id = u.id
                 where auth.token_hash = :value
+                  and member.workspace_id = auth.active_workspace_id
                   and auth.revoked_at is null
                   and auth.expires_at > :now
                 """, tokenHash, now);
@@ -90,6 +91,34 @@ public class JdbcAccountWorkspaceStore implements AccountWorkspaceStore {
                 .param("id", sessionId)
                 .param("userId", userId)
                 .param("tokenHash", tokenHash)
+                .param("createdAt", timestamp(createdAt))
+                .param("expiresAt", timestamp(expiresAt))
+                .update();
+    }
+
+    @Override
+    public void saveSession(
+            UUID sessionId,
+            UUID userId,
+            UUID activeWorkspaceId,
+            String tokenHash,
+            String userAgent,
+            String ipHash,
+            Instant createdAt,
+            Instant expiresAt) {
+        jdbcClient.sql("""
+                insert into auth_session
+                    (id, user_id, active_workspace_id, token_hash, user_agent, ip_hash,
+                     created_at, expires_at, last_seen_at)
+                values (:id, :userId, :workspaceId, :tokenHash, :userAgent, :ipHash,
+                        :createdAt, :expiresAt, :createdAt)
+                """)
+                .param("id", sessionId)
+                .param("userId", userId)
+                .param("workspaceId", activeWorkspaceId)
+                .param("tokenHash", tokenHash)
+                .param("userAgent", userAgent)
+                .param("ipHash", ipHash)
                 .param("createdAt", timestamp(createdAt))
                 .param("expiresAt", timestamp(expiresAt))
                 .update();

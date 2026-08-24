@@ -12,6 +12,18 @@ public interface AccountWorkspaceStore {
 
     void saveSession(UUID sessionId, UUID userId, String tokenHash, Instant createdAt, Instant expiresAt);
 
+    default void saveSession(
+            UUID sessionId,
+            UUID userId,
+            UUID activeWorkspaceId,
+            String tokenHash,
+            String userAgent,
+            String ipHash,
+            Instant createdAt,
+            Instant expiresAt) {
+        saveSession(sessionId, userId, tokenHash, createdAt, expiresAt);
+    }
+
     void revokeSession(String tokenHash, Instant revokedAt);
 
     void changePassword(UUID userId, String passwordHash, Instant changedAt);

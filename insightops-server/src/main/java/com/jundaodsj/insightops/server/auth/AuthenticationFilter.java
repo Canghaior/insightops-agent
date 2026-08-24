@@ -32,6 +32,8 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         return "OPTIONS".equals(request.getMethod())
                 || path.equals("/api/v1/auth/login")
+                || path.startsWith("/api/v1/public/identity/")
+                || path.startsWith("/api/v1/public/invitations/")
                 || path.equals("/api/v1/system/status")
                 || path.startsWith("/actuator/health")
                 || path.equals("/actuator/info")

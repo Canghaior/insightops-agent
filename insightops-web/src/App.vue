@@ -28,6 +28,7 @@ const navigation = [
   { path: '/memory', label: '长期记忆', icon: User },
   { path: '/approvals', label: '操作审批', icon: Operation },
   { path: '/runs', label: '执行记录', icon: Operation },
+  { path: '/workspace', label: 'Workspace', icon: FolderOpened },
   { path: '/settings', label: '账号设置', icon: Setting },
 ]
 
@@ -58,6 +59,13 @@ async function signOut() {
   await auth.signOut()
   await router.push('/login')
 }
+
+async function changeWorkspace(event: { target: unknown }) {
+  const workspaceId = (event.target as { value: string }).value
+  if (!workspaceId || workspaceId === auth.account?.workspaceId) return
+  await auth.switchWorkspace(workspaceId)
+  await router.replace('/')
+}
 </script>
 
 <template>
@@ -84,6 +92,11 @@ async function signOut() {
         <span class="eyebrow">当前账号</span>
         <strong>{{ auth.account?.displayName }}</strong>
         <p>{{ auth.account?.workspaceName }} · {{ auth.account?.role }}</p>
+        <label v-if="auth.workspaces.length > 1" class="workspace-switcher">切换 Workspace
+          <select :value="auth.account?.workspaceId" @change="changeWorkspace">
+            <option v-for="workspace in auth.workspaces" :key="workspace.id" :value="workspace.id">{{ workspace.name }} · {{ workspace.role }}</option>
+          </select>
+        </label>
         <p>{{ auth.account?.systemRole === 'SYSTEM_ADMIN' ? '系统管理员' : '普通用户' }}</p>
         <button class="text-button" @click="signOut">退出登录</button>
       </div>
@@ -91,7 +104,7 @@ async function signOut() {
     <main class="content">
       <header class="topbar">
         <div><span class="eyebrow">AI 开源情报工作台</span><h1>让技术选型有证据、可追溯</h1></div>
-        <div class="alpha-chip"><span></span> P1 开发版</div>
+        <div class="alpha-chip"><span></span> P3.1 团队版</div>
       </header>
       <RouterView />
     </main>

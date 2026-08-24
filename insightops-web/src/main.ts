@@ -6,6 +6,7 @@ import 'element-plus/es/components/icon/style/css'
 import App from './App.vue'
 import router from './router'
 import './styles/main.css'
+import './styles/p31.css'
 
 const app = createApp(App)
 app.component('ElIcon', ElIcon)

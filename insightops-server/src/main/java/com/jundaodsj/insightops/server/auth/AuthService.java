@@ -24,18 +24,24 @@ public class AuthService implements ApplicationRunner {
 
     private final AccountWorkspaceStore store;
     private final AuthProperties properties;
+    private final TotpService totp;
     private final BCryptPasswordEncoder passwords = new BCryptPasswordEncoder(12);
     private final SecureRandom random = new SecureRandom();
     private final Clock clock;
 
     @Autowired
-    public AuthService(AccountWorkspaceStore store, AuthProperties properties) {
-        this(store, properties, Clock.systemUTC());
+    public AuthService(AccountWorkspaceStore store, AuthProperties properties, TotpService totp) {
+        this(store, properties, totp, Clock.systemUTC());
     }
 
     AuthService(AccountWorkspaceStore store, AuthProperties properties, Clock clock) {
+        this(store, properties, null, clock);
+    }
+
+    AuthService(AccountWorkspaceStore store, AuthProperties properties, TotpService totp, Clock clock) {
         this.store = store;
         this.properties = properties;
+        this.totp = totp;
         this.clock = clock;
     }
 
@@ -53,15 +59,29 @@ public class AuthService implements ApplicationRunner {
     }
 
     public LoginResult login(String username, String password) {
+        return login(username, password, null, null, null);
+    }
+
+    public LoginResult login(String username, String password, String mfaCode,
+                             String userAgent, String remoteAddress) {
         AccountWorkspaceStore.AccountRecord account = store.findForLogin(normalizeUsername(username))
-                .filter(candidate -> password != null && passwords.matches(password, candidate.passwordHash()))
+                .filter(candidate -> passwordMatches(candidate, password))
                 .orElseThrow(InvalidCredentialsException::new);
+        if (totp != null && totp.enabled(account.userId())) {
+            if (mfaCode == null || mfaCode.isBlank()) {
+                throw new MfaRequiredException();
+            }
+            if (!totp.verify(account.userId(), mfaCode)) {
+                throw new InvalidCredentialsException();
+            }
+        }
         byte[] bytes = new byte[32];
         random.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         Instant createdAt = clock.instant();
         Instant expiresAt = createdAt.plus(properties.getSessionDays(), ChronoUnit.DAYS);
-        store.saveSession(UUID.randomUUID(), account.userId(), hash(token), createdAt, expiresAt);
+        store.saveSession(UUID.randomUUID(), account.userId(), account.workspaceId(), hash(token),
+                truncate(userAgent, 500), hashAddress(remoteAddress), createdAt, expiresAt);
         return new LoginResult(token, expiresAt, account);
     }
 
@@ -82,11 +102,15 @@ public class AuthService implements ApplicationRunner {
             AccountWorkspaceStore.AccountRecord account,
             String currentPassword,
             String newPassword) {
-        if (currentPassword == null || !passwords.matches(currentPassword, account.passwordHash())) {
+        if (!passwordMatches(account, currentPassword)) {
             throw new InvalidCredentialsException();
         }
         validatePassword(newPassword);
         store.changePassword(account.userId(), passwords.encode(newPassword), clock.instant());
+    }
+
+    public boolean passwordMatches(AccountWorkspaceStore.AccountRecord account, String password) {
+        return password != null && passwords.matches(password, account.passwordHash());
     }
 
     String encodePassword(String password) {
@@ -119,6 +143,15 @@ public class AuthService implements ApplicationRunner {
         }
     }
 
+    private static String truncate(String value, int maximum) {
+        if (value == null || value.isBlank()) return null;
+        return value.length() <= maximum ? value : value.substring(0, maximum);
+    }
+
+    private static String hashAddress(String address) {
+        return address == null || address.isBlank() ? null : hash("ip:" + address.strip());
+    }
+
     static String hash(String token) {
         try {
             return HexFormat.of().formatHex(
@@ -136,7 +169,13 @@ public class AuthService implements ApplicationRunner {
 
     public static class InvalidCredentialsException extends RuntimeException {
         public InvalidCredentialsException() {
-            super("Username or password is incorrect");
+            super("Username, password or MFA code is incorrect");
+        }
+    }
+
+    public static class MfaRequiredException extends RuntimeException {
+        public MfaRequiredException() {
+            super("MFA_REQUIRED");
         }
     }
 }

@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { useRoute, useRouter } from 'vue-router'
 
+import SecuritySettingsPanel from '@/components/SecuritySettingsPanel.vue'
 import { useAuthStore } from '@/stores/auth'
 import { getDigestPreference, saveDigestPreference, type DigestPreference } from '@/api/intelligence'
 import { listProjects, type ProjectWatch } from '@/api/projects'
@@ -71,6 +72,7 @@ onMounted(async () => {
       <p v-if="error" class="stream-error">{{ error }}</p>
       <button class="send-button" :disabled="saving">{{ saving ? '正在保存…' : '修改密码并重新登录' }}</button>
     </form>
+    <SecuritySettingsPanel v-if="!forced" />
     <div class="section-heading settings-subheading"><div><span class="eyebrow">技术情报投递</span><h2>摘要偏好</h2></div><span class="subtle">只在站内生成，不发送邮件或微信</span></div>
     <form class="panel digest-preference-form" @submit.prevent="saveDigest">
       <label>摘要频率<select v-model="digest.cadence"><option value="OFF">关闭</option><option value="DAILY">每日</option><option value="WEEKLY">每周一</option></select></label>

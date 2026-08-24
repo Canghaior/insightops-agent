@@ -17,6 +17,22 @@ spring:
       ddl-auto: validate
   flyway:
     enabled: true
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:25}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    test-connection: false
+    properties:
+      mail:
+        smtp:
+          auth: ${SMTP_AUTH:false}
+          starttls:
+            enable: ${SMTP_STARTTLS_ENABLED:false}
+            required: ${SMTP_STARTTLS_REQUIRED:false}
+          connectiontimeout: ${SMTP_CONNECTION_TIMEOUT_MS:5000}
+          timeout: ${SMTP_READ_TIMEOUT_MS:10000}
+          writetimeout: ${SMTP_WRITE_TIMEOUT_MS:10000}
   ai:
     model:
       chat: ${SPRING_AI_MODEL_CHAT:none}
@@ -115,6 +131,23 @@ insightops:
       username: ${AUTH_BOOTSTRAP_USERNAME:alpha-owner}
       display-name: ${AUTH_BOOTSTRAP_DISPLAY_NAME:Alpha Owner}
       password: ${AUTH_BOOTSTRAP_PASSWORD:}
+  identity:
+    enabled: ${IDENTITY_ENABLED:true}
+    public-base-url: ${APP_PUBLIC_URL:http://localhost:5173}
+    encryption-key: ${IDENTITY_ENCRYPTION_KEY:${DELIVERY_ENCRYPTION_KEY:${DB_PASSWORD:insightops_dev}}}
+    email-verification-minutes: ${IDENTITY_EMAIL_VERIFICATION_MINUTES:60}
+    password-reset-minutes: ${IDENTITY_PASSWORD_RESET_MINUTES:30}
+    invitation-hours: ${IDENTITY_INVITATION_HOURS:72}
+    deletion-grace-days: ${IDENTITY_DELETION_GRACE_DAYS:7}
+    deletion-initial-delay-ms: ${IDENTITY_DELETION_INITIAL_DELAY_MS:60000}
+    deletion-poll-delay-ms: ${IDENTITY_DELETION_POLL_DELAY_MS:3600000}
+    mail:
+      enabled: ${IDENTITY_MAIL_ENABLED:false}
+      from: ${IDENTITY_MAIL_FROM:noreply@localhost}
+      batch-size: ${IDENTITY_MAIL_BATCH_SIZE:10}
+      lease-seconds: ${IDENTITY_MAIL_LEASE_SECONDS:120}
+      initial-delay-ms: ${IDENTITY_MAIL_INITIAL_DELAY_MS:20000}
+      poll-delay-ms: ${IDENTITY_MAIL_POLL_DELAY_MS:15000}
   delivery:
     public-base-url: ${APP_PUBLIC_URL:https://insightops.canghaior.com}
     request-timeout-seconds: ${REPORT_DELIVERY_TIMEOUT_SECONDS:20}

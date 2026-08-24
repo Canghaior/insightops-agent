@@ -1,5 +1,6 @@
 package com.jundaodsj.insightops.server.auth;
 
+import com.jundaodsj.insightops.infrastructure.identity.IdentityRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
@@ -10,6 +11,7 @@ import java.time.ZoneOffset;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 class LoginRateLimiterTest {
 
@@ -17,6 +19,7 @@ class LoginRateLimiterTest {
     void springUsesTheProductionConstructorWhenTheTestConstructorAlsoExists() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
             context.registerBean(AuthProperties.class);
+            context.registerBean(IdentityRepository.class, () -> mock(IdentityRepository.class));
             context.register(LoginRateLimiter.class);
             context.refresh();
 

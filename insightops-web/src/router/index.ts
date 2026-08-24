@@ -6,6 +6,10 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
+    { path: '/forgot-password', name: 'forgot-password', component: () => import('@/views/ForgotPasswordView.vue'), meta: { public: true } },
+    { path: '/reset-password', name: 'reset-password', component: () => import('@/views/ResetPasswordView.vue'), meta: { public: true } },
+    { path: '/verify-email', name: 'verify-email', component: () => import('@/views/VerifyEmailView.vue'), meta: { public: true } },
+    { path: '/invitation', name: 'invitation', component: () => import('@/views/InvitationView.vue'), meta: { public: true } },
     { path: '/', name: 'dashboard', component: () => import('@/views/DashboardView.vue') },
     { path: '/projects', name: 'projects', component: () => import('@/views/ProjectsView.vue') },
     { path: '/updates', name: 'updates', component: () => import('@/views/UpdatesView.vue') },
@@ -21,6 +25,7 @@ const router = createRouter({
     { path: '/approvals', name: 'approvals', component: () => import('@/views/ApprovalsView.vue') },
     { path: '/runs', name: 'runs', component: () => import('@/views/RunsView.vue') },
     { path: '/runs/:runId', name: 'run-detail', component: () => import('@/views/RunsView.vue') },
+    { path: '/workspace', name: 'workspace', component: () => import('@/views/WorkspaceView.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
     {
       path: '/admin/users',

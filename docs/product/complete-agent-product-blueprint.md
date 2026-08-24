@@ -50,9 +50,9 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 | 目标形态 | 当前估算 | 说明 |
 |---|---:|---|
 | 固定三项目的封闭 Alpha | 约 94% | 三项目生产知识库、50 题及反馈版本化 RAG 门禁、统一事件流、真实引用问答、采集可观测性和备份链路已验收 |
-| 用户可自由配置的技术情报产品 | 约 86% | 项目、知识源、RSS、Roadmap、用户资料、关注规则、反馈复核、报告导出和 Webhook 已产品化；邮件、专用协作渠道及十项目长期稳定性观察仍待完成 |
+| 用户可自由配置的技术情报产品 | 约 88% | 项目、知识源、RSS、Roadmap、用户资料、关注规则、反馈复核、报告导出和 Webhook 已产品化；10 项目 72 小时稳定性已关闭，邮件和专用协作渠道仍待完成 |
 | 通用多工具自主 Agent | 约 98% | P2.0 至 P2.3 已关闭生产验收；P2.4-A/B/C 已完成模板、真实持久 Run、节点恢复、拖拽编排、参数预设、可撤销分享和模板质量趋势 |
-| 可公开运营的 SaaS | 约 40% | 已有上传配额、应用指标、关键告警和含文件卷备份；仍缺注册、找回密码、计费、合规、异地副本和完整容灾演练 |
+| 可公开运营的 SaaS | 约 50% | 已有上传配额、应用指标、外部告警、AES-256 异地副本和隔离恢复；仍缺注册/验证/找回/MFA、计费、合规及完整团队 Workspace |
 
 当前最准确的阶段判断是：
 
@@ -213,20 +213,20 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 
 - Spring 官方博客 Atom 与 Spring AI GitHub Milestone/Roadmap 已进入统一知识采集、切片、向量化、引用和新鲜度链路，并支持 ETag/Last-Modified 条件请求。
 - 用户可上传 Markdown、TXT 和 PDF；文件使用不可预测 UUID 落盘，实施 20 MB、500 页、200 万字符和 Workspace 总量配额，并支持私有/Workspace 可见性、失败重试、下载和删除。
-- 项目种子扩展到 10 个真实 Java/AI 仓库，首次采集错峰进入现有租约、心跳、退避和重放链路；“长期稳定持续采集”仍需生产时间窗观察后关闭。
+- 项目种子扩展到 10 个真实 Java/AI 仓库，首次采集错峰进入现有租约、心跳、退避和重放链路；10 个项目均已通过生产 72 小时、逐项目成功率 100% 的长期稳定性门禁。
 - server 与 worker 使用固定非 root UID/GID，共享上传卷由一次性初始化容器设置权限；生产备份和恢复同时覆盖数据库、上传文件及校验清单。
-- Prometheus 与 Grafana 已通过 `observability` Profile 在生产启用并仅绑定回环地址；Server/Worker Target 均为 `up`，采集失败、任务卡死、队列积压、高 5xx 和磁盘空间 5 条关键规则已加载。
-- P1.9-A/B/C 已于 2026-08-20 完成功能与即时生产验收，详见 `docs/testing/results/p1-9-sources-uploads-stability-production-acceptance-2026-08-20.md`；10 项目长期稳定性仍需观察。
+- Prometheus、Grafana 与 Alertmanager 已通过 `observability` Profile 在生产启用并仅绑定回环地址；Server/Worker Target 均为 `up`，聊天/工作流可靠性、采集失败或陈旧、任务卡死、队列积压、高 5xx 和磁盘空间等 18 条规则已加载。
+- P1.9-A/B/C 已于 2026-08-20 完成功能与即时生产验收；10 项目长期稳定性于 2026-08-24 通过 Stage 3 生产门禁，详见 `docs/testing/results/stage3-production-reliability-2026-08-24.md`。
 - 设计与运维边界详见 `docs/architecture/p1-9-sources-uploads-stability.md`。
 
 ### 4.15 测试与持续集成
 
-- 后端当前真实 PostgreSQL 全仓 `verify` 为 273/273、0 失败、0 错误、0 跳过，PostgreSQL 18.4、Flyway 36/36。
-- 前端当前 22 个测试文件、57 个测试全部通过。
+- 后端当前真实 PostgreSQL 全仓 `verify` 为 283/283、0 失败、0 错误、0 跳过，PostgreSQL 18.4、Flyway 37/37。
+- 前端当前 23 个测试文件、63 个测试全部通过。
 - 前端 ESLint 通过。
 - 前端生产构建通过。
 - GitHub Actions 已配置后端验证、前端 lint/test/build 和三个镜像构建。
-- GitHub `production` Environment Secrets 已完成配置；当前生产功能版本为 `60c94ab0e0cddca08beef1c61f38446de830bb18`，CI Run `32708453090` 的后端、前端和三个镜像任务全部成功，部署 Run `32708756290` 成功。
+- GitHub `production` Environment Secrets 已完成配置；当前生产功能版本为 `2e3e59fa4e5c3c18d573de8c30bfc483a6c76b13`，CI Run `32739451313` 的后端、前端和三个镜像任务全部成功，部署 Run `32739861289` 成功。
 - Dependabot 已覆盖 Maven、npm 和 GitHub Actions 依赖。
 
 ## 5. 当前部分完成的能力
@@ -319,14 +319,14 @@ P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md
 - 没有项目级权限。
 - 没有所有权移交和成员退出流程。
 
-### 5.6 本机监控与备份已闭环，异地容灾仍待完成
+### 5.6 监控外发与异地恢复已闭环
 
 - Prometheus 和 Grafana 已通过 `observability` Profile 在生产启用，且仅绑定服务器回环地址。
-- Server/Worker Target 均为 `up`，5 条关键告警规则已加载；告警外发仍需接入 Alertmanager。
+- Server/Worker Target 均为 `up`，18 条告警规则已加载并接入 Alertmanager；唯一 Canary 已通过随机私密 ntfy 主题完成端到端到达验收。
 - 数据库与上传卷联合备份已在真实部署中生成并通过校验，每日 03:17 的 Cron 已配置，使用 `flock` 防止重入。
-- 没有确认备份已加密同步到服务器之外。
-- 没有在隔离环境真实完成一次灾难恢复演练。
-- GitHub 生产部署 Workflow、专用部署密钥和五项 `production` Environment Secrets 已配置；P1.9 最终部署与公网回归成功。
+- 数据库与上传文件的 AES-256 加密三件套已保存到 GitHub Actions Artifact 30 天，明文和口令不离开生产安全边界。
+- 已从删除首份 Runner 副本后的 Artifact 往返副本完成 PostgreSQL 18 隔离恢复，验证 Flyway 37、10 项目、Workspace、用户和上传摘要。
+- GitHub 生产部署/可靠性 Workflow、专用部署密钥和所需 `production` Environment Secrets 已配置；Stage 3 最终部署、外部告警和隔离恢复验收成功。
 - 当前生产发布已以 GitHub Actions 为主，管理员 SSH 会话保留为故障处置通道。
 
 ### 5.7 安全能力仍是封闭 Alpha 水平
@@ -634,7 +634,8 @@ P2.1-C 已实现 Workspace Agent Token/成本/并发配额、用量聚合、硬�
 - [ ] 注册、验证、找回密码、MFA 和账户注销完整。
 - [ ] 套餐、配额、用量和计费完整。
 - [ ] 用户协议、隐私政策和数据删除流程完整。
-- [ ] 安全扫描、异地备份、恢复演练和告警完整。
+- [x] 异地备份、恢复演练和外部告警完整（Stage 3 生产验收已通过）。
+- [ ] 安全扫描、WAF/CDN 和供应链发布策略完整。
 - [ ] 达到约定可用性目标并具备故障响应流程。
 
 ## 10. 推荐实施顺序
@@ -685,8 +686,8 @@ P2.1-C 已实现 Workspace Agent Token/成本/并发配额、用量聚合、硬�
 1. 注册、邀请、找回密码和 MFA。
 2. 完整团队 Workspace。
 3. [~] Agent 基础配额与用量已完成；套餐、订单、支付、退款、发票和财务计费待完成。
-4. [x] Prometheus、Grafana 和应用告警规则正式启用；Alertmanager 外发待补充。
-5. 异地备份和定期恢复演练。
+4. [x] Prometheus、Grafana、18 条应用告警规则和 Alertmanager 外发正式启用，私密 ntfy Canary 已验收。
+5. [x] AES-256 异地备份和隔离恢复演练已通过 GitHub Actions Artifact 往返闭环。
 6. 安全扫描、WAF/CDN 和合规文档。
 
 ## 11. 当前不应优先扩张的范围

@@ -68,3 +68,7 @@ Server 新增 `insightops_project_collection_failed` 与 `insightops_project_col
 - 验收文档不得记录外部 URL、主题名、访问令牌、备份口令或用户文件内容。
 
 `.github/workflows/stage3-production-reliability.yml` 使用受保护的 `production` Environment 和强确认词串联上述门禁。它先把加密三件套传离生产机并上传 Artifact，删除 Runner 首份拷贝，再用 `download-artifact` 取得该 Artifact 副本，校验密文 SHA-256 后传回 `recovery-imports/<Run 标记>/`，最后调用隔离恢复脚本。该顺序证明恢复输入来自异地往返副本，而不是生产机原始备份。
+
+## 7. 生产关闭记录
+
+2026-08-24 的生产验收 Run `32741197128` 全部通过：10 项目在 72 小时窗口内逐项目成功率 100%，ntfy Canary 端到端到达，加密 Artifact `9525272938` 设置 30 天保留，并从删除首份 Runner 副本后的 Artifact 下载件完成 PostgreSQL 18 隔离恢复。详细证据见 `docs/testing/results/stage3-production-reliability-2026-08-24.md`。

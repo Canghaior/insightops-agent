@@ -44,7 +44,7 @@ backups/insightops-<UTC时间>.uploads.tar.gz
 backups/insightops-<UTC时间>.sha256
 ```
 
-三件套必须一起保留；数据库和上传卷任何一项缺失都不是可恢复备份。可在 `backups/` 内执行 `sha256sum --check insightops-<UTC时间>.sha256` 验证。默认保留 30 天。建议每天低峰期运行，并把三件套的加密副本同步到服务器之外。
+三件套必须一起保留；数据库和上传卷任何一项缺失都不是可恢复备份。可在 `backups/` 内执行 `sha256sum --check insightops-<UTC时间>.sha256` 验证。默认保留 30 天。Stage 3 工作流会把三件套封装为 AES-256-CBC、PBKDF2-HMAC-SHA-256 200,000 次迭代的密文包，并只把密文、外层摘要和非敏感元数据保存到 GitHub Actions Artifact 30 天；备份口令仅留在生产服务器 `.secrets/`，不得随 Artifact 传输。
 
 Cron 示例：
 
@@ -60,7 +60,7 @@ Cron 示例：
 bash scripts/restore-prod.sh backups/insightops-YYYYMMDDTHHMMSSZ.dump --confirm-destructive-restore
 ```
 
-脚本先验证数据库、同时间戳上传归档和 SHA-256 清单，再停止 Server/Worker、恢复数据库与上传卷并重启。恢复结束后必须测试登录、会话、上传文件下载、RAG 查询和用户隔离。不要在生产数据库上做演练；恢复演练应使用隔离的数据库和卷。
+脚本先验证数据库、同时间戳上传归档和 SHA-256 清单，再停止 Server/Worker、恢复数据库与上传卷并重启。恢复结束后必须测试登录、会话、上传文件下载、RAG 查询和用户隔离。不要在生产数据库上做演练；日常演练使用 `stage3-production-reliability.yml`，它从 Artifact 重新下载副本并由 `scripts/restore-offsite-drill.sh` 在临时 `pgvector/pg18` 容器恢复，绝不连接生产 Compose 或生产卷。
 
 ## 监控与告警
 
@@ -81,7 +81,7 @@ curl --fail --silent http://127.0.0.1:3000/api/health
 ssh -L 9090:127.0.0.1:9090 -L 3000:127.0.0.1:3000 insightops
 ```
 
-关键规则位于 `infra/monitoring/alerts.yml`，覆盖 Server/Worker 不可用、知识采集租约过期、Embedding 积压、上传处理失败和 HTTP 5xx 比例。Prometheus 当前只负责评估规则；要把告警发送到邮件或团队渠道，仍需另行接入 Alertmanager。
+关键规则位于 `infra/monitoring/alerts.yml`，当前 18 条规则覆盖 Server/Worker 不可用、聊天/工作流可靠性、知识采集失败或陈旧、Embedding 积压、上传处理失败和 HTTP 5xx 比例。Prometheus 已把事件发送到仅绑定回环地址的 Alertmanager；Alertmanager 从容器只读 Secret 读取随机私密 ntfy 目标。主题值不得输出到日志、Issue 或验收文档。运行 `stage3-production-reliability.yml` 并输入强确认词可完成合成 Canary 外部到达、加密 Artifact 往返和隔离恢复的整体验收。
 
 ## 证书
 

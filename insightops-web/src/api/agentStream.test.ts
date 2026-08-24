@@ -6,6 +6,7 @@ const started = '{"type":"started","runId":"run-1","sessionId":"session-1","sequ
 const delta = '{"type":"delta","runId":"run-1","sequence":2,"content":"Spring AI"}'
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -137,6 +138,39 @@ describe('createSseParser', () => {
       ['run_recovered', 2],
       ['delta', 3],
       ['completed', 4],
+    ])
+  })
+
+  it('reconnects from sequence zero when an accepted stream stays silently open', async () => {
+    vi.useFakeTimers()
+    let cancelled = false
+    const silentBody = new ReadableStream<Uint8Array>({
+      cancel() { cancelled = true },
+    })
+    const resumedWire = [
+      'data: {"type":"started","runId":"run-silent","sequence":1}\n\n',
+      'data: {"type":"completed","runId":"run-silent","sequence":2}\n\n',
+    ].join('')
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(silentBody, {
+        status: 200,
+        headers: { [CHAT_RUN_ID_HEADER]: 'run-silent' },
+      }))
+      .mockResolvedValueOnce(new Response(resumedWire, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const events: ReturnType<typeof parseSseEnvelope>[] = []
+
+    const streaming = streamChat(
+      'question', (event) => events.push(event), new AbortController().signal,
+    )
+    await vi.advanceTimersByTimeAsync(6_000)
+    await streaming
+
+    expect(cancelled).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('/chat/streams/run-silent?afterSequence=0')
+    expect(events.map((event) => [event.type, event.sequence])).toEqual([
+      ['started', 1], ['completed', 2],
     ])
   })
 

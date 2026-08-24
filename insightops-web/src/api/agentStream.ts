@@ -78,6 +78,15 @@ const eventTypes = new Set<ChatStreamEvent['type']>([
   'error',
 ])
 
+const FIRST_EVENT_TIMEOUT_MS = 5_000
+const STREAM_IDLE_TIMEOUT_MS = 15_000
+
+class StreamSilenceError extends Error {
+  constructor() {
+    super('聊天实时连接长时间没有收到事件')
+  }
+}
+
 export const CHAT_RUN_ID_HEADER = 'X-InsightOps-Run-Id'
 
 export function parseSseEnvelope(raw: string): ChatStreamEvent {
@@ -135,15 +144,35 @@ async function consumeSseResponse(
   if (!response.body) throw new Error('浏览器没有收到聊天流响应体')
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
-  const parser = createSseParser(onEvent)
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) {
-      parser.push(decoder.decode())
-      parser.finish()
-      return
+  let receivedEvent = false
+  const firstEventDeadline = Date.now() + FIRST_EVENT_TIMEOUT_MS
+  const parser = createSseParser((event) => {
+    receivedEvent = true
+    onEvent(event)
+  })
+  try {
+    while (true) {
+      const timeoutMs = receivedEvent
+        ? STREAM_IDLE_TIMEOUT_MS
+        : Math.max(1, firstEventDeadline - Date.now())
+      let timeout: ReturnType<typeof globalThis.setTimeout> | undefined
+      const read = reader.read()
+      const silence = new Promise<never>((_, reject) => {
+        timeout = globalThis.setTimeout(() => reject(new StreamSilenceError()), timeoutMs)
+      })
+      const { done, value } = await Promise.race([read, silence]).finally(() => {
+        if (timeout !== undefined) globalThis.clearTimeout(timeout)
+      })
+      if (done) {
+        parser.push(decoder.decode())
+        parser.finish()
+        return
+      }
+      parser.push(decoder.decode(value, { stream: true }))
     }
-    parser.push(decoder.decode(value, { stream: true }))
+  } catch (error) {
+    await reader.cancel().catch(() => undefined)
+    throw error
   }
 }
 

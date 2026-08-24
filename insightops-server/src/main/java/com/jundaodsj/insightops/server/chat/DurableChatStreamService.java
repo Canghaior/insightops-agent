@@ -61,10 +61,12 @@ public class DurableChatStreamService {
         return emitter;
     }
 
-    private void replay(
+    void replay(
             ActorContext actor, UUID runId, long initialSequence,
             SseEmitter emitter, AtomicBoolean connected) {
         long cursor = initialSequence;
+        long lastWriteNanos = System.nanoTime();
+        long heartbeatNanos = properties.streamHeartbeatInterval().toNanos();
         try {
             while (connected.get()) {
                 var events = store.events(actor, runId, cursor, 200);
@@ -76,9 +78,14 @@ public class DurableChatStreamService {
                             .data(payload));
                     cursor = event.sequence();
                 }
+                if (!events.isEmpty()) lastWriteNanos = System.nanoTime();
                 metrics.replayed(events.size());
                 DurableChatRunStore.WorkView work = store.findOwned(actor, runId).orElse(null);
                 if (work == null || (work.terminal() && events.isEmpty())) break;
+                if (events.isEmpty() && System.nanoTime() - lastWriteNanos >= heartbeatNanos) {
+                    emitter.send(SseEmitter.event().comment("keepalive"));
+                    lastWriteNanos = System.nanoTime();
+                }
                 Thread.sleep(properties.eventPollInterval().toMillis());
             }
             if (connected.get()) emitter.complete();

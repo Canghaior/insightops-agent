@@ -72,6 +72,7 @@ insightops:
       heartbeat-seconds: ${AGENT_CHAT_QUEUE_HEARTBEAT_SECONDS:5}
       max-attempts: ${AGENT_CHAT_QUEUE_MAX_ATTEMPTS:3}
       event-poll-ms: ${AGENT_CHAT_QUEUE_EVENT_POLL_MS:200}
+      stream-heartbeat-ms: ${AGENT_CHAT_STREAM_HEARTBEAT_MS:5000}
       run-timeout-seconds: ${AGENT_CHAT_QUEUE_RUN_TIMEOUT_SECONDS:${AGENT_RUN_TIMEOUT_SECONDS:90}}
       snapshot-interval-ms: ${AGENT_CHAT_QUEUE_SNAPSHOT_INTERVAL_MS:15000}
   report:

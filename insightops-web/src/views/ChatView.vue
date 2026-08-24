@@ -21,7 +21,7 @@ import { submitAnswerFeedback, submitCitationFeedback } from '@/api/feedback'
 
 const route = useRoute()
 
-type StreamStatus = 'idle' | 'connecting' | 'streaming' | 'paused' | 'completed' | 'cancelled' | 'error'
+type StreamStatus = 'idle' | 'connecting' | 'queued' | 'streaming' | 'paused' | 'completed' | 'cancelled' | 'error'
 
 interface ToolExecution {
   id: string
@@ -108,7 +108,8 @@ const suggestions = [
   '架构师评估 AI Agent 框架时应该关注哪些指标？',
 ]
 
-const streaming = computed(() => status.value === 'connecting' || status.value === 'streaming')
+const streaming = computed(() => status.value === 'connecting'
+  || status.value === 'queued' || status.value === 'streaming')
 const canSend = computed(() => question.value.trim().length > 0 && !streaming.value)
 
 const errorLabels: Record<string, string> = {
@@ -141,7 +142,8 @@ function statusLabel(message: ConversationMessage) {
   if (message.toolRunning) return '正在执行工具'
   return ({
     idle: '历史回答',
-    connecting: '正在连接 DeepSeek',
+    connecting: '正在创建 Agent Run',
+    queued: '已入队，Agent 正在处理',
     streaming: '正在生成',
     completed: '生成完成',
     paused: '已暂停并保存检查点',
@@ -176,8 +178,8 @@ function handleEvent(event: ChatStreamEvent) {
   }
   assistant.traceId = event.traceId || assistant.traceId
   if (event.type === 'started') {
-    status.value = 'streaming'
-    assistant.status = 'streaming'
+    status.value = 'queued'
+    assistant.status = 'queued'
     return
   }
   if (event.type === 'run_recovered') {
@@ -188,6 +190,8 @@ function handleEvent(event: ChatStreamEvent) {
     return
   }
   if (event.type === 'plan_created' && event.orchestration) {
+    status.value = 'streaming'
+    assistant.status = 'streaming'
     assistant.orchestration = {
       planId: event.orchestration.planId ?? '',
       version: event.orchestration.version ?? 1,
@@ -306,6 +310,8 @@ function handleEvent(event: ChatStreamEvent) {
     return
   }
   if (event.type === 'delta') {
+    status.value = 'streaming'
+    assistant.status = 'streaming'
     const shouldFollow = isNearConversationBottom()
     assistant.content += event.content ?? ''
     if (shouldFollow) void scrollConversationToBottom()
@@ -483,7 +489,8 @@ async function sendQuestion() {
       },
     )
     const assistant = currentAssistant()
-    if (assistant && (status.value === 'connecting' || status.value === 'streaming')) {
+    if (assistant && (status.value === 'connecting'
+      || status.value === 'queued' || status.value === 'streaming')) {
       status.value = 'completed'
       assistant.status = 'completed'
     }
@@ -639,7 +646,7 @@ onBeforeUnmount(() => {
         >
           <button class="conversation-select" @click="selectConversation(conversation)">
             <strong>{{ conversation.title }}</strong>
-            <small>{{ conversation.messageCount }} 条消息 · {{ conversation.status === 'ACTIVE' ? '进行中' : '已归档' }}</small>
+            <small>{{ conversation.messageCount }} 条消息 · {{ conversation.status === 'ACTIVE' ? '未归档' : '已归档' }}</small>
           </button>
           <div class="conversation-actions">
             <button @click="renameConversation(conversation)">改名</button>

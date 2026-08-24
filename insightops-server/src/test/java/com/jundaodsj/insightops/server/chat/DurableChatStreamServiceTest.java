@@ -1,14 +1,26 @@
 package com.jundaodsj.insightops.server.chat;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jundaodsj.insightops.conversation.application.DurableChatRunStore;
+import com.jundaodsj.insightops.identity.application.ActorContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.server.ServerHttpResponse;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DurableChatStreamServiceTest {
@@ -29,5 +41,35 @@ class DurableChatStreamServiceTest {
         assertTrue(headers.getCacheControl().contains("no-cache"));
         assertTrue(headers.getCacheControl().contains("no-store"));
         assertTrue(headers.getCacheControl().contains("no-transform"));
+    }
+
+    @Test
+    void sendsHeartbeatWhileNonTerminalRunHasNoEvents() throws Exception {
+        UUID runId = UUID.fromString("22222222-2222-4222-8222-222222222222");
+        ActorContext actor = new ActorContext(
+                UUID.fromString("33333333-3333-4333-8333-333333333333"),
+                UUID.fromString("44444444-4444-4444-8444-444444444444"));
+        DurableChatRunStore store = mock(DurableChatRunStore.class);
+        DurableChatRunProperties properties = new DurableChatRunProperties();
+        properties.setEventPollMs(50);
+        properties.setStreamHeartbeatMs(250);
+        DurableChatRunMetrics metrics = mock(DurableChatRunMetrics.class);
+        DurableChatStreamService service = new DurableChatStreamService(
+                store, properties, Runnable::run, new ObjectMapper(), metrics);
+        DurableChatRunStore.WorkView running = new DurableChatRunStore.WorkView(
+                runId, "RUNNING", 1, 3, "server-1", Instant.now(),
+                Instant.now().plusSeconds(30), null, null, null, Instant.now());
+        when(store.events(eq(actor), eq(runId), eq(0L), eq(200))).thenReturn(List.of());
+        when(store.findOwned(actor, runId)).thenReturn(Optional.of(running));
+        SseEmitter emitter = mock(SseEmitter.class);
+        AtomicBoolean connected = new AtomicBoolean(true);
+        doAnswer(invocation -> {
+            connected.set(false);
+            return null;
+        }).when(emitter).send(any(SseEmitter.SseEventBuilder.class));
+
+        service.replay(actor, runId, 0L, emitter, connected);
+
+        verify(emitter).send(any(SseEmitter.SseEventBuilder.class));
     }
 }

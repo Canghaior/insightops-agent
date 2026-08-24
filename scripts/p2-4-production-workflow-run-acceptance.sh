@@ -82,6 +82,10 @@ printf '%s' "$login_body" | \
     "https://${APP_ADDRESS}/api/v1/auth/login" >/dev/null
 unset AUTH_PASSWORD login_body
 
+# The admin overview is the product entry point that idempotently installs the
+# four built-in workspace templates before users can select an active version.
+curl --fail --silent --show-error --cookie "$cookie_jar" \
+  "https://${APP_ADDRESS}/api/v1/admin/agent-workflows" >/dev/null
 curl --fail --silent --show-error --cookie "$cookie_jar" \
   "https://${APP_ADDRESS}/api/v1/agent-workflows" >"$templates_json"
 curl --fail --silent --show-error --cookie "$cookie_jar" \

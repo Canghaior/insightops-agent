@@ -29,6 +29,7 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          PRODUCTION_GITHUB_TOKEN: ${{ secrets.PRODUCTION_GITHUB_TOKEN }}
         run: |
           test "$CONFIRMATION" = "STAGE3-PRODUCTION-RELIABILITY"
           test -n "$DEPLOY_HOST"
@@ -36,6 +37,7 @@ jobs:
           test -n "$DEPLOY_PATH"
           test -n "$DEPLOY_SSH_KEY"
           test -n "$DEPLOY_KNOWN_HOSTS"
+          test -n "$PRODUCTION_GITHUB_TOKEN"
           [[ "$DEPLOY_USER" =~ ^[A-Za-z0-9._-]+$ ]]
           [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
 
@@ -56,7 +58,14 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           ACCEPTANCE_MARKER: STAGE3-${{ github.run_id }}-${{ github.run_attempt }}
+          PRODUCTION_GITHUB_TOKEN: ${{ secrets.PRODUCTION_GITHUB_TOKEN }}
         run: |
+          printf -v credential_command \
+            'cd %q && git fetch origin main && git checkout main && git pull --ff-only origin main && bash scripts/configure-prod-github-token.sh --from-stdin' \
+            "$DEPLOY_PATH"
+          printf '%s\n' "$PRODUCTION_GITHUB_TOKEN" | \
+            ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" "$credential_command"
           printf -v remote_command \
             'cd %q && git fetch origin main && git checkout main && git pull --ff-only origin main && bash scripts/stage3-production-acceptance.sh prepare %q --create-encrypted-offsite-package --confirm-stage3-production-reliability' \
             "$DEPLOY_PATH" "$ACCEPTANCE_MARKER"

@@ -54,6 +54,8 @@ Server 新增 `insightops_project_collection_failed` 与 `insightops_project_col
 
 脚本不引用 `postgres-data`、`knowledge-uploads`、生产 Compose 或 `docker compose down -v`。生产数据库和上传卷在演练中始终只读且不作为恢复目标。
 
+10 项目长期门禁要求生产 Worker 使用长期只读 GitHub 凭据，避免匿名 API 限额制造伪稳定。凭据由 `production` Environment 的 `PRODUCTION_GITHUB_TOKEN` Secret 提供；工作流只通过 SSH 标准输入交给 `scripts/configure-prod-github-token.sh`。脚本校验单行格式、原子写入权限为 `600` 的 `.env.prod`，清空进程变量并仅重建 Worker；工作流和验收文档均不输出 Token。
+
 ## 6. 自动化与生产关闭条件
 
 - Shell 语法、生产 Compose、Prometheus `promtool`、Alertmanager `amtool` 全部通过；

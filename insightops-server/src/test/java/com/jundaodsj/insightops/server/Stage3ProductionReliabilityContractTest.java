@@ -69,6 +69,7 @@ class Stage3ProductionReliabilityContractTest {
         String restore = read("scripts/restore-offsite-drill.sh");
         String acceptance = read("scripts/stage3-production-acceptance.sh");
         String workflow = read(".github/workflows/stage3-production-reliability.yml");
+        String githubToken = read("scripts/configure-prod-github-token.sh");
 
         assertThat(bootstrap).contains(
                 "openssl rand -hex 24",
@@ -91,8 +92,17 @@ class Stage3ProductionReliabilityContractTest {
                 "production-stability-report.sh\" 72 95",
                 "create-offsite-backup.sh",
                 "restore-offsite-drill.sh");
+        assertThat(githubToken).contains(
+                "must be supplied through standard input",
+                "printf 'GITHUB_TOKEN=%s\\n' \"$github_token\"",
+                "chmod 600 \"$temporary\"",
+                "up -d --force-recreate worker",
+                "Worker is healthy");
         assertThat(workflow).contains(
                 "environment: production",
+                "PRODUCTION_GITHUB_TOKEN: ${{ secrets.PRODUCTION_GITHUB_TOKEN }}",
+                "printf '%s\\n' \"$PRODUCTION_GITHUB_TOKEN\" |",
+                "configure-prod-github-token.sh --from-stdin",
                 "actions/upload-artifact@v4",
                 "retention-days: 30",
                 "actions/download-artifact@v4",
@@ -105,6 +115,8 @@ class Stage3ProductionReliabilityContractTest {
         assertThat(create).doesNotContain("set -x");
         assertThat(restore).doesNotContain("set -x");
         assertThat(acceptance).doesNotContain("set -x");
+        assertThat(githubToken).doesNotContain("set -x");
+        assertThat(githubToken).doesNotContain("awk -v", "replacement=$github_token");
     }
 
     private String read(String relative) throws IOException {

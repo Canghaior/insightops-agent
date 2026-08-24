@@ -1,0 +1,132 @@
+name: Stage 3 production reliability acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type STAGE3-PRODUCTION-RELIABILITY to authorize the reliability acceptance
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: insightops-production
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: production
+    steps:
+      - name: Validate confirmation and production secrets
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test "$CONFIRMATION" = "STAGE3-PRODUCTION-RELIABILITY"
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_PATH"
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          [[ "$DEPLOY_USER" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+      - name: Close stability and alert delivery gates, then create encrypted package
+        id: prepare
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          ACCEPTANCE_MARKER: STAGE3-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          printf -v remote_command \
+            'cd %q && git fetch origin main && git checkout main && git pull --ff-only origin main && bash scripts/stage3-production-acceptance.sh prepare %q --create-encrypted-offsite-package --confirm-stage3-production-reliability' \
+            "$DEPLOY_PATH" "$ACCEPTANCE_MARKER"
+          remote_output="$(ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command")"
+          printf '%s\n' "$remote_output"
+          package_name="$(sed -n 's/^OFFSITE_PACKAGE_BASENAME=//p' <<< "$remote_output" | tail -n 1)"
+          [[ "$package_name" =~ ^insightops-offsite-[0-9]{8}T[0-9]{6}Z-STAGE3-[0-9]+-[0-9]+\.tar\.gz\.enc$ ]]
+          printf 'package_name=%s\n' "$package_name" >> "$GITHUB_OUTPUT"
+          printf 'marker=%s\n' "$ACCEPTANCE_MARKER" >> "$GITHUB_OUTPUT"
+
+      - name: Transfer encrypted package away from production
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          PACKAGE_NAME: ${{ steps.prepare.outputs.package_name }}
+        run: |
+          install -m 700 -d stage3-artifact
+          remote_base="$DEPLOY_PATH/backups/offsite/${PACKAGE_NAME%.tar.gz.enc}"
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST:$remote_base.tar.gz.enc" stage3-artifact/
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST:$remote_base.sha256" stage3-artifact/
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST:$remote_base.metadata" stage3-artifact/
+          test "$(find stage3-artifact -maxdepth 1 -type f | wc -l)" = "3"
+          (cd stage3-artifact && sha256sum --check "${PACKAGE_NAME%.tar.gz.enc}.sha256")
+
+      - name: Retain encrypted offsite backup for 30 days
+        uses: actions/upload-artifact@v4
+        with:
+          name: insightops-stage3-${{ github.run_id }}-${{ github.run_attempt }}
+          path: stage3-artifact/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Remove runner transfer copy
+        run: rm -rf -- stage3-artifact
+
+      - name: Retrieve the offsite Artifact copy
+        uses: actions/download-artifact@v4
+        with:
+          name: insightops-stage3-${{ github.run_id }}-${{ github.run_attempt }}
+          path: stage3-roundtrip
+
+      - name: Verify and return the Artifact copy to the isolated import boundary
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          PACKAGE_NAME: ${{ steps.prepare.outputs.package_name }}
+          ACCEPTANCE_MARKER: ${{ steps.prepare.outputs.marker }}
+        run: |
+          test "$(find stage3-roundtrip -maxdepth 1 -type f | wc -l)" = "3"
+          (cd stage3-roundtrip && sha256sum --check "${PACKAGE_NAME%.tar.gz.enc}.sha256")
+          remote_import="$DEPLOY_PATH/recovery-imports/$ACCEPTANCE_MARKER"
+          printf -v remote_prepare 'install -m 700 -d %q' "$remote_import"
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$remote_prepare"
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes stage3-roundtrip/* \
+            "$DEPLOY_USER@$DEPLOY_HOST:$remote_import/"
+          printf -v remote_restore \
+            'cd %q && bash scripts/stage3-production-acceptance.sh restore %q %q --confirm-stage3-production-reliability' \
+            "$DEPLOY_PATH" "$ACCEPTANCE_MARKER" \
+            "recovery-imports/$ACCEPTANCE_MARKER/$PACKAGE_NAME"
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$remote_restore"
+
+      - name: Remove runner round-trip copy
+        if: always()
+        run: rm -rf -- stage3-artifact stage3-roundtrip

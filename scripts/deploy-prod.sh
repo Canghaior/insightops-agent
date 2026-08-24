@@ -12,6 +12,7 @@ if ! [[ "$requested_tag" =~ ^[A-Za-z0-9._-]{1,128}$ ]]; then
   exit 1
 fi
 
+bash "$ROOT_DIR/scripts/ensure-prod-reliability-secrets.sh"
 bash "$ROOT_DIR/scripts/preflight-prod.sh" "$ENV_FILE"
 mkdir -p "$STATE_DIR"
 previous_tag=""

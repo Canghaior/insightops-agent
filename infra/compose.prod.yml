@@ -233,6 +233,26 @@ services:
         limits:
           memory: ${CADDY_MEMORY_LIMIT:-128M}
 
+  alertmanager:
+    profiles: [observability]
+    image: prom/alertmanager:v0.33.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ../.secrets/alertmanager-webhook-url:/run/insightops-secrets/alertmanager-webhook-url:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+    networks: [backend]
+    logging: *app-logging
+    deploy:
+      resources:
+        limits:
+          memory: ${ALERTMANAGER_MEMORY_LIMIT:-128M}
+
   prometheus:
     profiles: [observability]
     image: prom/prometheus:v3.7.3
@@ -252,6 +272,8 @@ services:
         condition: service_healthy
       worker:
         condition: service_healthy
+      alertmanager:
+        condition: service_started
     networks: [backend]
     logging: *app-logging
     deploy:
@@ -292,5 +314,6 @@ volumes:
   caddy-config:
   caddy-logs:
   prometheus-data:
+  alertmanager-data:
   grafana-data:
   knowledge-uploads:

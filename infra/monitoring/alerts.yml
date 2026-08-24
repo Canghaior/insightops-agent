@@ -13,6 +13,18 @@ groups:
         labels: { severity: critical }
         annotations:
           summary: "A knowledge collection worker lease has expired"
+      - alert: ProjectCollectionFailures
+        expr: insightops_project_collection_failed > 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "One or more tracked projects are in a failed collection state"
+      - alert: ProjectCollectionStale
+        expr: insightops_project_collection_stale > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "One or more tracked projects have missed their collection interval"
       - alert: KnowledgeEmbeddingBacklog
         expr: insightops_knowledge_embedding_backlog > 5000
         for: 30m

@@ -20,6 +20,19 @@ public class KnowledgeOperationalMetrics {
                         where status='RUNNING' and locked_until < now()
                         """))
                 .description("Knowledge sources whose collection lease has expired").register(registry);
+        Gauge.builder("insightops.project.collection.failed", this, value -> value.count("""
+                        select count(*) from tracked_project
+                        where enabled=true and last_sync_status in ('RETRY_WAIT','FAILED')
+                        """))
+                .description("Enabled tracked projects in a failed collection state").register(registry);
+        Gauge.builder("insightops.project.collection.stale", this, value -> value.count("""
+                        select count(*) from tracked_project
+                        where enabled=true
+                          and (last_sync_at is null
+                               or last_sync_at < now() - (sync_interval_hours + 6) * interval '1 hour')
+                        """))
+                .description("Enabled tracked projects beyond their collection interval and grace period")
+                .register(registry);
         Gauge.builder("insightops.knowledge.embedding.backlog", this, value -> value.count("""
                         select count(*) from knowledge_embedding
                         where status in ('PENDING','RUNNING','RETRY_WAIT')

@@ -33,4 +33,6 @@ Thumbs.db
 *.log
 .runtime/
 backups/
+recovery-imports/
+.secrets/
 .deploy/

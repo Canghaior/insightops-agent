@@ -1,0 +1,17 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: offsite-webhook
+  group_by: [alertname, severity, job]
+  group_wait: 5s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: offsite-webhook
+    webhook_configs:
+      - send_resolved: true
+        url_file: /run/insightops-secrets/alertmanager-webhook-url
+        timeout: 15s
+        max_alerts: 20

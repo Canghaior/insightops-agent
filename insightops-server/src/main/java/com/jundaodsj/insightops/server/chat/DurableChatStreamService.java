@@ -67,14 +67,14 @@ public class DurableChatStreamService {
         DurableChatRunStore.WorkView work = store.findOwned(actor, runId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Agent run not found"));
-        List<ObjectNode> events = store.events(
-                        actor, runId, Math.max(0, afterSequence), REPLAY_BATCH_SIZE)
-                .stream()
-                .map(event -> payload(event, runId))
+        var storedEvents = store.events(
+                actor, runId, Math.max(0, afterSequence), REPLAY_BATCH_SIZE);
+        List<Object> events = storedEvents.stream()
+                .map(event -> responsePayload(event, runId))
                 .toList();
-        long lastSequence = events.isEmpty()
+        long lastSequence = storedEvents.isEmpty()
                 ? Math.max(0, afterSequence)
-                : events.getLast().path("sequence").asLong(afterSequence);
+                : storedEvents.getLast().sequence();
         return new ReplayBatch(events, work.status(), work.terminal(), lastSequence);
     }
 
@@ -123,10 +123,18 @@ public class DurableChatStreamService {
     }
 
     public record ReplayBatch(
-            List<ObjectNode> events,
+            List<Object> events,
             String status,
             boolean terminal,
             long lastSequence) {
+    }
+
+    private Object responsePayload(DurableChatRunStore.StoredEvent event, UUID runId) {
+        try { return json.readValue(payload(event, runId).toString(), Object.class); }
+        catch (IOException exception) {
+            throw new IllegalStateException(
+                    "Stored chat event cannot cross the HTTP boundary", exception);
+        }
     }
 
     static final class RunAwareSseEmitter extends SseEmitter {

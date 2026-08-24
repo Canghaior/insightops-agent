@@ -10,6 +10,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -100,8 +101,9 @@ class DurableChatStreamServiceTest {
         assertEquals("SUCCEEDED", batch.status());
         assertTrue(batch.terminal());
         assertEquals(2L, batch.lastSequence());
+        assertTrue(batch.events().stream().allMatch(Map.class::isInstance));
         assertEquals(List.of("started", "completed"), batch.events().stream()
-                .map(event -> event.path("type").asText()).toList());
-        assertEquals("deepseek", batch.events().getLast().path("provider").asText());
+                .map(event -> ((Map<?, ?>) event).get("type")).toList());
+        assertEquals("deepseek", ((Map<?, ?>) batch.events().getLast()).get("provider"));
     }
 }

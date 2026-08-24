@@ -201,8 +201,9 @@ assert len(raw_token) >= 40
 assert preview["share"]["id"] == share_id
 assert preview["bundle"]["schemaVersion"] == 1
 assert imported["name"] == marker + "-IMPORT"
-assert imported["status"] == "DRAFT"
+assert imported["status"] == "ACTIVE"
 assert imported.get("activeVersionId") is None
+assert imported["versions"][0]["status"] == "DRAFT"
 audit = next(item for item in shares if item["id"] == share_id)
 assert audit["status"] == "REVOKED"
 assert audit["importCount"] == 1

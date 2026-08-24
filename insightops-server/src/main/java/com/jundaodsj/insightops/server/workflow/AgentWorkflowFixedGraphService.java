@@ -207,8 +207,9 @@ public class AgentWorkflowFixedGraphService {
                         if (spec.required() && requiredFailure == null) requiredFailure = code;
                     }
                 }
-                List<NodeOutcome> outcomes = executeWave(request, work, budget, listener, active);
-                outcomes.sort(Comparator.comparingInt(item -> item.planNode().position()));
+                List<NodeOutcome> outcomes = sortedCopy(
+                        executeWave(request, work, budget, listener, active),
+                        Comparator.comparingInt(item -> item.planNode().position()));
                 boolean waitingApproval = false;
                 boolean cancelled = false;
                 for (NodeOutcome outcome : outcomes) {
@@ -280,6 +281,12 @@ public class AgentWorkflowFixedGraphService {
             }
             return List.copyOf(result);
         }
+    }
+
+    static <T> List<T> sortedCopy(List<T> source, Comparator<? super T> comparator) {
+        List<T> result = new ArrayList<>(source);
+        result.sort(comparator);
+        return result;
     }
 
     private NodeOutcome executeNode(

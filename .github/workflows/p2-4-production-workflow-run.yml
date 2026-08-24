@@ -7,6 +7,10 @@ on:
         description: Type P2.4-B-READ-ONLY-RUN to authorize one production read-only template Run
         required: true
         type: string
+      existing_run_id:
+        description: Optional successful Run UUID to verify without creating another Run
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -24,6 +28,7 @@ jobs:
       - name: Validate confirmation and production secrets
         env:
           CONFIRMATION: ${{ inputs.confirmation }}
+          EXISTING_RUN_ID: ${{ inputs.existing_run_id }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
@@ -31,6 +36,9 @@ jobs:
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           test "$CONFIRMATION" = "P2.4-B-READ-ONLY-RUN"
+          if [[ -n "$EXISTING_RUN_ID" ]]; then
+            [[ "$EXISTING_RUN_ID" =~ ^[0-9a-fA-F-]{36}$ ]]
+          fi
           test -n "$DEPLOY_HOST"
           test -n "$DEPLOY_USER"
           test -n "$DEPLOY_PATH"
@@ -45,17 +53,24 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
-      - name: Execute one guarded read-only template Run
+      - name: Execute or verify one guarded read-only template Run
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           ACCEPTANCE_PASSWORD: ${{ secrets.P24B_ACCEPTANCE_PASSWORD }}
           ACCEPTANCE_MARKER: P24B-RUN-${{ github.run_id }}-${{ github.run_attempt }}
+          EXISTING_RUN_ID: ${{ inputs.existing_run_id }}
         run: |
-          printf -v remote_command \
-            'cd %q && git fetch origin main && git checkout main && git pull --ff-only origin main && bash scripts/p2-4-production-workflow-run-acceptance.sh %q --confirm-read-only-template-run' \
-            "$DEPLOY_PATH" "$ACCEPTANCE_MARKER"
+          if [[ -n "$EXISTING_RUN_ID" ]]; then
+            printf -v remote_command \
+              'cd %q && git fetch origin main && git checkout main && git pull --ff-only origin main && bash scripts/p2-4-production-workflow-run-verify.sh %q %q --confirm-existing-read-only-run' \
+              "$DEPLOY_PATH" "$EXISTING_RUN_ID" "$ACCEPTANCE_MARKER"
+          else
+            printf -v remote_command \
+              'cd %q && git fetch origin main && git checkout main && git pull --ff-only origin main && bash scripts/p2-4-production-workflow-run-acceptance.sh %q --confirm-read-only-template-run' \
+              "$DEPLOY_PATH" "$ACCEPTANCE_MARKER"
+          fi
           printf '%s\n' "$ACCEPTANCE_PASSWORD" | \
             ssh -i ~/.ssh/deploy_key \
               -o BatchMode=yes \

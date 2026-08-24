@@ -73,7 +73,7 @@ public class AgentWorkflowRunController {
 
     private Object value(String raw) {
         if (raw == null || raw.isBlank()) return null;
-        try { return json.readTree(raw); }
+        try { return json.readValue(raw, Object.class); }
         catch (JsonProcessingException exception) { return raw; }
     }
 

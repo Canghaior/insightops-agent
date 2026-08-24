@@ -59,6 +59,8 @@ psql_scalar() {
 }
 
 cookie_jar="$(mktemp)"
+admin_json="$(mktemp)"
+activation_json="$(mktemp)"
 templates_json="$(mktemp)"
 tools_json="$(mktemp)"
 selection_json="$(mktemp)"
@@ -69,7 +71,8 @@ checkpoint_json="$(mktemp)"
 cleanup() {
   curl --fail --silent --show-error --cookie "$cookie_jar" \
     --request POST "https://${APP_ADDRESS}/api/v1/auth/logout" >/dev/null 2>&1 || true
-  rm -f "$cookie_jar" "$templates_json" "$tools_json" "$selection_json" \
+  rm -f "$cookie_jar" "$admin_json" "$activation_json" "$templates_json" \
+    "$tools_json" "$selection_json" \
     "$launch_json" "$run_json" "$workflow_json" "$checkpoint_json"
 }
 trap cleanup EXIT
@@ -85,11 +88,72 @@ unset AUTH_PASSWORD login_body
 # The admin overview is the product entry point that idempotently installs the
 # four built-in workspace templates before users can select an active version.
 curl --fail --silent --show-error --cookie "$cookie_jar" \
-  "https://${APP_ADDRESS}/api/v1/admin/agent-workflows" >/dev/null
+  "https://${APP_ADDRESS}/api/v1/admin/agent-workflows" >"$admin_json"
 curl --fail --silent --show-error --cookie "$cookie_jar" \
   "https://${APP_ADDRESS}/api/v1/agent-workflows" >"$templates_json"
 curl --fail --silent --show-error --cookie "$cookie_jar" \
   "https://${APP_ADDRESS}/api/v1/agent/tools" >"$tools_json"
+
+python3 - "$templates_json" "$admin_json" "$tools_json" "$activation_json" <<'PY'
+import json
+import sys
+
+active_path, admin_path, tools_path, activation_path = sys.argv[1:]
+with open(active_path, encoding="utf-8") as source:
+    active = json.load(source).get("data") or []
+with open(admin_path, encoding="utf-8") as source:
+    overview = json.load(source).get("data") or {}
+with open(tools_path, encoding="utf-8") as source:
+    tools = json.load(source).get("data") or []
+
+risk = {item["name"]: item["riskLevel"] for item in tools}
+
+def readonly(graph):
+    nodes = graph.get("nodes") or []
+    return bool(nodes) and all(risk.get(node.get("toolName")) == "READ_ONLY" for node in nodes)
+
+has_active = any(readonly(json.loads(template["graphSpecJson"])) for template in active)
+activation = {"required": False}
+if not has_active:
+    candidates = []
+    for template in overview.get("templates") or []:
+        for version in template.get("versions") or []:
+            if version.get("summary") != "内置 P2.4-B 模板":
+                continue
+            graph = json.loads(version["graphSpecJson"])
+            if readonly(graph):
+                candidates.append((len(graph["nodes"]), template["name"], -version["version"], template, version))
+    if not candidates:
+        raise SystemExit("No built-in READ_ONLY template version is available for activation")
+    _, _, _, template, version = sorted(candidates, key=lambda item: item[:3])[0]
+    activation = {
+        "required": True,
+        "templateId": template["id"],
+        "templateName": template["name"],
+        "versionId": version["id"],
+        "version": version["version"],
+    }
+
+with open(activation_path, "w", encoding="utf-8") as target:
+    json.dump(activation, target, ensure_ascii=False)
+PY
+
+activate_required="$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["required"]).lower())' "$activation_json")"
+if [[ "$activate_required" == "true" ]]; then
+  activate_template_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["templateId"])' "$activation_json")"
+  activate_template_name="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["templateName"])' "$activation_json")"
+  activate_version_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["versionId"])' "$activation_json")"
+  activate_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$activation_json")"
+  activation_body="$(python3 -c 'import json,sys; print(json.dumps({"reason":sys.argv[1]+" guarded P2.4-B production READ_ONLY acceptance"}))' "$MARKER")"
+  printf '%s' "$activation_body" | \
+    curl --fail --silent --show-error --cookie "$cookie_jar" --request POST \
+      --header 'Content-Type: application/json' --data-binary @- \
+      "https://${APP_ADDRESS}/api/v1/admin/agent-workflows/templates/${activate_template_id}/versions/${activate_version_id}/activate" >/dev/null
+  echo "Activated built-in READ_ONLY template ${activate_template_name} v${activate_version} for $MARKER"
+  unset activation_body activate_template_id activate_template_name activate_version_id activate_version
+  curl --fail --silent --show-error --cookie "$cookie_jar" \
+    "https://${APP_ADDRESS}/api/v1/agent-workflows" >"$templates_json"
+fi
 
 python3 - "$templates_json" "$tools_json" "$selection_json" "$MARKER" <<'PY'
 import json

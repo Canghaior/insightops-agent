@@ -1,0 +1,63 @@
+name: P2.4-C production product acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type P2.4-C-PRODUCT-ACCEPTANCE to authorize one authenticated production product acceptance
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: insightops-production
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Validate confirmation and production secrets
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          ACCEPTANCE_PASSWORD: ${{ secrets.P24B_ACCEPTANCE_PASSWORD }}
+        run: |
+          test "$CONFIRMATION" = "P2.4-C-PRODUCT-ACCEPTANCE"
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_PATH"
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          test -n "$ACCEPTANCE_PASSWORD"
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+      - name: Execute authenticated product acceptance
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          ACCEPTANCE_PASSWORD: ${{ secrets.P24B_ACCEPTANCE_PASSWORD }}
+          ACCEPTANCE_MARKER: P24C-PRODUCT-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          printf -v remote_command \
+            'cd %q && git fetch origin main && git checkout main && git pull --ff-only origin main && bash scripts/p2-4-c-production-product-acceptance.sh %q --confirm-product-acceptance' \
+            "$DEPLOY_PATH" "$ACCEPTANCE_MARKER"
+          printf '%s\n' "$ACCEPTANCE_PASSWORD" | \
+            ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command"

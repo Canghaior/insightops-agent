@@ -23,10 +23,12 @@ class AgentWorkflowServiceTest {
                 {"reason":"compare", "nodes":[
                   {"id":"spring","toolName":"knowledge_hybrid_search",
                    "arguments":{"query":"Spring AI","candidateLimit":8},
-                   "dependsOn":[],"condition":"ALWAYS","required":true},
+                   "dependsOn":[],"condition":"ALWAYS","required":true,
+                   "position":{"x":24,"y":28}},
                   {"id":"langchain","toolName":"knowledge_hybrid_search",
                    "arguments":{"query":"LangChain4j","candidateLimit":8},
-                   "dependsOn":[],"condition":"ALWAYS","required":true},
+                   "dependsOn":[],"condition":"ALWAYS","required":true,
+                   "position":{"x":24,"y":28}},
                   {"id":"evidence","toolName":"knowledge_hybrid_search",
                    "arguments":{"query":"compare official evidence","candidateLimit":12},
                    "dependsOn":["spring","langchain"],
@@ -40,6 +42,7 @@ class AgentWorkflowServiceTest {
                 .containsExactly(java.util.List.of("spring", "langchain"),
                         java.util.List.of("evidence"));
         assertThat(preview.mutatingNodeCount()).isZero();
+        assertThat(preview.graphSpecJson()).contains("\"position\":{\"x\":24,\"y\":28}");
     }
 
     @Test

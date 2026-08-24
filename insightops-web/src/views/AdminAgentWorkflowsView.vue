@@ -2,6 +2,9 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import WorkflowDragCanvas, { type WorkflowCanvasNode } from '@/components/WorkflowDragCanvas.vue'
+import WorkflowProductPanel from '@/components/WorkflowProductPanel.vue'
+
 import {
   activateAgentWorkflowVersion,
   createAgentWorkflowTemplate,
@@ -15,14 +18,9 @@ import {
   type WorkflowVersion,
 } from '@/api/agentWorkflows'
 
-interface EditableNode {
-  id: string
-  toolName: string
+interface EditableNode extends WorkflowCanvasNode {
   argumentsJson: string
-  dependsOn: string
-  condition: string
   exposeOutputs: string
-  required: boolean
 }
 
 const router = useRouter()
@@ -72,7 +70,7 @@ function resetEditor() {
   const toolName = overview.value.tools[0]?.name ?? 'knowledge_hybrid_search'
   nodes.value = [{
     id: 'research_1', toolName, argumentsJson: defaultArguments(toolName),
-    dependsOn: '', condition: 'ALWAYS', exposeOutputs: '', required: true,
+    dependsOn: '', condition: 'ALWAYS', exposeOutputs: '', required: true, x: 24, y: 28,
   }]
   preview.value = null
   error.value = ''
@@ -86,7 +84,7 @@ function parseVersion(item: WorkflowVersion) {
     nodes?: Array<{
       id?: string; toolName?: string; arguments?: Record<string, unknown>
       dependsOn?: string[]; condition?: string; exposeOutputs?: string[]
-      required?: boolean
+      required?: boolean; position?: { x?: number; y?: number }
     }>
   }
   form.summary = item.summary
@@ -101,6 +99,8 @@ function parseVersion(item: WorkflowVersion) {
     condition: node.condition ?? 'ALL_SUCCESS',
     exposeOutputs: (node.exposeOutputs ?? []).join(', '),
     required: node.required !== false,
+    x: node.position?.x,
+    y: node.position?.y,
   }))
   preview.value = null
 }
@@ -149,7 +149,7 @@ function graph(): Record<string, unknown> {
   return {
     reason: form.reason.trim(),
     inputs: JSON.parse(form.inputsJson) as Record<string, unknown>,
-    nodes: nodes.value.map((node) => ({
+    nodes: nodes.value.map((node, index) => ({
       id: node.id.trim(),
       toolName: node.toolName,
       arguments: JSON.parse(node.argumentsJson) as Record<string, unknown>,
@@ -157,6 +157,10 @@ function graph(): Record<string, unknown> {
       condition: node.condition,
       exposeOutputs: dependencies(node.exposeOutputs),
       required: node.required,
+      position: {
+        x: node.x ?? 24 + (index % 3) * 250,
+        y: node.y ?? 28 + Math.floor(index / 3) * 165,
+      },
     })),
   }
 }
@@ -183,6 +187,8 @@ function addNode() {
     argumentsJson: defaultArguments(toolName), dependsOn: '',
     condition: nodes.value.length ? 'ALL_SUCCESS' : 'ALWAYS',
     exposeOutputs: '', required: true,
+    x: 24 + (nodes.value.length % 3) * 250,
+    y: 28 + Math.floor(nodes.value.length / 3) * 165,
   })
   preview.value = null
 }
@@ -252,19 +258,33 @@ function nodePreview(nodeId: string): WorkflowNodePreview | undefined {
   return preview.value?.nodes.find((item) => item.id === nodeId)
 }
 
+const riskLevels = computed(() => Object.fromEntries(
+  overview.value.tools.map((tool) => [tool.name, tool.riskLevel]),
+))
+
+function updateCanvasNodes(updated: WorkflowCanvasNode[]) {
+  nodes.value = nodes.value.map((node, index) => ({
+    ...node,
+    dependsOn: updated[index]?.dependsOn ?? node.dependsOn,
+    x: updated[index]?.x ?? node.x,
+    y: updated[index]?.y ?? node.y,
+  }))
+  preview.value = null
+}
+
 onMounted(() => load())
 </script>
 
 <template>
   <section>
     <div class="section-heading">
-      <div><span class="eyebrow">P2.4-A · Workflow Studio</span><h2>工作流模板与运行前预检</h2></div>
+      <div><span class="eyebrow">P2.4-C · Workflow Studio</span><h2>工作流模板、拖拽编排与质量治理</h2></div>
       <div class="heading-actions"><button class="secondary-button" @click="resetEditor">新建模板</button><button class="secondary-button" @click="load()">刷新</button></div>
     </div>
 
     <div class="panel workflow-boundary">
       <strong>当前边界</strong>
-      <p>这里管理可复用的 Agent 任务图、版本和激活状态。预检不会创建 Run；写工具即使进入模板，运行时仍必须逐项人工审批。</p>
+      <p>这里管理可复用任务图、拖拽布局、不可变版本、参数预设、分享和真实运行质量。导入与分享不会绕过预检；写工具运行时仍必须逐项人工审批。</p>
     </div>
     <p v-if="error" class="stream-error">{{ error }}</p>
     <p v-if="success" class="success-banner">{{ success }}</p>
@@ -303,7 +323,13 @@ onMounted(() => load())
             <label class="wide">入口参数定义 JSON<textarea v-model="form.inputsJson" spellcheck="false" :placeholder="inputSchemaPlaceholder" /></label>
           </div>
 
-          <div class="node-heading"><div><span class="eyebrow">DAG Nodes</span><h3>任务节点</h3></div><button type="button" class="secondary-button" @click="addNode">增加节点</button></div>
+          <WorkflowDragCanvas
+            :nodes="nodes"
+            :risk-levels="riskLevels"
+            @update:nodes="updateCanvasNodes"
+            @dirty="preview = null"
+          />
+          <div class="node-heading"><div><span class="eyebrow">DAG Nodes</span><h3>节点合同与参数</h3></div><button type="button" class="secondary-button" @click="addNode">增加节点</button></div>
           <article v-for="(node, index) in nodes" :key="index" class="node-editor">
             <header><strong>节点 {{ index + 1 }}</strong><button type="button" class="text-button" :disabled="nodes.length === 1" @click="removeNode(index)">删除</button></header>
             <div class="node-grid">
@@ -339,6 +365,14 @@ onMounted(() => load())
           <div v-else class="graph-empty"><strong>先运行预检</strong><p>校验通过后，这里会按依赖层展示并行节点、条件和风险等级。</p></div>
           <ul v-if="preview?.warnings.length" class="workflow-warnings"><li v-for="warning in preview.warnings" :key="warning">{{ warning }}</li></ul>
         </section>
+
+        <WorkflowProductPanel
+          v-if="selectedTemplate && selectedVersion"
+          :template-id="selectedTemplate.id"
+          :version-id="selectedVersion.id"
+          :template-name="selectedTemplate.name"
+          @changed="load($event)"
+        />
       </main>
     </div>
   </section>

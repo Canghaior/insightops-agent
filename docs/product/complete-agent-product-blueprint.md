@@ -51,7 +51,7 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 |---|---:|---|
 | 固定三项目的封闭 Alpha | 约 94% | 三项目生产知识库、50 题及反馈版本化 RAG 门禁、统一事件流、真实引用问答、采集可观测性和备份链路已验收 |
 | 用户可自由配置的技术情报产品 | 约 86% | 项目、知识源、RSS、Roadmap、用户资料、关注规则、反馈复核、报告导出和 Webhook 已产品化；邮件、专用协作渠道及十项目长期稳定性观察仍待完成 |
-| 通用多工具自主 Agent | 约 96% | P2.0 至 P2.3 已关闭生产验收；P2.4-A/B 已完成模板、真实持久 Run、受限结果表达式、节点恢复和失败节点定点重跑，P2.4-C 继续补模板分享与质量趋势 |
+| 通用多工具自主 Agent | 约 98% | P2.0 至 P2.3 已关闭生产验收；P2.4-A/B/C 已完成模板、真实持久 Run、节点恢复、拖拽编排、参数预设、可撤销分享和模板质量趋势 |
 | 可公开运营的 SaaS | 约 40% | 已有上传配额、应用指标、关键告警和含文件卷备份；仍缺注册、找回密码、计费、合规、异地副本和完整容灾演练 |
 
 当前最准确的阶段判断是：
@@ -273,16 +273,18 @@ P2.3-C 已完成可靠性 SLO、告警与安全演练能力并关闭真实生产
 P2.4-A 已实现工作流模板与运行前可视化预检：V35 提供 Workspace 模板、不可变版本、单活动版本和激活审计；保存与激活前复用 P2.1 条件 DAG 校验，并增加工具启用状态、输入合同和写节点独占门禁。Owner/系统管理员页面支持四类内置研究模板、节点/依赖/条件编辑、分层 DAG 预览、版本创建与激活，并可将入口问题带入研究问答。真实 PostgreSQL Flyway 35/35、模板版本切换与审计门禁、后端 263 个测试槽以及前端 53/53 均通过。P2.4-A 只关闭模板与预检闭环，活动模板直接驱动持久 Run 留给 P2.4-B。
 P2.4-B 已实现并关闭认证态生产验收：V36 固化模板/版本/图/入口参数/工具合同快照，并增加逻辑节点与节点尝试；`${inputs.*}` 和 `${node.output.*}` 在依赖与输出白名单内解析，节点执行复用持久队列、租约 fencing、安全点、成本结算及写工具审批边界。失败 Run 可创建带完整血缘的新 Run，已成功节点以 `REUSED` 复用而不重复调用。成员页面支持活动模板动态参数启动，Run 详情展示节点输入输出、尝试、耗时、Token、费用、失败原因、安全点和定点重试。真实 PostgreSQL 18.4、Flyway 36/36、后端 271/271 及前端 56/56 已通过。生产验收先后发现并修复并行波次不可变列表排序与 Jackson 2/3 动态 JSON 响应边界缺陷；最终替代 Run `c957fdd9-2425-4cdb-a2c4-f45e76eb685b` 使用活动模板“版本对比”v1 完成 2/2 READ_ONLY 节点，工作流 Run `32695436333` 只读复核确认不可变图快照哈希一致、安全点 `AVAILABLE / WORKFLOW_WAVE_COMPLETED`、节点汇总 `2|2|2` 和成本 `SETTLED|1|1`。最终运行修复提交 `868c1ea402754752d30a99e74943aa4b2e153f7c` 经 CI Run `32694809322`、部署 Run `32695040331` 发布，生产页面、服务状态、DeepSeek readiness 和未登录 401 边界再次通过。
 
+P2.4-C 已完成工作流产品化并关闭认证态生产验收：V37 增加用户/版本绑定参数预设和只存 SHA-256 哈希的有期可撤销分享；管理端支持拖拽 DAG、可视依赖、模板包导入导出、分享审计和真实 Run 质量趋势。分享令牌只进入浏览器 fragment 与 POST body，多成员反馈先按 Run 聚合，避免重复计算 Token、费用和节点。真实 PostgreSQL 18.4、Flyway 37/37、后端 280/280、前端 63/63、lint、类型检查和生产构建全部通过。生产代码提交 `9563234ec10b3a3efee78f6f6c5f05c3367b6151` 经 CI Run `32716387888` 和 Deploy Run `32716895893` 发布；替代认证验收 Run `32717865872` 完成预设创建/删除、导出、分享预览/导入/撤销、撤销后拒绝、质量趋势和未激活 DRAFT v1 边界验证。验收脚本语义修复提交 `f64e083c531dee4ad76afec6392e2f735f78bbbd` 经 CI Run `32717652958` 全绿。
+
 P2.3-B 持久聊天续流在 P2.4-B 之后又完成三轮生产缺陷修复：`666a4ac` 增加服务端心跳和客户端首事件/空闲超时，`f829991` 增加非阻塞取消与持久事件 JSON 轮询回补，`60c94ab` 将回补事件转换为 Jackson 3 HTTP 边界兼容的标准 Map/List/标量。最终后端 273/273、前端 57/57 通过，CI Run `32708453090`、部署 Run `32708756290` 成功；生产服务 `UP`、`deepseek-v4-flash ready=true`，用户确认复杂问题无需刷新即可自动显示答案。详细验收见 `docs/testing/results/p2-3-durable-chat-stream-recovery-2026-08-24.md`。
 
 当前仍缺少：
 
-- 工作流拖拽画布、模板分享/导入导出、运行参数预设和模板级质量趋势（P2.4-C）。
+- 工作流模板市场、团队级协作编辑和模板归档/清理策略（P2.4 后续增强）。
 - 超出用户记忆的更多写工具及其差异化审批、幂等和补偿策略。
 - 认证型/会话型 MCP、合同发现、健康探测与更完整的租户级工具包策略。
 - 套餐、订单、支付、退款、发票和财务级用量对账。
 
-P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md` 和 `docs/testing/results/p2-0-agent-tool-resilience-2026-08-22.md`；P2.0-D 见 `docs/architecture/p2-0-agent-tool-governance.md` 和 `docs/testing/results/p2-0-agent-tool-governance-2026-08-22.md`。P2.1-A/B/C 设计与测试见 `docs/architecture/p2-1-agent-orchestration-cost-governance.md` 和 `docs/testing/results/p2-1-agent-orchestration-cost-governance-2026-08-22.md`；P2.2-A/B/C 见 `docs/architecture/p2-2-agent-evaluation-release-governance.md` 和 `docs/testing/results/p2-2-agent-evaluation-release-governance-2026-08-22.md`；P2.3-A 见 `docs/architecture/p2-3-durable-agent-evaluation-queue.md` 和 `docs/testing/results/p2-3-durable-agent-evaluation-queue-2026-08-22.md`；P2.3-B 见 `docs/architecture/p2-3-durable-chat-agent-runs.md` 和 `docs/testing/results/p2-3-durable-chat-agent-runs-2026-08-22.md`；P2.3-C 见 `docs/architecture/p2-3-chat-reliability-slo.md` 和 `docs/testing/results/p2-3-chat-reliability-slo-2026-08-22.md`；P2.4-A 见 `docs/architecture/p2-4-agent-workflow-templates.md` 和 `docs/testing/results/p2-4-agent-workflow-templates-2026-08-23.md`；P2.4-B 见 `docs/architecture/p2-4-b-template-driven-agent-runs.md` 和 `docs/testing/results/p2-4-b-template-driven-agent-runs-2026-08-23.md`。
+P2.0-C 详细设计与验收见 `docs/architecture/p2-0-agent-tool-resilience.md` 和 `docs/testing/results/p2-0-agent-tool-resilience-2026-08-22.md`；P2.0-D 见 `docs/architecture/p2-0-agent-tool-governance.md` 和 `docs/testing/results/p2-0-agent-tool-governance-2026-08-22.md`。P2.1-A/B/C 设计与测试见 `docs/architecture/p2-1-agent-orchestration-cost-governance.md` 和 `docs/testing/results/p2-1-agent-orchestration-cost-governance-2026-08-22.md`；P2.2-A/B/C 见 `docs/architecture/p2-2-agent-evaluation-release-governance.md` 和 `docs/testing/results/p2-2-agent-evaluation-release-governance-2026-08-22.md`；P2.3-A 见 `docs/architecture/p2-3-durable-agent-evaluation-queue.md` 和 `docs/testing/results/p2-3-durable-agent-evaluation-queue-2026-08-22.md`；P2.3-B 见 `docs/architecture/p2-3-durable-chat-agent-runs.md` 和 `docs/testing/results/p2-3-durable-chat-agent-runs-2026-08-22.md`；P2.3-C 见 `docs/architecture/p2-3-chat-reliability-slo.md` 和 `docs/testing/results/p2-3-chat-reliability-slo-2026-08-22.md`；P2.4-A 见 `docs/architecture/p2-4-agent-workflow-templates.md` 和 `docs/testing/results/p2-4-agent-workflow-templates-2026-08-23.md`；P2.4-B 见 `docs/architecture/p2-4-b-template-driven-agent-runs.md` 和 `docs/testing/results/p2-4-b-template-driven-agent-runs-2026-08-23.md`；P2.4-C 见 `docs/architecture/p2-4-c-workflow-productization.md` 和 `docs/testing/results/p2-4-c-workflow-productization-2026-08-24.md`。
 
 ### 5.3 RAG 重排与评测仍是基础版本
 
@@ -624,6 +626,7 @@ P2.1-C 已实现 Workspace Agent Token/成本/并发配额、用量聚合、硬�
 - [x] 普通聊天 Agent Run 已支持持久队列、跨实例事件续流、租约接管、旧 Worker fencing 和同 Run 安全点恢复（P2.3-B，生产已验收）。
 - [x] Workspace 工作流模板、不可变版本、激活审计、工具合同门禁和分层 DAG 可视化预检已完成（P2.4-A）。
 - [x] 活动模板已可创建不可变快照的持久 Run，支持受限节点结果表达式、节点级恢复和失败节点定点重跑（P2.4-B，生产发布与公开 Smoke 已验收）。
+- [x] 工作流拖拽画布、版本绑定参数预设、模板导入导出、可撤销分享和真实运行质量趋势已完成（P2.4-C，认证态生产验收已通过）。
 - [x] 普通聊天可靠性队列 SLO、接管延迟、SSE 恢复指标、Prometheus 告警、Grafana 面板及强确认演练脚本已部署，并完成唯一测试 Run 的真实生产 `SIGKILL` 接管验收（P2.3-C）。
 
 ### 9.4 公开 SaaS 完成标准
@@ -675,6 +678,7 @@ P2.1-C 已实现 Workspace Agent Token/成本/并发配额、用量聚合、硬�
 12. [x] 实现普通聊天队列与接管 SLO、SSE 恢复指标、可靠性告警、Grafana 面板及受保护的生产接管演练工具，并完成真实生产 `SIGKILL` 接管闭环（P2.3-C，已验收）。
 13. [x] 实现工作流模板库、不可变版本、活动版本审计、运行前合同校验和分层 DAG 预览（P2.4-A）。
 14. [x] 实现活动模板驱动持久 Run、不可变快照、受限结果表达式、节点级恢复和失败节点定点重跑（P2.4-B，生产发布与公开 Smoke 已验收）。
+15. [x] 实现拖拽 DAG、版本绑定参数预设、模板导入导出、可撤销分享和真实运行质量趋势（P2.4-C，认证态生产验收已通过）。
 
 ### 阶段 D：补齐公开运营能力
 

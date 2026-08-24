@@ -49,4 +49,4 @@ Owner 和系统管理员可使用 `/api/v1/admin/agent-workflows`：
 
 ## 5. 后续阶段
 
-P2.4-B 已实现模板快照、受限依赖输出表达式、持久节点执行、跨实例恢复和失败节点定点重跑，详细设计见 `docs/architecture/p2-4-b-template-driven-agent-runs.md`。P2.4-C 再补拖拽画布、模板分享/导入导出、运行参数预设和模板级运行质量趋势。
+P2.4-B 已实现模板快照、受限依赖输出表达式、持久节点执行、跨实例恢复和失败节点定点重跑，详细设计见 `docs/architecture/p2-4-b-template-driven-agent-runs.md`。P2.4-C 已完成拖拽画布、模板分享/导入导出、版本绑定运行参数预设和模板级运行质量趋势，详见 `docs/architecture/p2-4-c-workflow-productization.md`。

@@ -18,6 +18,7 @@ import {
 } from '@/api/conversations'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import { submitAnswerFeedback, submitCitationFeedback } from '@/api/feedback'
+import { sourceHeading } from '@/utils/sourceClassification'
 
 const route = useRoute()
 
@@ -592,15 +593,6 @@ function toolExecutionResult(execution: ToolExecution) {
   return execution.model ? `已获取 ${count} 条 · ${execution.model}` : `已获取 ${count} 条结果`
 }
 
-function sourceHeading(message: ConversationMessage) {
-  const sources = message.sources ?? []
-  const hasRelease = sources.some((source) => source.includes('github.com/') && source.includes('/releases/tag/'))
-  const hasProjectEvent = sources.some((source) => source.includes('github.com/')
-    && (source.includes('/issues/') || source.includes('/pull/') || source.includes('/security/advisories/')))
-  const hasDocs = sources.some((source) => !source.includes('github.com/'))
-  if ((hasRelease || hasProjectEvent) && hasDocs) return 'GitHub 官方事件与知识库来源'
-  return hasRelease || hasProjectEvent ? 'GitHub 官方来源' : '官方知识库来源'
-}
 
 async function rateAnswer(message: ConversationMessage, helpful: boolean) {
   if (!message.runId) return
@@ -792,7 +784,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div v-else-if="message.sources?.length" class="source-list">
-              <strong>{{ sourceHeading(message) }}</strong>
+              <strong>{{ sourceHeading(message.sources ?? []) }}</strong>
               <a v-for="source in message.sources" :key="source" :href="source" target="_blank" rel="noreferrer">
                 {{ source }}
               </a>

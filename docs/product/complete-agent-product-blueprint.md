@@ -223,12 +223,12 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 
 ### 4.15 测试与持续集成
 
-- 后端当前真实 PostgreSQL 全仓 `verify` 为 293/293、0 失败、0 错误、0 跳过，PostgreSQL 18.4、Flyway 38/38。
-- 前端当前 25 个测试文件、67 个测试全部通过。
+- 后端当前真实 PostgreSQL 全仓 `verify` 为 294/294、0 失败、0 错误、0 跳过，PostgreSQL 18.4、Flyway 38/38。
+- 前端当前 25 个测试文件、68 个测试全部通过。
 - 前端 ESLint 通过。
 - 前端生产构建通过。
 - GitHub Actions 已配置后端验证、前端 lint/test/build 和三个镜像构建。
-- GitHub `production` Environment Secrets 已完成配置；当前生产功能镜像版本为 `209d88d839d6c38e92eb3c6196bfa27b13bec23b`，CI Run `32824432131` 的后端、前端和三个镜像任务全部成功，部署 Run `32824775308` 成功；最终验收脚本提交 `f1eb515c9d88dc5b9de861f715bfccb5f2e336a8` 的 CI Run `32825930469` 和 P3.1 生产验收 Run `32826199893` 均成功。
+- GitHub `production` Environment Secrets 已完成配置；当前生产功能镜像版本为 `15dc3a0c5098421c89faa54148e2c94e56ed3f5a`，CI Run `32843561951` 的后端、前端和三个镜像任务全部成功，部署 Run `32843905374` 成功；P3.1 身份/Workspace 与认证聊天 SSE 生产复验 Run `32844206799` 成功。
 - Dependabot 已覆盖 Maven、npm 和 GitHub Actions 依赖。
 
 ## 5. 当前部分完成的能力

@@ -48,6 +48,19 @@ if ! docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orp
   echo "Compose startup failed" >&2
   deployment_ok=false
 fi
+if [[ "$deployment_ok" == "true" ]]; then
+  if ! docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+    run --rm --no-deps caddy \
+    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
+    echo "Caddy configuration validation failed" >&2
+    deployment_ok=false
+  elif ! docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+    up -d --no-deps --force-recreate caddy; then
+    echo "Caddy configuration activation failed" >&2
+    deployment_ok=false
+  fi
+fi
+
 
 if [[ "$deployment_ok" == "true" ]]; then
   for service in postgres ollama server worker web caddy; do

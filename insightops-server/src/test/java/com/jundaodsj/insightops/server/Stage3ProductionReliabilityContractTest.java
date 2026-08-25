@@ -118,6 +118,17 @@ class Stage3ProductionReliabilityContractTest {
         assertThat(githubToken).doesNotContain("set -x");
         assertThat(githubToken).doesNotContain("awk -v", "replacement=$github_token");
     }
+    @Test
+    void deploymentValidatesAndActivatesMountedCaddyConfiguration() throws IOException {
+        String deploy = read("scripts/deploy-prod.sh");
+        String caddy = read("infra/caddy/Caddyfile");
+
+        assertThat(deploy).contains(
+                "run --rm --no-deps caddy",
+                "caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile",
+                "up -d --no-deps --force-recreate caddy");
+        assertThat(caddy).contains("Strict-Transport-Security \"max-age=31536000; includeSubDomains\"");
+    }
 
     private String read(String relative) throws IOException {
         return Files.readString(root().resolve(relative));

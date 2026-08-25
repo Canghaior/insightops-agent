@@ -6,10 +6,12 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
+    { path: '/register', name: 'register', component: () => import('@/views/RegisterView.vue'), meta: { public: true } },
     { path: '/forgot-password', name: 'forgot-password', component: () => import('@/views/ForgotPasswordView.vue'), meta: { public: true } },
     { path: '/reset-password', name: 'reset-password', component: () => import('@/views/ResetPasswordView.vue'), meta: { public: true } },
     { path: '/verify-email', name: 'verify-email', component: () => import('@/views/VerifyEmailView.vue'), meta: { public: true } },
     { path: '/invitation', name: 'invitation', component: () => import('@/views/InvitationView.vue'), meta: { public: true } },
+    { path: '/legal/:document(terms|privacy|acceptable-use)', name: 'legal', component: () => import('@/views/LegalDocumentView.vue'), meta: { public: true } },
     { path: '/', name: 'dashboard', component: () => import('@/views/DashboardView.vue') },
     { path: '/projects', name: 'projects', component: () => import('@/views/ProjectsView.vue') },
     { path: '/updates', name: 'updates', component: () => import('@/views/UpdatesView.vue') },
@@ -27,6 +29,7 @@ const router = createRouter({
     { path: '/runs/:runId', name: 'run-detail', component: () => import('@/views/RunsView.vue') },
     { path: '/workspace', name: 'workspace', component: () => import('@/views/WorkspaceView.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
+    { path: '/privacy', name: 'privacy', component: () => import('@/views/PrivacyView.vue') },
     {
       path: '/admin/users',
       name: 'admin-users',
@@ -74,6 +77,12 @@ const router = createRouter({
       name: 'admin-agent-workflows',
       component: () => import('@/views/AdminAgentWorkflowsView.vue'),
       meta: { manager: true },
+    },
+    {
+      path: '/admin/public-beta',
+      name: 'admin-public-beta',
+      component: () => import('@/views/AdminPublicBetaView.vue'),
+      meta: { systemAdmin: true },
     },
   ],
 })

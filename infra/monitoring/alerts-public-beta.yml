@@ -1,0 +1,39 @@
+groups:
+  - name: insightops-public-beta
+    rules:
+      - alert: PublicBetaCapacityNearFull
+        expr: insightops_public_beta_registration_slots_occupied / clamp_min(insightops_public_beta_registration_capacity, 1) >= 0.9
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Public Beta registration capacity is at least 90% occupied"
+      - alert: PublicBetaCapacityFull
+        expr: insightops_public_beta_registration_slots_occupied >= insightops_public_beta_registration_capacity
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Public Beta registration capacity is full"
+      - alert: IdentityMailTerminalFailures
+        expr: insightops_identity_mail_failed > 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "One or more identity emails exhausted all retries"
+      - alert: IdentityMailBacklogStale
+        expr: insightops_identity_mail_oldest_pending_seconds > 600
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "An identity email has remained pending for more than ten minutes"
+      - alert: TencentSesNotReady
+        expr: insightops_public_beta_config_enabled == 1 and insightops_tencent_ses_ready == 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Tencent SES configuration is not ready"
+      - alert: TurnstileFailureBurst
+        expr: sum(increase(insightops_turnstile_verifications_total{outcome!="accepted"}[10m])) > 20
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Turnstile rejected or failed more than twenty registrations in ten minutes"

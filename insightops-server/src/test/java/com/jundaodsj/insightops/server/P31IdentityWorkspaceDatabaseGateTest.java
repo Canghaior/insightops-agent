@@ -43,7 +43,7 @@ class P31IdentityWorkspaceDatabaseGateTest {
         dataSource = new DriverManagerDataSource(schemaUrl, username, password);
         var result = Flyway.configure().dataSource(dataSource).schemas(SCHEMA).defaultSchema(SCHEMA)
                 .createSchemas(true).locations("classpath:db/migration").load().migrate();
-        assertThat(result.migrationsExecuted).isEqualTo(38);
+        assertThat(result.migrationsExecuted).isEqualTo(40);
     }
 
     @AfterAll

@@ -153,7 +153,7 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(38);
+        assertThat(migration.migrationsExecuted).isEqualTo(40);
 
         jdbcClient = JdbcClient.create(dataSource);
         assertThat(jdbcClient.sql("select count(*) from tracked_project")

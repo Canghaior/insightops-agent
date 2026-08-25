@@ -7,6 +7,7 @@ import App from './App.vue'
 import router from './router'
 import './styles/main.css'
 import './styles/p31.css'
+import './styles/public-beta.css'
 
 const app = createApp(App)
 app.component('ElIcon', ElIcon)

@@ -54,7 +54,7 @@ class P23DurableChatRunDatabaseGateTest {
         var result = Flyway.configure().dataSource(dataSource).schemas(SCHEMA)
                 .defaultSchema(SCHEMA).createSchemas(true)
                 .locations("classpath:db/migration").load().migrate();
-        assertThat(result.migrationsExecuted).isEqualTo(38);
+        assertThat(result.migrationsExecuted).isEqualTo(40);
         transactions = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
     }
 

@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
 
-const username = ref('alpha-owner')
+const username = ref('')
 const password = ref('')
 const mfaCode = ref('')
 const mfaRequired = ref(false)
@@ -33,7 +33,7 @@ async function submit() {
 <template>
   <main class="login-page">
     <section class="login-card">
-      <div class="brand"><span class="brand-mark">IO</span><div><strong>InsightOps</strong><small>Agent · P1</small></div></div>
+      <div class="brand"><span class="brand-mark">IO</span><div><strong>InsightOps</strong><small>Agent · 免费 Beta</small></div></div>
       <span class="eyebrow">个人工作区登录</span>
       <h1>欢迎回来</h1>
       <p>登录后，会话、Workspace、执行记录、长期记忆和项目关注都会按租户隔离。</p>
@@ -47,7 +47,7 @@ async function submit() {
         <button class="send-button" :disabled="loading">{{ loading ? '登录中…' : '登录' }}</button>
       </form>
       <RouterLink to="/forgot-password">忘记密码？</RouterLink>
-      <p class="registration-note">当前为封闭邀请制，不开放自主注册。账号由管理员创建。</p>
+      <p class="registration-note"><RouterLink to="/register">查看免费公开 Beta 注册状态</RouterLink></p>
     </section>
   </main>
 </template>

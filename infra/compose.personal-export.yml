@@ -1,0 +1,23 @@
+services:
+  personal-exports-init:
+    image: ghcr.io/canghaior/insightops-agent-server:${IMAGE_TAG:-latest}
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mkdir -p /var/lib/insightops/personal-exports && chown -R 10001:10001 /var/lib/insightops/personal-exports"]
+    volumes:
+      - personal-data-exports:/var/lib/insightops/personal-exports
+    networks: [backend]
+
+  server:
+    environment:
+      INSIGHTOPS_IDENTITY_EXPORT_DIRECTORY: /var/lib/insightops/personal-exports
+      INSIGHTOPS_IDENTITY_EXPORT_EXPIRES_HOURS: ${PERSONAL_EXPORT_EXPIRES_HOURS:-24}
+    volumes:
+      - personal-data-exports:/var/lib/insightops/personal-exports
+
+    depends_on:
+      personal-exports-init:
+        condition: service_completed_successfully
+volumes:
+  personal-data-exports:

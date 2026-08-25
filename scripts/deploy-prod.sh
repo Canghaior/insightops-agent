@@ -3,7 +3,13 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.prod}"
-COMPOSE_FILE="$ROOT_DIR/infra/compose.prod.yml"
+COMPOSE_FILES=(
+  -f "$ROOT_DIR/infra/compose.prod.yml"
+  -f "$ROOT_DIR/infra/compose.public-beta.yml"
+  -f "$ROOT_DIR/infra/compose.tencent-ses.yml"
+  -f "$ROOT_DIR/infra/compose.personal-export.yml"
+  -f "$ROOT_DIR/infra/compose.public-beta-monitoring.yml"
+)
 STATE_DIR="$ROOT_DIR/.deploy"
 requested_tag="${1:-latest}"
 
@@ -15,6 +21,7 @@ fi
 bash "$ROOT_DIR/scripts/ensure-prod-reliability-secrets.sh"
 bash "$ROOT_DIR/scripts/preflight-prod.sh" "$ENV_FILE"
 mkdir -p "$STATE_DIR"
+bash "$ROOT_DIR/scripts/preflight-public-beta.sh" "$ENV_FILE"
 previous_tag=""
 if [[ -f "$STATE_DIR/last-successful-tag" ]]; then
   previous_tag="$(<"$STATE_DIR/last-successful-tag")"
@@ -25,7 +32,7 @@ wait_for_health() {
   local container_id
   local status
   container_id="$(IMAGE_TAG="$requested_tag" docker compose --env-file "$ENV_FILE" \
-    -f "$COMPOSE_FILE" ps -q "$service")"
+    "${COMPOSE_FILES[@]}" ps -q "$service")"
   if [[ -z "$container_id" ]]; then
     return 1
   fi
@@ -39,22 +46,22 @@ wait_for_health() {
 }
 
 export IMAGE_TAG="$requested_tag"
-if docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps --status running -q postgres | grep -q .; then
+if docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" ps --status running -q postgres | grep -q .; then
   bash "$ROOT_DIR/scripts/backup-prod.sh"
 fi
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull server worker web
+docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" pull server worker web
 deployment_ok=true
-if ! docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans; then
+if ! docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" up -d --remove-orphans; then
   echo "Compose startup failed" >&2
   deployment_ok=false
 fi
 if [[ "$deployment_ok" == "true" ]]; then
-  if ! docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+  if ! docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" \
     run --rm --no-deps caddy \
     caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
     echo "Caddy configuration validation failed" >&2
     deployment_ok=false
-  elif ! docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+  elif ! docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" \
     up -d --no-deps --force-recreate caddy; then
     echo "Caddy configuration activation failed" >&2
     deployment_ok=false
@@ -74,13 +81,13 @@ fi
 
 if [[ "$deployment_ok" != "true" ]]; then
   echo "Deployment diagnostics for $requested_tag" >&2
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps >&2 || true
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+  docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" ps >&2 || true
+  docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" \
     logs --tail 200 --no-color server worker web >&2 || true
   if [[ -n "$previous_tag" && "$previous_tag" != "$requested_tag" ]]; then
     echo "Rolling back from $requested_tag to $previous_tag" >&2
     export IMAGE_TAG="$previous_tag"
-    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans
+    docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" up -d --remove-orphans
   fi
   exit 1
 fi

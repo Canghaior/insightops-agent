@@ -1,0 +1,5 @@
+services:
+  prometheus:
+    volumes:
+      - ./monitoring/prometheus-public-beta.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts-public-beta.yml:/etc/prometheus/alerts-public-beta.yml:ro

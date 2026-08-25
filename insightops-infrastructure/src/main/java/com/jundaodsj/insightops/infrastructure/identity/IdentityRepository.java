@@ -307,6 +307,7 @@ public class IdentityRepository {
         int updated = jdbc.sql("""
                 update account_deletion_request set cancelled_at = :now
                 where user_id = :userId and cancelled_at is null and completed_at is null
+                  and purge_status <> 'PROCESSING'
                 """).param("userId", userId).param("now", timestamp(now)).update();
         if (updated == 1) {
             jdbc.sql("""

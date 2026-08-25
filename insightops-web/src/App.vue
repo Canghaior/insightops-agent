@@ -30,6 +30,7 @@ const navigation = [
   { path: '/runs', label: '执行记录', icon: Operation },
   { path: '/workspace', label: 'Workspace', icon: FolderOpened },
   { path: '/settings', label: '账号设置', icon: Setting },
+  { path: '/privacy', label: '隐私与数据', icon: Setting },
 ]
 
 async function loadUnread() {
@@ -87,6 +88,7 @@ async function changeWorkspace(event: { target: unknown }) {
         <RouterLink to="/admin/agent-workflows"><el-icon><Operation /></el-icon><span>工作流模板</span></RouterLink>
         <RouterLink v-if="isSystemAdmin" to="/admin/knowledge"><el-icon><FolderOpened /></el-icon><span>知识库采集</span></RouterLink>
         <RouterLink v-if="isSystemAdmin" to="/admin/quality"><el-icon><DataAnalysis /></el-icon><span>质量复核</span></RouterLink>
+        <RouterLink v-if="isSystemAdmin" to="/admin/public-beta"><el-icon><Operation /></el-icon><span>公开 Beta</span></RouterLink>
       </nav>
       <div class="scope-note account-card">
         <span class="eyebrow">当前账号</span>
@@ -104,7 +106,7 @@ async function changeWorkspace(event: { target: unknown }) {
     <main class="content">
       <header class="topbar">
         <div><span class="eyebrow">AI 开源情报工作台</span><h1>让技术选型有证据、可追溯</h1></div>
-        <div class="alpha-chip"><span></span> P3.1 团队版</div>
+        <div class="alpha-chip"><span></span> P3 免费 Beta</div>
       </header>
       <RouterView />
     </main>

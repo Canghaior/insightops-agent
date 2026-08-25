@@ -1,0 +1,37 @@
+name: Sign production images
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  sign:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: [server, worker, web]
+    steps:
+      - uses: sigstore/cosign-installer@v3
+      - uses: imjasonh/setup-crane@v0.4
+      - name: Authenticate to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sign immutable CI image digest with GitHub OIDC
+        env:
+          IMAGE: ghcr.io/canghaior/insightops-agent-${{ matrix.image }}
+          SHA_TAG: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          digest="$(crane digest "$IMAGE:$SHA_TAG")"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          cosign sign --yes "$IMAGE@$digest"

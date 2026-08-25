@@ -171,7 +171,7 @@ assert created["name"] == marker and created["status"] == "ACTIVE"
 assert switched["workspaceId"] == workspace_id and switched["role"] == "OWNER"
 assert any(item["userId"] == login["userId"] and item["role"] == "OWNER" for item in members)
 assert isinstance(security["mfaEnabled"], bool)
-assert security["activeSessionCount"] >= 1
+assert len(sessions) >= 1
 assert any(item["current"] and item["workspaceId"] == original_id for item in sessions)
 
 created_invite = invitation_created["invitation"]

@@ -129,6 +129,14 @@ class Stage3ProductionReliabilityContractTest {
                 "up -d --no-deps --force-recreate caddy");
         assertThat(caddy).contains("Strict-Transport-Security \"max-age=31536000; includeSubDomains\"");
     }
+    @Test
+    void p31AcceptanceCountsSessionsFromTheSessionsEndpoint() throws IOException {
+        String acceptance = read("scripts/p3-1-production-acceptance.sh");
+
+        assertThat(acceptance)
+                .contains("assert len(sessions) >= 1")
+                .doesNotContain("security[\"activeSessionCount\"]");
+    }
 
     private String read(String relative) throws IOException {
         return Files.readString(root().resolve(relative));

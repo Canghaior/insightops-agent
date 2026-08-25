@@ -2,6 +2,7 @@ package com.jundaodsj.insightops.server.auth;
 
 import com.jundaodsj.insightops.infrastructure.identity.IdentityRepository;
 import com.jundaodsj.insightops.infrastructure.identity.IdentitySecretCipher;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.Mac;
@@ -27,6 +28,7 @@ public class TotpService {
     private final SecureRandom random = new SecureRandom();
     private final Clock clock;
 
+    @Autowired
     public TotpService(IdentityRepository repository, IdentitySecretCipher cipher) {
         this(repository, cipher, Clock.systemUTC());
     }

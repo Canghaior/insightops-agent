@@ -6,6 +6,7 @@ import com.jundaodsj.insightops.identity.application.AdminAccountStore;
 import com.jundaodsj.insightops.infrastructure.identity.IdentityRepository;
 import com.jundaodsj.insightops.infrastructure.identity.IdentitySecretCipher;
 import com.jundaodsj.insightops.infrastructure.identity.WorkspaceRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -39,6 +40,7 @@ public class WorkspaceManagementService {
     private final SecureRandom random = new SecureRandom();
     private final Clock clock;
 
+    @Autowired
     public WorkspaceManagementService(WorkspaceRepository repository, IdentityRepository identities,
                                       IdentitySecretCipher cipher, IdentityProperties properties,
                                       AuthService authService, AdminAccountStore auditStore,

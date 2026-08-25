@@ -4,6 +4,7 @@ import com.jundaodsj.insightops.identity.application.AccountWorkspaceStore;
 import com.jundaodsj.insightops.infrastructure.identity.IdentityRepository;
 import com.jundaodsj.insightops.infrastructure.identity.IdentitySecretCipher;
 import com.jundaodsj.insightops.infrastructure.identity.WorkspaceRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,7 @@ public class IdentityLifecycleService {
     private final SecureRandom random = new SecureRandom();
     private final Clock clock;
 
+    @Autowired
     public IdentityLifecycleService(IdentityRepository repository, WorkspaceRepository workspaces,
                                     IdentitySecretCipher cipher, IdentityProperties properties,
                                     AuthService authService, TotpService totp) {

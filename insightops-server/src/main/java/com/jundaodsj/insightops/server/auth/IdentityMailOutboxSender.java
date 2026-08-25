@@ -4,6 +4,7 @@ import com.jundaodsj.insightops.infrastructure.identity.IdentityRepository;
 import com.jundaodsj.insightops.infrastructure.identity.IdentitySecretCipher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -25,6 +26,7 @@ public class IdentityMailOutboxSender {
     private final Clock clock;
     private final String workerId = ManagementFactory.getRuntimeMXBean().getName() + '-' + UUID.randomUUID();
 
+    @Autowired
     public IdentityMailOutboxSender(IdentityRepository repository, IdentitySecretCipher cipher,
                                     IdentityProperties properties, JavaMailSender sender) {
         this(repository, cipher, properties, sender, Clock.systemUTC());

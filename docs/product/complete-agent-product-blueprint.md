@@ -3,7 +3,7 @@
 > 文档状态：当前产品事实与后续总路线的统一基线
 > 版本：v1.3
 > 创建日期：2026-08-18
-> 最近更新：2026-08-22
+> 最近更新：2026-08-25
 > 适用项目：InsightOps Agent
 > 首发用户：需要持续跟踪 AI 开源项目的 Java 开发者、架构师和技术负责人
 > 生产地址：<https://insightops.canghaior.com>
@@ -223,12 +223,12 @@ InsightOps Agent 不应被定义为通用聊天机器人，也不应在当前阶
 
 ### 4.15 测试与持续集成
 
-- 后端当前真实 PostgreSQL 全仓 `verify` 为 290/290、0 失败、0 错误、0 跳过，PostgreSQL 18.4、Flyway 38/38。
+- 后端当前真实 PostgreSQL 全仓 `verify` 为 293/293、0 失败、0 错误、0 跳过，PostgreSQL 18.4、Flyway 38/38。
 - 前端当前 25 个测试文件、67 个测试全部通过。
 - 前端 ESLint 通过。
 - 前端生产构建通过。
 - GitHub Actions 已配置后端验证、前端 lint/test/build 和三个镜像构建。
-- GitHub `production` Environment Secrets 已完成配置；当前生产功能版本为 `2e3e59fa4e5c3c18d573de8c30bfc483a6c76b13`，CI Run `32739451313` 的后端、前端和三个镜像任务全部成功，部署 Run `32739861289` 成功。
+- GitHub `production` Environment Secrets 已完成配置；当前生产功能镜像版本为 `209d88d839d6c38e92eb3c6196bfa27b13bec23b`，CI Run `32824432131` 的后端、前端和三个镜像任务全部成功，部署 Run `32824775308` 成功；最终验收脚本提交 `f1eb515c9d88dc5b9de861f715bfccb5f2e336a8` 的 CI Run `32825930469` 和 P3.1 生产验收 Run `32826199893` 均成功。
 - Dependabot 已覆盖 Maven、npm 和 GitHub Actions 依赖。
 
 ## 5. 当前部分完成的能力
@@ -672,7 +672,7 @@ P2.1-C 已实现 Workspace Agent Token/成本/并发配额、用量聚合、硬�
 
 ### 阶段 D：补齐公开运营能力（当前公开发布 NO-GO）
 
-2026-08-24 已完成首次正式 Go/No-Go：允许继续封闭 Alpha/受控 Beta，并按 P3.1 身份与团队开始补齐；在硬门禁关闭前不开放自主注册或收费。
+2026-08-24 已完成首次正式 Go/No-Go；P3.1 身份与团队已于 2026-08-25 完成生产验收，下一阶段进入 P3.2 安全与合规。硬门禁关闭前仍不开放自主注册或收费。
 
 1. [x] 完成邀请制邮箱身份、验证、找回密码、TOTP MFA、Session 和账户注销申请（P3.1；不开放自主注册）。
 2. [x] 完成 Workspace 创建/切换、资料、邀请、Owner/Member、所有权移交、成员退出和归档（P3.1）。

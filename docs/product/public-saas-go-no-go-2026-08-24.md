@@ -17,25 +17,25 @@
 
 | 门禁 | 当前证据 | 结论 |
 |---|---|---|
-| 账号全生命周期 | 只有管理员创建账号、登录、本人改密和管理员重置；没有注册、邮箱验证、用户自助找回、MFA、账户注销 | **NO-GO** |
-| 多租户 Workspace | 数据表具备 Workspace 隔离键，但登录固定选择首个成员关系；用户不能创建/切换 Workspace，没有邀请链接、所有权移交、成员退出或项目级权限 | **NO-GO** |
+| 账号全生命周期 | P3.1 已完成邀请制邮箱身份、验证、找回、TOTP MFA、恢复码、设备 Session、全会话撤销和账户删除宽限期；仍未开放陌生用户自主注册，法律级数据权利留待 P3.2 | **NO-GO** |
+| 多租户 Workspace | P3.1 已完成创建、切换、邀请、Owner/Member、所有权移交、成员移除/退出和归档并通过生产验收；仍缺 Admin/Viewer 和项目级细粒度权限 | **CONDITIONAL** |
 | 商业套餐与计费 | 已有 Workspace 日/月 Token、成本、并发预占和硬拒绝；没有套餐权益、订阅、订单、支付、支付 Webhook、退款、发票或财务对账 | **NO-GO** |
-| 合规与数据权利 | 仓库没有用户协议、隐私政策、数据保留/导出/删除流程和面向用户的账户删除闭环 | **NO-GO** |
-| 安全与滥用防护 | 已有 HTTPS、Secure/HttpOnly Cookie、登录限流、CSP、安全响应头、非 root 容器和依赖更新；仍缺 MFA、持久/分布式限流、验证码/机器人防护、SAST、镜像与 Secret 扫描、WAF/CDN/DDoS、安全事件流程；生产响应缺少 HSTS | **NO-GO** |
+| 合规与数据权利 | P3.1 已完成账户删除宽限期和身份匿名化；仍缺用户协议、隐私政策、数据保留/导出以及业务内容和备份的法律级级联删除流程 | **NO-GO** |
+| 安全与滥用防护 | 已有 HTTPS、Secure/HttpOnly Cookie、TOTP MFA、PostgreSQL 持久限流、CSRF/Origin、HSTS、CSP、安全响应头、非 root 容器和依赖更新；仍缺验证码/机器人防护、SAST、镜像与 Secret 扫描、WAF/CDN/DDoS 和安全事件流程 | **NO-GO** |
 | 可靠性与恢复 | 10 项目 72 小时稳定性、18 条告警、外部 Canary、AES-256 异地 Artifact 和 PostgreSQL 18 隔离恢复已通过；但生产仍是单主机、单 PostgreSQL、单 Server/Worker，没有公开 SaaS 可用性目标和事故响应承诺 | **CONDITIONAL** |
 
-公开 SaaS 完成标准共 6 组，目前只有“异地备份、恢复演练和外部告警”完整通过。任一账号、合规或安全硬门禁未关闭时，公开发布保持 NO-GO。
+公开 SaaS 完成标准共 6 组；P3.1 身份与团队、异地备份、恢复演练和外部告警已完成生产验收，可靠性仍为单主机条件通过，商业、合规、安全供应链和公开 Beta 可用性门禁尚未关闭。任一硬门禁未关闭时，公开发布保持 NO-GO。
 
 ## 3. 代码与生产证据
 
 - `docs/architecture/p1-account-administration.md` 明确产品是封闭邀请制且不存在匿名注册接口。
-- `AuthController` 仅提供 login、me、logout 和本人改密；`AccountAdminController` 只允许管理员创建/启停/重置用户。
-- 前端路由只有 `/login`；登录页明确显示“当前为封闭邀请制，不开放自主注册”。
-- `AccountWorkspaceStore.AccountRecord` 只携带一个 Workspace；`JdbcAccountWorkspaceStore` 对成员关系排序后 `limit 1`，没有 Workspace 选择上下文。
+- P3.1 的 `IdentityController`、`PublicIdentityController` 和 `WorkspaceController` 已提供邮箱验证/找回、TOTP、Session、账户删除和团队 Workspace 闭环；陌生用户匿名注册接口仍不存在。
+- 前端已提供 `/forgot-password`、`/reset-password`、`/verify-email`、`/settings` 和 `/workspace`；登录页继续明确显示“当前为封闭邀请制，不开放自主注册”。
+- 设备 Session 已固化活动 Workspace；切换、成员关系移除或 Workspace 归档时按有效成员关系安全迁移，没有替代 Workspace 才撤销 Session。
 - V29 是技术成本治理台账，不是商业订单或支付账本。
 - CI 运行 Maven、前端测试/构建和镜像构建，Dependabot 覆盖 Maven/npm/Actions；没有 CodeQL、SAST、容器漏洞、Secret 泄漏、SBOM 或签名门禁。
 - 生产 `https://insightops.canghaior.com/` 返回 HTTP 200，匿名 `/api/v1/auth/me` 返回 HTTP 401。
-- 生产响应已有 CSP、`nosniff`、`DENY`、Referrer Policy 和 Permissions Policy；`Strict-Transport-Security` 当前缺失。
+- 生产响应已有 HSTS、CSP、`nosniff`、`DENY`、Referrer Policy 和 Permissions Policy；HSTS 已由部署脚本验证并强制激活 Caddy 配置。
 - Stage 3 生产可靠性证据见 `docs/testing/results/stage3-production-reliability-2026-08-24.md`。
 
 ## 4. 允许继续的运营边界
@@ -59,15 +59,15 @@
 
 ### P3.1 身份与团队
 
-1. 邮箱身份、验证、找回密码、MFA、全会话撤销、账户注销。
-2. Workspace 创建、邀请接受、切换、角色、所有权移交、成员退出和删除。
-3. 注册/验证/找回/邀请接口分别实施持久限流、一次性令牌、过期、重放拒绝和审计。
+1. [x] 邮箱身份、验证、找回密码、MFA、全会话撤销和账户删除宽限期。
+2. [x] Workspace 创建、邀请接受、切换、角色、所有权移交、成员退出和归档。
+3. [x] 验证/找回/邀请接口已实施持久限流、一次性令牌、过期、重放拒绝和审计；最终生产验收 Run `32826199893` 通过。
 
 ### P3.2 安全与合规
 
 1. 用户协议、隐私政策、数据保留、导出和级联删除流程，经适用辖区的专业审阅后发布。
 2. CodeQL/SAST、依赖审查、容器与 Secret 扫描、SBOM、镜像签名和发布门禁。
-3. CDN/WAF/DDoS 与机器人防护、HSTS、持久/分布式限流、安全事件分级和响应演练。
+3. CDN/WAF/DDoS 与机器人防护、安全事件分级和响应演练。
 
 ### P3.3 套餐与商业闭环
 
@@ -89,4 +89,4 @@
 
 ## 7. 阶段结论
 
-第 4 步已经完成决策：InsightOps Agent 应继续向 SaaS 基础能力发展，但当前不得公开注册或收费。项目保持封闭 Alpha/受控 Beta，下一实施阶段应从 P3.1 身份与团队开始，而不是直接接支付或扩大公网流量。
+第 4 步已经完成决策，P3.1 身份与团队也已通过生产验收：InsightOps Agent 应继续向 SaaS 基础能力发展，但当前不得公开注册或收费。项目保持封闭 Alpha/受控 Beta，下一实施阶段进入 P3.2 安全与合规，而不是直接接支付或扩大公网流量。

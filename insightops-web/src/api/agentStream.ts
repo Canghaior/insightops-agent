@@ -1,4 +1,4 @@
-import { apiClient } from './client'
+import { apiClient, CSRF_HEADER } from './client'
 
 export interface ModelUsage {
   inputTokens: number | null
@@ -224,6 +224,7 @@ export async function streamChat(
       Accept: 'text/event-stream',
       'Content-Type': 'application/json',
       'X-Trace-Id': crypto.randomUUID(),
+      [CSRF_HEADER]: '1',
     },
     body: JSON.stringify({
       message,

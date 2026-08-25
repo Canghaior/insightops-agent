@@ -129,6 +129,29 @@ class Stage3ProductionReliabilityContractTest {
                 "up -d --no-deps --force-recreate caddy");
         assertThat(caddy).contains("Strict-Transport-Security \"max-age=31536000; includeSubDomains\"");
     }
+
+    @Test
+    void frontendChatStreamPostCarriesTheP31CsrfMarker() throws IOException {
+        String client = read("insightops-web/src/api/client.ts");
+        String stream = read("insightops-web/src/api/agentStream.ts");
+        String test = read("insightops-web/src/api/agentStream.test.ts");
+        String acceptance = read("scripts/p3-1-production-acceptance.sh");
+
+        assertThat(client).contains(
+                "export const CSRF_HEADER = 'X-InsightOps-CSRF'",
+                "config.headers.set(CSRF_HEADER, '1')");
+        assertThat(stream).contains(
+                "import { apiClient, CSRF_HEADER } from './client'",
+                "[CSRF_HEADER]: '1'");
+        assertThat(test).contains(
+                "new Headers(request?.headers).get('X-InsightOps-CSRF')");
+        assertThat(acceptance).contains(
+                "你是什么模型？",
+                "Origin: $base",
+                "assert len(events) == 3",
+                "DeepSeek");
+    }
+
     @Test
     void p31AcceptanceCountsSessionsFromTheSessionsEndpoint() throws IOException {
         String acceptance = read("scripts/p3-1-production-acceptance.sh");

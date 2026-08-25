@@ -118,6 +118,25 @@ describe('createSseParser', () => {
     expect(paused).toMatchObject({ type: 'plan_paused', content: 'checkpoint-1' })
   })
 
+  it('adds the anti-CSRF marker to the initial chat stream POST', async () => {
+    const wire = [
+      'data: {"type":"started","runId":"run-csrf","sequence":1}',
+      'data: {"type":"completed","runId":"run-csrf","sequence":2}',
+      '',
+    ].join('\n\n')
+    const fetchMock = vi.fn().mockResolvedValue(new Response(wire, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await streamChat(
+      'question', vi.fn(), new AbortController().signal,
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
+    expect(request?.method).toBe('POST')
+    expect(new Headers(request?.headers).get('X-InsightOps-CSRF')).toBe('1')
+  })
+
   it('parses a durable worker recovery event', () => {
     const recovered = parseSseEnvelope(JSON.stringify({
       type: 'run_recovered', runId: 'run-5', sequence: 8,

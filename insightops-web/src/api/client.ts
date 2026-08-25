@@ -1,5 +1,7 @@
 import axios from 'axios'
 
+export const CSRF_HEADER = 'X-InsightOps-CSRF'
+
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api/v1',
   timeout: 15_000,
@@ -25,7 +27,7 @@ apiClient.interceptors.response.use(
 apiClient.interceptors.request.use((config) => {
   config.headers.set('X-Trace-Id', crypto.randomUUID())
   if (!['get', 'head', 'options'].includes(String(config.method).toLowerCase())) {
-    config.headers.set('X-InsightOps-CSRF', '1')
+    config.headers.set(CSRF_HEADER, '1')
   }
   return config
 })

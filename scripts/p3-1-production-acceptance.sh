@@ -50,6 +50,7 @@ cookie_jar="$tmp_dir/cookies"
 original_workspace_id=""
 workspace_id=""
 invitation_id=""
+chat_session_id=""
 cleanup() {
   if [[ -n "$workspace_id" && -n "$invitation_id" ]]; then
     curl --silent --show-error --cookie "$cookie_jar" --request DELETE \
@@ -58,6 +59,10 @@ cleanup() {
   if [[ -n "$original_workspace_id" ]]; then
     curl --silent --show-error --cookie "$cookie_jar" --request POST \
       "$api/workspaces/$original_workspace_id/switch" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$chat_session_id" ]]; then
+    curl --silent --show-error --cookie "$cookie_jar" --request DELETE \
+      "$api/chat/sessions/$chat_session_id" >/dev/null 2>&1 || true
   fi
   if [[ -n "$workspace_id" ]]; then
     curl --silent --show-error --cookie "$cookie_jar" --request POST \
@@ -98,6 +103,32 @@ if [[ "$csrf_status" != "403" ]]; then
   echo "Unsafe authenticated request without CSRF marker returned HTTP $csrf_status instead of 403" >&2
   exit 1
 fi
+
+chat_body='{"message":"你是什么模型？"}'
+printf '%s' "$chat_body" | curl --fail --silent --show-error --max-time 30 \
+  --cookie "$cookie_jar" --header "Origin: $base" \
+  --header 'Accept: text/event-stream' --header 'Content-Type: application/json' --data-binary @- \
+  "$api/chat/streams" >"$tmp_dir/chat.sse"
+chat_session_id="$(python3 - "$tmp_dir/chat.sse" <<'PY'
+import json
+import sys
+
+events = []
+with open(sys.argv[1], encoding="utf-8") as stream:
+    for line in stream:
+        if line.startswith("data:"):
+            events.append(json.loads(line[5:].strip()))
+assert len(events) == 3
+assert [event["type"] for event in events] == ["started", "delta", "completed"]
+run_ids = {event["runId"] for event in events}
+session_ids = {event["sessionId"] for event in events}
+assert len(run_ids) == 1
+assert len(session_ids) == 1
+answer = "".join(event.get("content") or "" for event in events)
+assert "DeepSeek" in answer
+print(session_ids.pop())
+PY
+)"
 
 curl --fail --silent --show-error --cookie "$cookie_jar" "$api/auth/me" >"$tmp_dir/me-before.json"
 curl --fail --silent --show-error --cookie "$cookie_jar" "$api/identity/security" >"$tmp_dir/security.json"

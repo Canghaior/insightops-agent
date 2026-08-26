@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.InputStreamSource;
@@ -49,6 +50,7 @@ public class TencentSesJavaMailSender implements JavaMailSender {
     private final HttpClient http;
     private final Clock clock;
 
+    @Autowired
     public TencentSesJavaMailSender(TencentSesProperties properties, ObjectMapper json) {
         this(properties, json, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(Math.max(2, properties.getTimeoutSeconds())))

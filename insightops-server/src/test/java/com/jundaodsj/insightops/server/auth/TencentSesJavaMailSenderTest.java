@@ -6,6 +6,8 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.util.TestPropertyValues;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.mail.MailSendException;
 import org.springframework.mail.SimpleMailMessage;
 
@@ -46,6 +48,20 @@ class TencentSesJavaMailSenderTest {
     @AfterEach
     void stopServer() {
         server.stop(0);
+    }
+
+    @Test
+    void springSelectsTheProductionConstructorWhenSesIsEnabled() {
+        TencentSesProperties properties = configuredProperties();
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            TestPropertyValues.of("insightops.tencent-ses.enabled=true").applyTo(context);
+            context.registerBean(TencentSesProperties.class, () -> properties);
+            context.registerBean(ObjectMapper.class, () -> json);
+            context.register(TencentSesJavaMailSender.class);
+            context.refresh();
+
+            assertThat(context.getBean(TencentSesJavaMailSender.class)).isNotNull();
+        }
     }
 
     @Test

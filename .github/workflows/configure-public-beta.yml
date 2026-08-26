@@ -36,13 +36,27 @@ jobs:
           PUBLIC_OPERATOR_NAME: ${{ secrets.PUBLIC_OPERATOR_NAME }}
           PUBLIC_CONTACT_EMAIL: ${{ secrets.PUBLIC_CONTACT_EMAIL }}
         run: |
-          test "$CONFIRMATION" = "CONFIGURE-PUBLIC-BETA-DISABLED"
+          validation_failed=false
+          if [[ "$CONFIRMATION" != "CONFIGURE-PUBLIC-BETA-DISABLED" ]]; then
+            echo "::error title=Confirmation mismatch::Type CONFIGURE-PUBLIC-BETA-DISABLED exactly"
+            validation_failed=true
+          fi
           for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS \
             TENCENT_SES_SECRET_ID TENCENT_SES_SECRET_KEY TURNSTILE_SITE_KEY \
             TURNSTILE_SECRET_KEY PUBLIC_OPERATOR_NAME PUBLIC_CONTACT_EMAIL; do
-            test -n "${!name}"
-            [[ "${!name}" != *$'\n'* && "${!name}" != *$'\r'* ]]
+            if [[ -z "${!name}" ]]; then
+              echo "::error title=Missing production secret::$name is not configured in the production environment"
+              validation_failed=true
+            fi
           done
+          for name in TENCENT_SES_SECRET_ID TENCENT_SES_SECRET_KEY TURNSTILE_SITE_KEY \
+            TURNSTILE_SECRET_KEY PUBLIC_OPERATOR_NAME PUBLIC_CONTACT_EMAIL; do
+            if [[ "${!name}" == *$'\n'* || "${!name}" == *$'\r'* ]]; then
+              echo "::error title=Invalid production secret::$name must contain exactly one line"
+              validation_failed=true
+            fi
+          done
+          [[ "$validation_failed" == "false" ]]
           [[ "$DEPLOY_USER" =~ ^[A-Za-z0-9._-]+$ ]]
           [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
 

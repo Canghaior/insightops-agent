@@ -4,11 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.prod}"
 confirmation="${1:-}"
+requested_tag="${2:-$(git -C "$ROOT_DIR" rev-parse HEAD)}"
 previous_env=""
 deployment_started=false
 
 if [[ "$confirmation" != "--confirm-public-beta-infrastructure" ]]; then
   echo "Refusing to activate Public Beta infrastructure without explicit confirmation" >&2
+  exit 1
+fi
+if ! [[ "$requested_tag" =~ ^[A-Za-z0-9._-]{1,128}$ ]]; then
+  echo "Invalid image tag: $requested_tag" >&2
   exit 1
 fi
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -97,10 +102,8 @@ bash "$ROOT_DIR/scripts/preflight-public-beta.sh" "$temporary" >/dev/null
 mv -- "$temporary" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
-image_tag="$(env_value IMAGE_TAG)"
-[[ -n "$image_tag" ]] || image_tag="latest"
 deployment_started=true
-bash "$ROOT_DIR/scripts/deploy-prod.sh" "$image_tag"
+bash "$ROOT_DIR/scripts/deploy-prod.sh" "$requested_tag"
 
 switch_after="$(registration_switch)"
 if [[ "$switch_after" != "f" ]]; then

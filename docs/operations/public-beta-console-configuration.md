@@ -73,12 +73,24 @@ Successful completion means the masked GitHub secrets were transferred over SSH 
 atomically to the server-side `.env.prod`, file permissions remain `0600`, production preflight
 passed, and public registration remains closed.
 
+After the prerequisite workflow succeeds, open **Actions > Activate public Beta infrastructure
+with registration off > Run workflow**. Enter
+`ENABLE-PUBLIC-BETA-INFRASTRUCTURE-WITH-REGISTRATION-OFF` exactly.
+
+This second workflow first confirms that the database registration switch is off. It then enables
+the mail, Tencent SES, Turnstile, and Public Beta adapters, deploys the current production image,
+and checks the public readiness endpoint. Success requires the endpoint to report
+`REGISTRATION_SWITCH_OFF` with a non-empty Turnstile site key. If deployment or readiness fails,
+the workflow restores the previous environment configuration. A successful run prepares the
+infrastructure but still does not allow public registration.
+
 ## 5. Release gate after template approval
 
 Do not activate the adapters until Tencent Cloud SES templates `58078`, `58079`, and `58080`
 all show **Approved**. The activation sequence is:
 
-1. enable mail, Tencent SES, and Turnstile while keeping the database registration switch off;
+1. run the infrastructure activation workflow above, which enables mail, Tencent SES, and
+   Turnstile while keeping the database registration switch off;
 2. deploy and verify the public registration readiness endpoint;
 3. use dedicated real mailboxes to test registration verification, password reset, and a
    workspace invitation;

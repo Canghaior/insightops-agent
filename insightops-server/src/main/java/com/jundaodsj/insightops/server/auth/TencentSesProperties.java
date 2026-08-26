@@ -14,9 +14,9 @@ public class TencentSesProperties {
     private String fromAddress = "no-reply@mail.canghaior.com";
     private String fromName = "InsightOps Agent";
     private String replyTo = "";
-    private long emailVerificationTemplateId = 58053;
-    private long passwordResetTemplateId = 58054;
-    private long workspaceInvitationTemplateId = 58055;
+    private long emailVerificationTemplateId = 58078;
+    private long passwordResetTemplateId = 58079;
+    private long workspaceInvitationTemplateId = 58080;
     private int timeoutSeconds = 10;
 
     public boolean isReady() {

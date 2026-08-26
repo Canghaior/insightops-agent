@@ -55,15 +55,15 @@ class TencentSesJavaMailSenderTest {
                 HttpClient.newHttpClient(), Clock.fixed(
                 Instant.parse("2026-08-26T00:00:00Z"), ZoneOffset.UTC));
 
-        sender.send(message("Verify your InsightOps email", "https://example.test/verify#token=one"));
-        sender.send(message("Reset your InsightOps password", "https://example.test/reset#token=two"));
+        sender.send(message("Verify your InsightOps email", "https://example.test/verify-email#token=one"));
+        sender.send(message("Reset your InsightOps password", "https://example.test/reset-password#token=two"));
         sender.send(message("You were invited to an InsightOps Workspace",
-                "https://example.test/invitations/three"));
+                "https://example.test/invitation#token=three"));
 
         assertThat(bodies).hasSize(3);
-        assertPayload(bodies.get(0), 58053, "https://example.test/verify#token=one");
-        assertPayload(bodies.get(1), 58054, "https://example.test/reset#token=two");
-        assertPayload(bodies.get(2), 58055, "https://example.test/invitations/three");
+        assertPayload(bodies.get(0), 58078, "verify-email#token=one");
+        assertPayload(bodies.get(1), 58079, "reset-password#token=two");
+        assertPayload(bodies.get(2), 58080, "invitation#token=three");
         assertThat(authorizations).allSatisfy(value -> assertThat(value)
                 .startsWith("TC3-HMAC-SHA256 Credential=test-secret-id/2026-08-26/ses/tc3_request")
                 .contains("SignedHeaders=content-type;host;x-tc-action", "Signature="));
@@ -83,6 +83,19 @@ class TencentSesJavaMailSenderTest {
         assertThat(bodies).isEmpty();
     }
 
+    @Test
+    void rejectsLinksThatDoNotMatchTheSelectedFixedTemplateRoute() {
+        TencentSesProperties properties = configuredProperties();
+        TencentSesJavaMailSender sender = new TencentSesJavaMailSender(properties, json,
+                HttpClient.newHttpClient(), Clock.systemUTC());
+
+        assertThatThrownBy(() -> sender.send(message("Reset your InsightOps password",
+                "https://example.test/verify-email#token=one")))
+                .isInstanceOf(MailSendException.class)
+                .hasMessageContaining("fixed InsightOps route");
+        assertThat(bodies).isEmpty();
+    }
+
     private TencentSesProperties configuredProperties() {
         TencentSesProperties value = new TencentSesProperties();
         value.setEnabled(true);
@@ -92,9 +105,9 @@ class TencentSesJavaMailSenderTest {
         value.setEndpoint("http://127.0.0.1:" + server.getAddress().getPort());
         value.setFromAddress("no-reply@mail.canghaior.com");
         value.setFromName("InsightOps Agent");
-        value.setEmailVerificationTemplateId(58053);
-        value.setPasswordResetTemplateId(58054);
-        value.setWorkspaceInvitationTemplateId(58055);
+        value.setEmailVerificationTemplateId(58078);
+        value.setPasswordResetTemplateId(58079);
+        value.setWorkspaceInvitationTemplateId(58080);
         return value;
     }
 

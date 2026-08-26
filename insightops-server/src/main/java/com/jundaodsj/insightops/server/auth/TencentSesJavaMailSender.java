@@ -81,7 +81,7 @@ public class TencentSesJavaMailSender implements JavaMailSender {
             String recipient = singleRecipient(message);
             String subject = message.getSubject() == null ? "InsightOps notification" : message.getSubject();
             long templateId = templateId(subject);
-            String templateData = json.writeValueAsString(Map.of("link", extractLink(message.getText())));
+            String templateData = json.writeValueAsString(Map.of("link", templateLink(templateId, message.getText())));
             Map<String, Object> template = new LinkedHashMap<>();
             template.put("TemplateID", templateId);
             template.put("TemplateData", templateData);
@@ -176,6 +176,28 @@ public class TencentSesJavaMailSender implements JavaMailSender {
         Matcher matcher = LINK.matcher(body == null ? "" : body);
         if (!matcher.find()) throw new MailSendException("Mail template link is missing");
         return matcher.group();
+    }
+
+    private String templateLink(long templateId, String body) {
+        URI value;
+        try {
+            value = URI.create(extractLink(body));
+        } catch (IllegalArgumentException exception) {
+            throw new MailSendException("Mail template link is invalid", exception);
+        }
+        String expectedPath;
+        if (templateId == properties.getPasswordResetTemplateId()) {
+            expectedPath = "/reset-password";
+        } else if (templateId == properties.getWorkspaceInvitationTemplateId()) {
+            expectedPath = "/invitation";
+        } else {
+            expectedPath = "/verify-email";
+        }
+        if (!expectedPath.equals(value.getRawPath()) || present(value.getRawQuery())
+                || !present(value.getRawFragment()) || !value.getRawFragment().startsWith("token=")) {
+            throw new MailSendException("Mail template link does not match its fixed InsightOps route");
+        }
+        return expectedPath.substring(1) + "#" + value.getRawFragment();
     }
 
     private static boolean present(String value) { return value != null && !value.isBlank(); }

@@ -1,0 +1,83 @@
+name: Configure public Beta production prerequisites
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type CONFIGURE-PUBLIC-BETA-DISABLED to configure credentials without opening registration
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: insightops-production
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Validate confirmation and required production secrets
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          TENCENT_SES_SECRET_ID: ${{ secrets.TENCENT_SES_SECRET_ID }}
+          TENCENT_SES_SECRET_KEY: ${{ secrets.TENCENT_SES_SECRET_KEY }}
+          TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          PUBLIC_OPERATOR_NAME: ${{ secrets.PUBLIC_OPERATOR_NAME }}
+          PUBLIC_CONTACT_EMAIL: ${{ secrets.PUBLIC_CONTACT_EMAIL }}
+        run: |
+          test "$CONFIRMATION" = "CONFIGURE-PUBLIC-BETA-DISABLED"
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS \
+            TENCENT_SES_SECRET_ID TENCENT_SES_SECRET_KEY TURNSTILE_SITE_KEY \
+            TURNSTILE_SECRET_KEY PUBLIC_OPERATOR_NAME PUBLIC_CONTACT_EMAIL; do
+            test -n "${!name}"
+            [[ "${!name}" != *$'\n'* && "${!name}" != *$'\r'* ]]
+          done
+          [[ "$DEPLOY_USER" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+      - name: Configure production values with activation disabled
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          TENCENT_SES_SECRET_ID: ${{ secrets.TENCENT_SES_SECRET_ID }}
+          TENCENT_SES_SECRET_KEY: ${{ secrets.TENCENT_SES_SECRET_KEY }}
+          TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          PUBLIC_OPERATOR_NAME: ${{ secrets.PUBLIC_OPERATOR_NAME }}
+          PUBLIC_CONTACT_EMAIL: ${{ secrets.PUBLIC_CONTACT_EMAIL }}
+        run: |
+          printf -v remote_command \
+            'cd %q && git fetch origin main && git checkout main && git pull --ff-only origin main && bash scripts/configure-public-beta-prod.sh --from-base64-lines' \
+            "$DEPLOY_PATH"
+          encode() { printf '%s' "$1" | base64 -w 0; }
+          {
+            encode "$TENCENT_SES_SECRET_ID"; printf '\n'
+            encode "$TENCENT_SES_SECRET_KEY"; printf '\n'
+            encode "$TURNSTILE_SITE_KEY"; printf '\n'
+            encode "$TURNSTILE_SECRET_KEY"; printf '\n'
+            encode "$PUBLIC_OPERATOR_NAME"; printf '\n'
+            encode "$PUBLIC_CONTACT_EMAIL"; printf '\n'
+          } | ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command"

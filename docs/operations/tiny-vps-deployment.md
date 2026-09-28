@@ -1,6 +1,6 @@
 # 1 核 / 2 GB VPS 轻量部署
 
-此配置只运行 PostgreSQL、Server、Web、Caddy。关闭 Worker、Ollama、向量嵌入、RAG、采集和监控；聊天需要单独提供 DeepSeek API Key。它适合低访问量试运行，不是原生产环境的等效迁移。公开注册默认关闭。
+此配置起初只运行 PostgreSQL、Server、Web、Caddy。可在登录和基础聊天稳定后启用有资源上限的 Worker、少量采集及 PostgreSQL 关键词检索问答；本机 Ollama、向量嵌入和监控栈保持关闭。关键词模式没有中文语义检索能力，不能等同于原生产环境的混合向量 RAG。公开注册默认关闭。
 
 VPS 上仍有 WireGuard 和代理，只有 Caddy 发布 80/443；数据库 5432 和应用 18080 不对公网开放。首次部署前检查 `free -h`、`df -h /` 和 `ss -lntup`。20 GB 系统盘需要定期查看余量。
 
@@ -62,6 +62,21 @@ grep '^AUTH_BOOTSTRAP_PASSWORD=' ~/insightops-agent/.env.tiny
 不要把密码粘贴到聊天或截图。首次登录按页面提示修改密码。确认新密码能登录后，运行 `python3 scripts/finalize-tiny-owner.py`，它会关闭 bootstrap 并从 `.env.tiny` 清除临时密码。随后用 `sudo docker compose --env-file .env.tiny -f infra/compose.tiny.yml up -d server` 重新创建 Server 容器。
 
 没有 DeepSeek API Key 时，站点和账号可用，但聊天不可用。有 Key 时，在自己的 SSH 终端运行 `bash scripts/configure-tiny-deepseek.sh`，按提示隐式输入 Key。脚本会验证 Key、设置当前 Flash 模型和保守的高峰价格估算、重启 Server；不会将 Key 打印到终端。
+
+## 低流量演示：采集与关键词问答
+
+确认基础聊天可用后，在 VPS 上运行：
+
+```bash
+cd ~/insightops-agent
+sudo bash scripts/enable-tiny-demo.sh
+```
+
+脚本先验证 Caddy 配置，再启动内存上限 512 MB、Java 堆上限 256 MB 的 Worker；Worker 健康且剩余内存足够时，开启 Server 关键词检索问答并发布 `/about` 项目介绍页。采集限制为单次一个项目、每个官方文档源最多 20 页；用户上传单个文件最多 5 MB。若 Worker 启动失败，脚本会停止 Worker，保留原网站。官方文档首次采集仍需管理员在“知识库采集”中手动触发。可先选一个文档源验证，不要一次启动所有来源。上传的文件需先完成解析，才会被关键词检索命中。
+
+演示问题请包含明确的项目名和技术术语，例如“Spring AI 的 ChatClient 如何使用？”。关键词模式对中文同义表达和模糊问题命中较弱，结果页显示 `KEYWORD` 属于预期行为；要恢复向量语义检索需外部 Embedding 服务或更大机器。若内存紧张，先运行 `sudo docker compose --env-file .env.tiny -f infra/compose.tiny.yml stop worker`，基础登录和聊天可继续使用。
+
+`https://insightops.canghaior.com/about` 是可公开索引的项目介绍页，`robots.txt` 和 `sitemap.xml` 指向它；搜索引擎收录时间不受本站控制。访客进入应用仍需要账号。公开注册依赖可用的邮件发送、Turnstile、运营者信息和真实注册链路验收；不要只切换 `PUBLIC_BETA_ENABLED`。面试演示可由管理员为少量试用者分别创建账号。
 
 ## 日常维护
 

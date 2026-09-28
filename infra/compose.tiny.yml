@@ -1,6 +1,6 @@
 name: ${COMPOSE_PROJECT_NAME:-insightops-prod}
 
-# Small-VPS trial: no worker, Ollama, RAG, or observability stack.
+# Small-VPS demo: keyword-only RAG and a bounded collector; no Ollama or observability stack.
 # Use prebuilt images; building Java/Node images on a 2 GB VPS is not recommended.
 services:
   postgres:
@@ -44,6 +44,8 @@ services:
       JAVA_TOOL_OPTIONS: -Xms128m -Xmx512m -XX:+ExitOnOutOfMemoryError
       SERVER_ADDRESS: 0.0.0.0
       SERVER_PORT: 18080
+      DB_MAX_POOL_SIZE: "6"
+      DB_MIN_IDLE: "1"
       DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-insightops}
       DB_USERNAME: ${POSTGRES_USER:-insightops}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env.tiny}
@@ -65,13 +67,19 @@ services:
       SPRING_AI_MODEL_CHAT: ${SPRING_AI_MODEL_CHAT:-none}
       SPRING_AI_MODEL_EMBEDDING: none
       EMBEDDING_ENABLED: "false"
-      RAG_ENABLED: "false"
+      # PostgreSQL keyword retrieval works without a local embedding model.
+      RAG_ENABLED: ${RAG_ENABLED:-true}
       AGENT_CHAT_QUEUE_CONCURRENCY: "1"
       AGENT_EVALUATION_QUEUE_ENABLED: "false"
       AGENT_COST_MAX_CONCURRENT_RUNS: "1"
       IDENTITY_MAIL_ENABLED: ${IDENTITY_MAIL_ENABLED:-false}
       INSIGHTOPS_PUBLIC_BETA_ENABLED: ${PUBLIC_BETA_ENABLED:-false}
       KNOWLEDGE_UPLOAD_DIRECTORY: /var/lib/insightops/uploads
+      KNOWLEDGE_UPLOAD_MAX_FILE_SIZE: 5MB
+      KNOWLEDGE_UPLOAD_MAX_REQUEST_SIZE: 6MB
+      KNOWLEDGE_UPLOAD_MAX_FILE_BYTES: "5242880"
+      KNOWLEDGE_UPLOAD_MAX_PDF_PAGES: "100"
+      KNOWLEDGE_UPLOAD_MAX_EXTRACTED_CHARACTERS: "300000"
     volumes:
       - knowledge-uploads:/var/lib/insightops/uploads
     depends_on:
@@ -80,6 +88,51 @@ services:
       uploads-init:
         condition: service_completed_successfully
     mem_limit: 800m
+    networks: [backend]
+    logging: *small-logs
+
+  worker:
+    image: ghcr.io/canghaior/insightops-agent-worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      JAVA_TOOL_OPTIONS: -Xms96m -Xmx256m -XX:+ExitOnOutOfMemoryError
+      SERVER_ADDRESS: 0.0.0.0
+      WORKER_PORT: 18081
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-insightops}
+      DB_USERNAME: ${POSTGRES_USER:-insightops}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env.tiny}
+      DB_MAX_POOL_SIZE: "3"
+      DB_MIN_IDLE: "1"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_ENABLED: ${DEEPSEEK_ENABLED:-false}
+      DEEPSEEK_CHAT_MODEL: ${DEEPSEEK_CHAT_MODEL:-deepseek-flash}
+      SPRING_AI_MODEL_CHAT: ${SPRING_AI_MODEL_CHAT:-none}
+      SPRING_AI_MODEL_EMBEDDING: none
+      EMBEDDING_ENABLED: "false"
+      RELEASE_COLLECTION_ENABLED: "true"
+      RELEASE_COLLECTION_BATCH_SIZE: "1"
+      RELEASE_COLLECTION_INTERVAL_HOURS: "24"
+      DOCUMENT_COLLECTION_ENABLED: "true"
+      DOCUMENT_COLLECTION_BATCH_SIZE: "1"
+      DOCUMENT_CRAWL_MAX_PAGES_PER_SOURCE: "20"
+      DOCUMENT_CRAWL_MAX_DEPTH: "2"
+      DOCUMENT_CRAWL_MAX_BYTES_PER_PAGE: "1048576"
+      DOCUMENT_COLLECTION_INTERVAL_HOURS: "168"
+      INTELLIGENCE_ANALYSIS_ENABLED: "false"
+      REPORT_DELIVERY_ENABLED: "false"
+      KNOWLEDGE_UPLOAD_DIRECTORY: /var/lib/insightops/uploads
+      KNOWLEDGE_UPLOAD_MAX_FILE_BYTES: "5242880"
+      KNOWLEDGE_UPLOAD_MAX_PDF_PAGES: "100"
+      KNOWLEDGE_UPLOAD_MAX_EXTRACTED_CHARACTERS: "300000"
+    volumes:
+      - knowledge-uploads:/var/lib/insightops/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      uploads-init:
+        condition: service_completed_successfully
+    mem_limit: 512m
     networks: [backend]
     logging: *small-logs
 
@@ -100,6 +153,7 @@ services:
       - "${HTTPS_PORT:-443}:443"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/public:/srv/public:ro
       - caddy-data:/data
       - caddy-config:/config
       - caddy-logs:/var/log/caddy

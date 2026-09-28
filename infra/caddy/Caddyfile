@@ -6,6 +6,13 @@
     @not_chat_stream not path /api/v1/chat/streams*
     encode @not_chat_stream zstd gzip
 
+    @public_info path /about /about/ /robots.txt /sitemap.xml
+    handle @public_info {
+        root * /srv/public
+        try_files {path} /about.html
+        file_server
+    }
+
     @chat_stream path /api/v1/chat/streams*
     handle @chat_stream {
         reverse_proxy server:18080 {

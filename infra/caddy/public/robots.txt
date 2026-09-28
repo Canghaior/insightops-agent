@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /about
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /chat
+Disallow: /admin/
+Disallow: /settings
+
+Sitemap: https://insightops.canghaior.com/sitemap.xml

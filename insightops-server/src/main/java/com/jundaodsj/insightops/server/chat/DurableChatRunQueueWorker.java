@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.server.chat;
 
 import com.jundaodsj.insightops.conversation.application.DurableChatRunStore;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -13,6 +14,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
+@ConditionalOnProperty(prefix = "insightops.model.deepseek", name = "enabled", havingValue = "true")
 public class DurableChatRunQueueWorker {
 
     private final DurableChatRunStore store;

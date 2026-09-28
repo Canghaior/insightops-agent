@@ -1,0 +1,125 @@
+name: ${COMPOSE_PROJECT_NAME:-insightops-prod}
+
+# Small-VPS trial: no worker, Ollama, RAG, or observability stack.
+# Use prebuilt images; building Java/Node images on a 2 GB VPS is not recommended.
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.5-pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-insightops}
+      POSTGRES_USER: ${POSTGRES_USER:-insightops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.tiny}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    mem_limit: 384m
+    networks: [backend]
+    logging: &small-logs
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  uploads-init:
+    image: ghcr.io/canghaior/insightops-agent-server:${IMAGE_TAG:-latest}
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mkdir -p /var/lib/insightops/uploads && chown -R 10001:10001 /var/lib/insightops/uploads"]
+    volumes:
+      - knowledge-uploads:/var/lib/insightops/uploads
+    networks: [backend]
+
+  server:
+    image: ${TINY_SERVER_IMAGE:-ghcr.io/canghaior/insightops-agent-server:${IMAGE_TAG:-latest}}
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      JAVA_TOOL_OPTIONS: -Xms128m -Xmx512m -XX:+ExitOnOutOfMemoryError
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: 18080
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-insightops}
+      DB_USERNAME: ${POSTGRES_USER:-insightops}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env.tiny}
+      AUTH_BOOTSTRAP_ENABLED: ${AUTH_BOOTSTRAP_ENABLED:-false}
+      AUTH_BOOTSTRAP_USERNAME: ${AUTH_BOOTSTRAP_USERNAME:-alpha-owner}
+      AUTH_BOOTSTRAP_DISPLAY_NAME: ${AUTH_BOOTSTRAP_DISPLAY_NAME:-Alpha Owner}
+      AUTH_BOOTSTRAP_PASSWORD: ${AUTH_BOOTSTRAP_PASSWORD:-}
+      AUTH_SECURE_COOKIE: ${AUTH_SECURE_COOKIE:-true}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://insightops.canghaior.com}
+      DELIVERY_ENCRYPTION_KEY: ${DELIVERY_ENCRYPTION_KEY:-${DB_PASSWORD}}
+      IDENTITY_ENCRYPTION_KEY: ${IDENTITY_ENCRYPTION_KEY:-${DELIVERY_ENCRYPTION_KEY:-${DB_PASSWORD}}}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_ENABLED: ${DEEPSEEK_ENABLED:-false}
+      SPRING_AI_MODEL_CHAT: ${SPRING_AI_MODEL_CHAT:-none}
+      SPRING_AI_MODEL_EMBEDDING: none
+      EMBEDDING_ENABLED: "false"
+      RAG_ENABLED: "false"
+      AGENT_CHAT_QUEUE_CONCURRENCY: "1"
+      AGENT_EVALUATION_QUEUE_ENABLED: "false"
+      AGENT_COST_MAX_CONCURRENT_RUNS: "1"
+      IDENTITY_MAIL_ENABLED: ${IDENTITY_MAIL_ENABLED:-false}
+      INSIGHTOPS_PUBLIC_BETA_ENABLED: ${PUBLIC_BETA_ENABLED:-false}
+      KNOWLEDGE_UPLOAD_DIRECTORY: /var/lib/insightops/uploads
+    volumes:
+      - knowledge-uploads:/var/lib/insightops/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      uploads-init:
+        condition: service_completed_successfully
+    mem_limit: 800m
+    networks: [backend]
+    logging: *small-logs
+
+  web:
+    image: ghcr.io/canghaior/insightops-agent-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    mem_limit: 96m
+    networks: [backend]
+    logging: *small-logs
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      APP_ADDRESS: ${APP_ADDRESS:?Set APP_ADDRESS in .env.tiny}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - caddy-logs:/var/log/caddy
+    depends_on:
+      server:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:2019/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    mem_limit: 96m
+    networks: [backend]
+    logging: *small-logs
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  knowledge-uploads:
+  caddy-data:
+  caddy-config:
+  caddy-logs:

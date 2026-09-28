@@ -4,10 +4,12 @@ import com.jundaodsj.insightops.conversation.application.DurableChatRunStore;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.core.env.MapPropertySource;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
@@ -26,6 +28,8 @@ class DurableChatRunQueueWorkerTest {
     @Test
     void springCanSelectTheProductionConstructor() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.getEnvironment().getPropertySources().addFirst(new MapPropertySource(
+                    "test", Map.of("insightops.model.deepseek.enabled", "true")));
             context.registerBean(DurableChatRunStore.class, () -> mock(DurableChatRunStore.class));
             context.registerBean(DurableChatRunExecutionService.class,
                     () -> mock(DurableChatRunExecutionService.class));
@@ -38,6 +42,17 @@ class DurableChatRunQueueWorkerTest {
             context.refresh();
 
             assertThat(context.getBean(DurableChatRunQueueWorker.class)).isNotNull();
+        }
+    }
+
+    @Test
+    void excludesModelDependentBeansWhenDeepSeekIsDisabled() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.register(DurableChatRunExecutionService.class, DurableChatRunQueueWorker.class);
+            context.refresh();
+
+            assertThat(context.getBeansOfType(DurableChatRunExecutionService.class)).isEmpty();
+            assertThat(context.getBeansOfType(DurableChatRunQueueWorker.class)).isEmpty();
         }
     }
 

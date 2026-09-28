@@ -19,6 +19,7 @@ import com.jundaodsj.insightops.model.application.StreamingChatModelGateway;
 import com.jundaodsj.insightops.server.api.ChatStreamController.ChatSseEvent;
 import com.jundaodsj.insightops.server.api.ChatStreamController.OrchestrationSsePayload;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolDefinition;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -39,6 +40,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
+@ConditionalOnProperty(prefix = "insightops.model.deepseek", name = "enabled", havingValue = "true")
 public class DurableChatRunExecutionService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DurableChatRunExecutionService.class);

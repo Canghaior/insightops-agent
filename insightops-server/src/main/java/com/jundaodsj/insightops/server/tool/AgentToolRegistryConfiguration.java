@@ -14,13 +14,39 @@ import java.util.List;
 public class AgentToolRegistryConfiguration {
 
     @Bean
-    public AgentToolRegistry agentToolRegistry(KnowledgeRagProperties ragProperties) {
-        return new AgentToolRegistry(definitions(ragProperties.isEnabled()));
+    public AgentToolRegistry agentToolRegistry(
+            KnowledgeRagProperties ragProperties, GitHubMcpProperties githubMcpProperties) {
+        return new AgentToolRegistry(definitions(ragProperties.isEnabled(),
+                githubMcpProperties.isEnabled() && !githubMcpProperties.getToken().isBlank()));
     }
 
     public static List<AgentToolDefinition> definitions(boolean ragEnabled) {
+        return definitions(ragEnabled, false);
+    }
+
+    public static List<AgentToolDefinition> definitions(boolean ragEnabled, boolean githubMcpEnabled) {
         return List.of(releaseDefinition(), ragDefinition(ragEnabled), eventDefinition(),
-                memoryDefinition(), mcpDefinition());
+                memoryDefinition(), mcpDefinition(), issueDefinition(githubMcpEnabled));
+    }
+
+    private static AgentToolDefinition issueDefinition(boolean enabled) {
+        return definition(
+                AgentToolNames.GITHUB_ISSUE_READ,
+                "通过 GitHub 官方 MCP 实时读取当前 Workspace 已启用项目的单个 Issue 正文和状态。"
+                        + "用户提供 Issue 编号或 /issues/编号 链接时使用；不读取评论、不搜索未知编号、不操作 PR。",
+                enabled,
+                Duration.ofSeconds(30),
+                List.of(
+                        AgentToolDefinition.Parameter.string(
+                                "projectId", "当前 Workspace 的项目 ID 或 owner/repo 别名。", true, 256),
+                        AgentToolDefinition.Parameter.integer(
+                                "issueNumber", "用户提供的 Issue 编号，禁止猜测。", true, 1, Integer.MAX_VALUE)),
+                List.of(
+                        AgentToolDefinition.Parameter.string("provider", "证据提供方。", true, 128),
+                        AgentToolDefinition.Parameter.json("issue", "实时 Issue 详情，不包含评论。", true),
+                        AgentToolDefinition.Parameter.string("fetchedAt", "实际获取时间。", true, 64),
+                        AgentToolDefinition.Parameter.integer("resultCount", "Issue 数量。", true, 1, 1),
+                        AgentToolDefinition.Parameter.stringArray("sources", "GitHub 官方 Issue 链接。", true, 1)));
     }
 
     private static AgentToolDefinition releaseDefinition() {
@@ -37,14 +63,18 @@ public class AgentToolRegistryConfiguration {
                         AgentToolDefinition.Parameter.integer(
                                 "maxReleasesPerProject", "每个项目最多返回的 Release。", true, 1, 30),
                         AgentToolDefinition.Parameter.bool(
-                                "includePrereleases", "是否包含预发布版本。", true)),
+                                "includePrereleases", "是否包含预发布版本。", true),
+                        AgentToolDefinition.Parameter.string("currentVersion", "升级范围起点（不包含）。与 targetVersion 一起填写。", false, 80),
+                        AgentToolDefinition.Parameter.string("targetVersion", "升级范围终点（包含）。", false, 80)),
                 List.of(
                         AgentToolDefinition.Parameter.jsonArray(
                                 "releases", "GitHub 官方 Release 记录。", true),
                         AgentToolDefinition.Parameter.string(
                                 "fetchedAt", "GitHub 获取时间。", true, 64),
                         AgentToolDefinition.Parameter.bool(
-                                "truncated", "结果是否被上限截断。", true)));
+                                "truncated", "结果是否被上限截断或范围不完整。", true),
+                        AgentToolDefinition.Parameter.json("range", "实际查询的版本范围及完整性。", false),
+                        AgentToolDefinition.Parameter.stringArray("warnings", "范围或资料缺口。", false, 10)));
     }
 
     private static AgentToolDefinition ragDefinition(boolean enabled) {
@@ -57,7 +87,9 @@ public class AgentToolRegistryConfiguration {
                         AgentToolDefinition.Parameter.string(
                                 "query", "用于检索的当前问题和必要对话上下文。", true, 16_000),
                         AgentToolDefinition.Parameter.integer(
-                                "candidateLimit", "进入证据筛选的候选切片上限。", true, 1, 20)),
+                                "candidateLimit", "进入证据筛选的候选切片上限。", true, 1, 20),
+                        AgentToolDefinition.Parameter.string("projectId", "可选：只检索此项目的官方资料。", false, 64),
+                        AgentToolDefinition.Parameter.stringArray("uploadIds", "可选：仅检索明确选中的且当前用户有权限的文件；空数组仅查官方资料。", false, 10)),
                 List.of(
                         AgentToolDefinition.Parameter.string(
                                 "provider", "检索提供方。", true, 128),

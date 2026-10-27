@@ -66,10 +66,11 @@ onMounted(load)
 
 <template>
   <section>
-    <div class="section-heading"><div><span class="eyebrow">P2.0-D · Controlled extension</span><h2>Agent 工具与 MCP</h2></div><span class="subtle">默认关闭 · 只读白名单</span></div>
+    <div class="section-heading"><div><span class="eyebrow">P2.0-D · Controlled extension</span><h2>Agent 工具与 MCP</h2></div><span class="subtle">通用连接 · 只读白名单</span></div>
     <div class="panel mcp-policy">
-      <strong>当前安全边界</strong>
-      <ul><li>只允许公网 HTTPS 443、无重定向的 JSON-RPC MCP 端点。</li><li>Agent 只能调用这里明确列出的工具名；连接默认关闭。</li><li>不支持本地进程、任意命令、私网地址或 MCP 写工具。</li></ul>
+      <strong>通用 MCP 连接边界</strong>
+      <ul><li>只允许公网 HTTPS 443、无重定向的 JSON-RPC MCP 端点。</li><li>这些通用连接只能调用各自白名单中的工具；新连接默认关闭。</li><li>不支持本地进程、任意命令、私网地址或 MCP 写工具。</li></ul>
+      <p class="subtle">GitHub Issue · MCP 是由服务端配置管理的专用只读工具，不会出现在下方通用连接列表。配置并重启后，可在<a href="/api/v1/agent/tools" target="_blank" rel="noreferrer">当前可用工具目录</a>中查找 github_issue_read；实际连接结果以问答执行记录为准。</p>
     </div>
     <form class="panel mcp-form" @submit.prevent="save">
       <input v-model="form.name" maxlength="100" placeholder="连接名称" />
@@ -86,7 +87,7 @@ onMounted(load)
         <p>{{ Object.keys(JSON.parse(item.allowedToolsJson)).join(' · ') }}</p>
         <footer><button class="secondary-button" @click="edit(item)">编辑</button><button class="text-button" @click="remove(item)">删除</button></footer>
       </article>
-      <div v-if="!connections.length" class="panel conversation-empty"><strong>尚未配置 MCP</strong><p>系统当前不会向任何外部 MCP 端点发送数据。</p></div>
+      <div v-if="!connections.length" class="panel conversation-empty"><strong>尚未配置通用 MCP 连接</strong><p>这里为空不代表 GitHub Issue 等专用 MCP 工具未启用，请查看当前可用工具目录。</p></div>
     </div>
   </section>
 </template>

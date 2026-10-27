@@ -33,17 +33,19 @@ public class GitHubReleaseEvidenceFormatter {
                     .count();
             evidence.append(projectId).append('=').append(count).append(' ');
         }
-        evidence.append("（回答中的数量必须使用这里的计数）\n");
+        evidence.append("（这是实际返回条数，不是配置上限；回答中的数量必须使用这里的计数）\n");
         if (result.truncated()) {
-            evidence.append("证据完整性：结果达到单项目上限，后续 Release 未进入本次证据；")
+            evidence.append("证据完整性：远程扫描或结果返回达到上限，部分 Release 未进入本次证据；")
                     .append("不得声称这是时间窗口内的完整列表或据此计算精确发布频率。\n");
         }
         if (result.releases().isEmpty()) {
             evidence.append("查询范围内没有找到符合口径的已发布 Release。\n");
             return evidence.toString();
         }
+        int citationIndex = 0;
         for (GitHubRelease release : result.releases()) {
             evidence.append("\n---\n")
+                    .append("[R").append(++citationIndex).append("]\n")
                     .append("项目：").append(release.projectName()).append('\n')
                     .append("版本：").append(release.tagName()).append('\n')
                     .append("名称：").append(release.releaseName()).append('\n')

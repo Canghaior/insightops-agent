@@ -26,6 +26,8 @@ export interface AgentOrchestrationEvent {
 }
 
 export interface ChatCitation {
+  versionLabel?: string | null
+  fetchedAt?: string | null
   label: string
   title: string
   url: string

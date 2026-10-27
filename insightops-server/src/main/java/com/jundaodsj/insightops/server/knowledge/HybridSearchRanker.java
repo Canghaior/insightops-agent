@@ -38,7 +38,7 @@ public class HybridSearchRanker {
                     output.add(new KnowledgeEmbeddingStore.SearchResult(
                             item.chunkId(), item.projectId(), item.projectName(), item.sourceName(),
                             item.title(), item.canonicalUrl(), item.headingPath(), item.content(),
-                            item.language(), item.trustTier(), normalizedScore));
+                            item.language(), item.trustTier(), normalizedScore, item.versionLabel(), item.collectedAt()));
                 });
         return List.copyOf(output);
     }
@@ -60,7 +60,12 @@ public class HybridSearchRanker {
                 && (query.contains("spring ai") || query.contains("spring-ai")))
                 || (project.contains("langchain4j") && query.contains("langchain4j"))
                 || (project.contains("dify") && query.contains("dify"));
-        return value.score * (named ? 1.08 : 1.0);
+        String version = value.result.versionLabel();
+        boolean versionNamed = version != null && java.util.regex.Pattern.compile(
+                "(?<![a-z0-9.])v?" + java.util.regex.Pattern.quote(version.toLowerCase(Locale.ROOT)) + "(?![a-z0-9.])")
+                .matcher(query).find();
+        boolean changelog = query.contains("changelog") && value.result.canonicalUrl().endsWith("/CHANGELOG.md");
+        return value.score * (named ? 1.08 : 1.0) * (versionNamed ? 1.25 : 1.0) * (changelog ? 1.15 : 1.0);
     }
 
     private static final class RankedResult {

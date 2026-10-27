@@ -121,9 +121,16 @@ const errorLabels: Record<string, string> = {
   TIMED_OUT: '本次生成超过 90 秒，已自动停止。',
   PERSISTENCE_ERROR: '运行记录保存失败，请稍后重试。',
   TOOL_RATE_LIMITED: 'GitHub API 调用额度已用尽，请稍后重试。',
-  TOOL_TIMEOUT: 'GitHub Release 查询超时，请稍后重试。',
+  TOOL_TIMEOUT: '工具调用超时，请稍后重试。',
   TOOL_VALIDATION_ERROR: 'Release 查询参数不在 P0 允许范围内。',
   TOOL_ERROR: 'GitHub Release 查询失败，请稍后重试。',
+  MCP_GITHUB_AUTH_REQUIRED: 'GitHub MCP 尚未配置授权，请在本机配置 Token 后重启后端。',
+  MCP_GITHUB_AUTH_FAILED: 'GitHub MCP 授权失败，请检查 Token 是否有效以及仓库读取权限。',
+  MCP_GITHUB_NOT_FOUND: '没有找到该 Issue，或当前 GitHub 授权无权读取。请检查项目和 Issue 编号。',
+  MCP_GITHUB_TOOL_ERROR: 'GitHub MCP 未能完成 Issue 查询，请查看执行记录中的错误状态。',
+  MCP_GITHUB_UNAVAILABLE: 'GitHub MCP 暂时无法连接，请检查网络后重试。',
+  MCP_GITHUB_INVALID_RESPONSE: 'GitHub MCP 返回的数据无法识别，本次未生成 Issue 查询结果。',
+  MCP_GITHUB_NOT_CONFIGURED: 'GitHub MCP Issue 工具尚未启用，请检查本机配置并重启后端。',
   OUTPUT_SOURCE_NOT_ALLOWED: '回答来源没有通过安全校验，本次结果已停止。',
   WORKSPACE_COST_MAX_CONCURRENT_RUNS: 'Workspace Agent 并发数已达上限，请等待其他任务结束。',
   WORKSPACE_COST_DAILY_TOKEN_LIMIT: 'Workspace 今日 Token 配额已用尽。',
@@ -578,6 +585,7 @@ function budgetPercentage(message: ConversationMessage) {
 
 function toolExecutionLabel(execution: ToolExecution) {
   if (execution.name === 'github_release_list') return 'GitHub Release'
+  if (execution.name === 'github_issue_read') return 'GitHub Issue · MCP'
   if (execution.name === 'knowledge_hybrid_search') return '知识库混合检索'
   if (execution.name === 'project_intelligence_event_search') return '项目情报事件'
   if (execution.name === 'user_memory_upsert') return '长期记忆写入'
@@ -588,7 +596,9 @@ function toolExecutionLabel(execution: ToolExecution) {
 function toolExecutionResult(execution: ToolExecution) {
   if (execution.status === 'running') return execution.progress ?? '执行中'
   if (execution.status === 'waiting_approval') return '尚未执行 · 等待你的审批'
-  if (execution.status === 'failed') return `安全降级 · ${execution.errorCode ?? '工具不可用'}`
+  if (execution.status === 'failed') {
+    return `安全降级 · ${errorLabels[execution.errorCode ?? ''] ?? execution.errorCode ?? '工具不可用'}`
+  }
   const count = execution.resultCount ?? 0
   return execution.model ? `已获取 ${count} 条 · ${execution.model}` : `已获取 ${count} 条结果`
 }
@@ -721,7 +731,7 @@ onBeforeUnmount(() => {
                   :key="node.id"
                   class="plan-node"
                   :class="`is-${node.status.toLowerCase()}`"
-                  :title="node.errorCode ?? node.dependencyIds.join(', ')"
+                  :title="errorLabels[node.errorCode ?? ''] ?? node.errorCode ?? node.dependencyIds.join(', ')"
                 >{{ toolExecutionLabel({ id: node.id, name: node.name, status: 'running' }) }} · {{ planNodeStatus(node.status) }}</span>
               </div>
               <p v-if="message.orchestration.exhaustionReason" class="budget-warning">
@@ -775,7 +785,7 @@ onBeforeUnmount(() => {
                   class="citation-feedback-card"
                 >
                   <a class="citation-card" :href="citation.url" target="_blank" rel="noreferrer">
-                    <span>{{ citation.label }} · {{ citation.sourceType === 'GITHUB_RELEASE' ? 'Release' : citation.project }}</span>
+                    <span>{{ citation.label }} · {{ citation.sourceType === 'GITHUB_RELEASE' ? 'Release' : citation.sourceType === 'GITHUB_ISSUE' ? 'Issue' : citation.project }}</span>
                     <b>{{ citation.heading || citation.title }}</b>
                     <small v-if="citation.score != null">融合得分 {{ citation.score.toFixed(3) }}</small>
                   </a>

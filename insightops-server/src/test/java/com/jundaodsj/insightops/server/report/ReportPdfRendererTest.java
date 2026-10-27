@@ -17,6 +17,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ReportPdfRendererTest {
     private static final Instant NOW = Instant.parse("2026-08-20T02:00:00Z");
 
+    @Test void researchPdfKeepsClickableCitationTargetsWithoutMarkdownDelimiters() throws Exception {
+        String url = "https://github.com/spring-projects/spring-ai/issues/6620";
+        String markdown = "# 升级评估\n## 主要变化\n已核实 [I1](" + url + ")\n\n| 来源 | 缺口 |\n|---|---|\n| I1 | 未读取评论 |\n\n## 尚未确认事项\n尚未运行项目测试\n";
+        var snapshot = new ReportDeliveryStore.ResearchSnapshot(UUID.randomUUID(), "升级", markdown,
+                java.util.Map.of(), List.of(), List.of(url), List.of("未读取评论"), List.of(), NOW, NOW);
+        var report = new ReportDeliveryStore.ReportRecord(UUID.randomUUID(), "升级评估", "RESEARCH", NOW, NOW,
+                List.of(), List.of(), 1, 0, List.of(), markdown, NOW, snapshot);
+        byte[] bytes = new ReportPdfRenderer(System.getProperty("insightops.pdf.qa-font", "")).render(report);
+        String researchOutput = System.getProperty("insightops.pdf.qa-research-output");
+        if (researchOutput != null) Files.write(Path.of(researchOutput), bytes);
+        try (PdfReader reader = new PdfReader(bytes)) {
+            var annotations = reader.getPageN(1).getAsArray(org.openpdf.text.pdf.PdfName.ANNOTS);
+            assertThat(annotations).isNotNull();
+            var target = annotations.getAsDict(0).getAsDict(org.openpdf.text.pdf.PdfName.A)
+                    .getAsString(org.openpdf.text.pdf.PdfName.URI).toUnicodeString();
+            assertThat(target).isEqualTo(url);
+        }
+    }
+
     @Test
     void rendersReadableMultipageChineseReport() throws Exception {
         List<ReportDeliveryStore.ReportItem> items = IntStream.rangeClosed(1, 12)

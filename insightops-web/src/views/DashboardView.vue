@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { listProjects } from '@/api/projects'
+import { listRuns, type RunSummary } from '@/api/runs'
+import { listKnowledgeUploads } from '@/api/uploads'
 
 import { useSystemStore } from '@/stores/system'
 
 const systemStore = useSystemStore()
 const modelLabel = computed(() => systemStore.status?.model.ready ? 'DeepSeek 已就绪' : '等待配置 Key')
 
-onMounted(() => systemStore.refresh())
+const projectCount = ref<number | null>(null), runCount = ref<number | null>(null), fileCount = ref<number | null>(null)
+const recentRuns = ref<RunSummary[]>([]), dataError = ref('')
+onMounted(async () => {
+  void systemStore.refresh()
+  const results = await Promise.allSettled([listProjects(), listRuns(0, 3), listKnowledgeUploads()])
+  if (results[0].status === 'fulfilled') projectCount.value = results[0].value.filter(item => item.enabled).length
+  if (results[1].status === 'fulfilled') { runCount.value = results[1].value.total; recentRuns.value = results[1].value.items }
+  if (results[2].status === 'fulfilled') fileCount.value = results[2].value.filter(item => item.status === 'SUCCEEDED').length
+  if (results.some(item => item.status === 'rejected')) dataError.value = '部分数据读取失败，未能读取的统计显示为 —。'
+})
 </script>
 
 <template>
@@ -15,7 +27,7 @@ onMounted(() => systemStore.refresh())
       <span class="eyebrow">今日研究入口</span>
       <h2>按需研究，不做无证据判断</h2>
       <p>围绕版本变化、兼容风险和迁移建议，形成带来源证据的技术判断。</p>
-      <RouterLink class="primary-action" to="/chat">开始一次研究问答 →</RouterLink>
+      <RouterLink class="primary-action" to="/upgrade-assessment">开始升级评估 →</RouterLink>
     </article>
 
     <article class="panel system-panel">
@@ -34,19 +46,18 @@ onMounted(() => systemStore.refresh())
     </article>
 
     <div class="metric-grid">
-      <article class="metric"><span>跟踪项目</span><strong>3</strong><small>P0 固定范围</small></article>
-      <article class="metric"><span>研究问题集</span><strong>20</strong><small>用于场景与路由回归</small></article>
-      <article class="metric"><span>数据来源</span><strong>1</strong><small>GitHub Releases</small></article>
+      <article class="metric"><span>关注框架</span><strong>{{ projectCount ?? '—' }}</strong><small>当前工作区内的关注</small></article>
+      <article class="metric"><span>研究记录</span><strong>{{ runCount ?? '—' }}</strong><small>你的实际研究次数</small></article>
+      <article class="metric"><span>可用上传资料</span><strong>{{ fileCount ?? '—' }}</strong><small>已处理且你有权访问</small></article>
     </div>
+    <p v-if="dataError" role="status">{{ dataError }}</p>
 
     <article class="panel full-span">
-      <div class="panel-heading"><div><span class="eyebrow">P0 主链路</span><h3>第一条可验收闭环</h3></div></div>
+      <div class="panel-heading"><div><span class="eyebrow">继续上次的研究</span><h3>最近研究</h3></div><RouterLink to="/runs">查看全部</RouterLink></div>
       <ol class="flow-list">
-        <li><span>01</span><div><strong>按需查询</strong><p>从 GitHub 官方 API 获取三个项目的 Release。</p></div></li>
-        <li><span>02</span><div><strong>执行审计</strong><p>保存 Run、Step、Tool Call 与来源引用。</p></div></li>
-        <li><span>03</span><div><strong>证据增强</strong><p>后端受控查询 Release，DeepSeek 基于证据生成回答。</p></div></li>
-        <li><span>04</span><div><strong>契约检查</strong><p>用 20 个问题检查项目识别、工具参数和来源边界。</p></div></li>
+        <li v-for="run in recentRuns" :key="run.id"><div><RouterLink :to="`/runs/${run.id}`">{{ run.question.split('\n')[0]?.slice(0, 100) }}</RouterLink><p>{{ run.status === 'SUCCEEDED' ? '研究完成' : run.status === 'FAILED' ? '研究失败，可查看原因' : '进行中或已暂停' }} · {{ new Date(run.createdAt).toLocaleString('zh-CN') }}</p></div></li>
       </ol>
+      <p v-if="runCount === 0">还没有研究记录。选择框架与版本，发起第一次升级评估。</p>
     </article>
   </section>
 </template>

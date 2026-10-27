@@ -286,6 +286,13 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
         if (contentType.contains("text/plain") || contentType.contains("text/markdown")
                 || fetched.uri().getPath().endsWith(".md")) {
             String content = cleanMarkdown(fetched.body());
+            String releaseVersion = pinnedChangelogVersion(fetched.uri());
+            if ("OFFICIAL_RELEASE_NOTES".equals(source.sourceType()) && releaseVersion != null) {
+                content = releaseSection(content, releaseVersion);
+                // A tagged changelog contains older releases too; do not label all of them
+                // as changes introduced by the tag being researched.
+                return new ParsedPage(source.name(), "en", content, List.of());
+            }
             String title = content.lines().map(String::trim)
                     .filter(line -> line.startsWith("# ")).map(line -> line.substring(2).trim())
                     .findFirst().orElseGet(() -> fileName(fetched.uri()));
@@ -419,7 +426,10 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
             }
             boolean exactDiscovery = discoveryResource && strip(uri).equals(strip(URI.create(source.discoveryUrl())));
             boolean robots = discoveryResource && "/robots.txt".equals(path);
-            if (!exactDiscovery && !robots && !path.startsWith(source.allowedPathPrefix())) {
+            // Source administration stores directory-style prefixes. The exact root page
+            // is also valid without a trailing slash (including a single .html article).
+            boolean boundaryRoot = source.allowedPathPrefix().equals(path.endsWith("/") ? path : path + "/");
+            if (!exactDiscovery && !robots && !boundaryRoot && !path.startsWith(source.allowedPathPrefix())) {
                 throw validation("URL is outside the registered documentation path");
             }
             if (!discoveryResource
@@ -493,9 +503,36 @@ public class OfficialDocumentHttpGateway implements OfficialDocumentGateway {
                 || normalized.startsWith("for the latest stable version, please use spring ai");
     }
 
-    private static String version(URI uri) {
+    static String version(URI uri) {
+        String pinned = pinnedChangelogVersion(uri);
+        if (pinned != null) return pinned;
         Matcher matcher = VERSION_PATH.matcher(uri.getPath());
-        return matcher.find() ? matcher.group(1) : null;
+        if (matcher.find()) return matcher.group(1);
+        // Vue's versioned release articles encode major/minor in their official URL.
+        if ("blog.vuejs.org".equalsIgnoreCase(uri.getHost())) {
+            Matcher release = Pattern.compile("^/posts/vue-(\\d+)-(\\d+)/?$").matcher(uri.getPath());
+            if (release.matches()) return release.group(1) + "." + release.group(2);
+        }
+        return null;
+    }
+
+    static String pinnedChangelogVersion(URI uri) {
+        if (!"raw.githubusercontent.com".equalsIgnoreCase(uri.getHost())) return null;
+        Matcher tag = Pattern.compile("^/[^/]+/[^/]+/v?(\\d+\\.\\d+\\.\\d+(?:-[A-Za-z0-9.-]+)?)/CHANGELOG\\.md$")
+                .matcher(uri.getPath());
+        return tag.matches() ? tag.group(1) : null;
+    }
+
+    static String releaseSection(String markdown, String version) {
+        Matcher headings = Pattern.compile("(?m)^#{1,2}\\s+\\[?v?(\\d+\\.\\d+\\.\\d+(?:-[A-Za-z0-9.-]+)?)(?=\\]|\\s|\\()").matcher(markdown);
+        int start = -1;
+        while (headings.find()) {
+            if (start >= 0) return markdown.substring(start, headings.start()).strip();
+            if (version.equals(headings.group(1))) start = headings.start();
+        }
+        if (start >= 0) return markdown.substring(start).strip();
+        throw new DocumentCollectionException(DocumentCollectionException.Code.UNSUPPORTED_CONTENT,
+                "Pinned CHANGELOG does not contain the requested version section: " + version);
     }
 
     private static String fileName(URI uri) {

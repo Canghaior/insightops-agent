@@ -13,6 +13,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 class GitHubReleaseEvidenceFormatterTest {
 
     @Test
+    void doesNotConfuseReturnedCountWithTheRemoteScanLimit() {
+        String evidence = new GitHubReleaseEvidenceFormatter().format(
+                new GitHubReleaseQuery(List.of("vue"), null, 30, true),
+                new GitHubReleaseResult(List.of(), Instant.now(), true));
+        assertThat(evidence).contains("实际返回条数，不是配置上限", "远程扫描或结果返回达到上限")
+                .doesNotContain("达到单项目上限");
+    }
+
+    @Test
     void shouldKeepOfficialReleaseSourceButRemoveLinksFromUntrustedNotes() {
         String officialRelease = "https://github.com/spring-projects/spring-ai/releases/tag/v2.0.0";
         GitHubRelease release = new GitHubRelease(

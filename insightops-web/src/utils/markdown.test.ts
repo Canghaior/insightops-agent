@@ -3,6 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { renderSafeMarkdown } from './markdown'
 
 describe('renderSafeMarkdown', () => {
+  it('links actual document evidence and renders its source table without trusting raw HTML', () => {
+    const url = 'https://docs.spring.io/spring-ai/reference/upgrade-notes.html'
+    const html = renderSafeMarkdown(`| 来源 | 说明 |\n|---|---|\n| [S1](${url}) | <script>danger</script> |`, [url])
+    expect(html).toContain('<table>')
+    expect(html).toContain(`href="${url}"`)
+    expect(html).not.toContain('<script>')
+  })
   it('renders common model markdown', () => {
     const html = renderSafeMarkdown('**v2.0.0**\n\n- 功能一\n- `Tool Calling`\n\nhttps://github.com/spring-projects/spring-ai/releases/tag/v2.0.0')
 

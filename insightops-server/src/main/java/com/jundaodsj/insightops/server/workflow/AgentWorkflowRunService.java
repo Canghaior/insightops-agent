@@ -86,6 +86,9 @@ public class AgentWorkflowRunService {
         if (!template.activeVersionId().equals(expectedVersionId)) {
             throw new WorkflowRunException("WORKFLOW_ACTIVE_VERSION_CHANGED");
         }
+        if ("UPGRADE_ASSESSMENT".equals(template.category())) {
+            throw new WorkflowRunException("请从升级评估表单启动研究。");
+        }
         AgentWorkflowTemplateStore.WorkflowVersion version = template.versions().stream()
                 .filter(item -> item.id().equals(expectedVersionId)).findFirst()
                 .orElseThrow(() -> new WorkflowRunException("WORKFLOW_VERSION_NOT_FOUND"));
@@ -105,6 +108,29 @@ public class AgentWorkflowRunService {
         durableRuns.enqueue(actor, runId, actualSessionId, traceId, systemAdmin,
                 accessLevel, question, question, null, now);
         return new LaunchResult(runId, actualSessionId, false);
+    }
+
+    /** Server-authored research plan; callers must validate project and attachment scope first. */
+    @Transactional
+    public LaunchResult launchPrepared(ActorContext actor, boolean systemAdmin,
+            AgentToolDefinition.AccessLevel accessLevel, AgentWorkflowTemplateStore.WorkflowTemplate template,
+            String graphJson, String question, Map<String, Object> suppliedInputs, UUID requestId, String traceId) {
+        var existing = workflowRuns.findByRequest(actor.workspaceId(), actor.userId(), requestId).orElse(null);
+        if (existing != null) return new LaunchResult(existing.runId(), null, true);
+        if (!actor.workspaceId().equals(template.workspaceId())) throw new WorkflowRunException("WORKFLOW_TEMPLATE_NOT_FOUND");
+        var version = template.versions().stream().filter(item -> item.id().equals(template.activeVersionId())).findFirst().orElseThrow();
+        var graph = expressions.validateGraph(graphJson);
+        validateAccess(graph, accessLevel);
+        var inputs = expressions.validateInputs(graph, suppliedInputs);
+        Instant now = Instant.now();
+        UUID runId = UUID.randomUUID();
+        UUID sessionId = chatRuns.startRun(actor, runId, null, traceId, question, now);
+        workflowRuns.create(new AgentWorkflowRunStore.WorkflowRunDraft(runId, actor.workspaceId(), actor.userId(),
+                template.id(), version.id(), template.name(), version.version(), question, graph.root().toString(),
+                write(inputs), expressions.contractFingerprint(graph), requestId, null, runId, null, now),
+                nodeDrafts(graph, null, now));
+        durableRuns.enqueue(actor, runId, sessionId, traceId, systemAdmin, accessLevel, question, question, null, now);
+        return new LaunchResult(runId, sessionId, false);
     }
 
     @Transactional

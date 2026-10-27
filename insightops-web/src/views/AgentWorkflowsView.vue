@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import {
+  getWorkflowRun,
   launchWorkflow,
   listActiveWorkflows,
   type ActiveWorkflowTemplate,
@@ -16,6 +17,7 @@ import {
 } from '@/api/workflowProducts'
 
 const router = useRouter()
+const route = useRoute()
 const templates = ref<ActiveWorkflowTemplate[]>([])
 const selectedId = ref('')
 const values = ref<Record<string, unknown>>({})
@@ -103,8 +105,8 @@ function normalizedInputs() {
     if ((raw === '' || raw == null) && !input.required) continue
     if ((raw === '' || raw == null) && input.required) throw new Error(`请填写 ${input.name}`)
     if (input.type === 'integer') result[input.name] = Number(raw)
-    else if (input.type === 'string_array') result[input.name] = String(raw).split(',').map((item) => item.trim()).filter(Boolean)
-    else if (input.type === 'json' || input.type === 'json_array') result[input.name] = JSON.parse(String(raw))
+    else if (input.type === 'string_array') result[input.name] = (Array.isArray(raw) ? raw : String(raw).split(',')).map((item) => item.trim()).filter(Boolean)
+    else if (input.type === 'json' || input.type === 'json_array') result[input.name] = typeof raw === 'string' ? JSON.parse(raw) : raw
     else result[input.name] = raw
   }
   return result
@@ -127,8 +129,15 @@ async function launch() {
 onMounted(async () => {
   loading.value = true
   try {
-    templates.value = await listActiveWorkflows()
-    if (templates.value[0]) await select(templates.value[0])
+    templates.value = (await listActiveWorkflows()).filter(item => !['UPGRADE_ASSESSMENT', 'UPGRADE_IMPACT'].includes(item.category))
+    if (typeof route.query.runId === 'string') {
+      const previous = await getWorkflowRun(route.query.runId)
+      const template = templates.value.find(item => item.id === previous.templateId)
+      if (template) {
+        await select(template)
+        values.value = { ...(previous.inputs as Record<string, unknown>) }
+      } else error.value = '原研究模板已不可用，请选择其他模板。'
+    } else if (templates.value[0]) await select(templates.value[0])
   } catch {
     error.value = '活动工作流加载失败。'
   } finally {
@@ -140,10 +149,11 @@ onMounted(async () => {
 <template>
   <section>
     <div class="section-heading">
-      <div><span class="eyebrow">P2.4-C · Durable Workflow</span><h2>研究工作流与参数预设</h2></div>
+      <div><span class="eyebrow">可复用的研究步骤</span><h2>其他研究模板</h2></div>
       <RouterLink class="secondary-button" to="/runs">执行记录</RouterLink>
     </div>
-    <p class="workflow-intro">从当前活动版本启动真实 Agent Run。版本、任务图和入口参数会在创建时固化。</p>
+    <p class="workflow-intro">选择研究主题，填写对象。升级场景可直接使用专用表单。</p>
+    <RouterLink class="primary-button" to="/upgrade-assessment">开始升级评估 →</RouterLink>
     <div v-if="error" class="workflow-error">{{ error }}</div>
     <div v-if="loading" class="panel workflow-loading">正在读取活动模板…</div>
     <div v-else-if="templates.length === 0" class="panel workflow-empty">当前 Workspace 还没有已激活的工作流模板。</div>
@@ -156,7 +166,7 @@ onMounted(async () => {
           @click="select(template)"
         >
           <strong>{{ template.name }}</strong>
-          <span>{{ template.category }} · v{{ template.version }}</span>
+          <span>第 {{ template.version }} 版</span>
           <small>{{ template.description }}</small>
         </button>
       </aside>
@@ -166,7 +176,7 @@ onMounted(async () => {
           <code>{{ selected.activeVersionId.slice(0, 8) }}</code>
         </header>
         <p>{{ selected.summary || selected.description }}</p>
-        <blockquote>{{ selected.entryQuestion }}</blockquote>
+        <details><summary>查看研究说明</summary><blockquote>{{ selected.entryQuestion }}</blockquote></details>
         <div class="preset-toolbar">
           <label>参数预设
             <select v-model="selectedPresetId" :disabled="presetLoading" @change="applyPreset">
@@ -180,7 +190,7 @@ onMounted(async () => {
         </div>
         <form @submit.prevent="launch">
           <label v-for="input in fields" :key="input.name">
-            <span>{{ input.name }} <i v-if="input.required">必填</i></span>
+            <span>{{ input.name === 'topic' ? '研究对象或主题' : input.name }} <i v-if="input.required">必填</i></span>
             <input
               v-if="input.type !== 'boolean'"
               v-model="values[input.name]"
@@ -190,11 +200,11 @@ onMounted(async () => {
               :max="input.maximum ?? undefined"
             />
             <input v-else v-model="values[input.name]" type="checkbox" />
-            <small>{{ input.type }}</small>
+
           </label>
           <div v-if="fields.length === 0" class="no-inputs">该模板不需要额外入口参数。</div>
           <button class="primary-button" :disabled="launching" type="submit">
-            {{ launching ? '正在创建持久 Run…' : '启动真实工作流' }}
+            {{ launching ? '正在启动研究…' : '开始研究' }}
           </button>
         </form>
       </main>

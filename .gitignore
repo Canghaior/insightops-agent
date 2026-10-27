@@ -39,3 +39,14 @@ backups/
 recovery-imports/
 .secrets/
 .deploy/
+
+# Local runtime data and generated deliverables
+/data/
+/output/
+/OrcaTerm/
+/本地验收.txt
+
+# Ignore private environment variants; keep distributable templates.
+.env.*
+!.env.example
+!.env.*.example

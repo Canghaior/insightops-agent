@@ -45,4 +45,20 @@ class HybridSearchRankerTest {
                 "https://docs.example.test/" + slug, "heading", "content", "en",
                 "T1_PROJECT_DOMAIN", 0.8);
     }
+
+    @Test
+    void prefersTheExactVersionChangelogWithoutConfusingPatchPrefixes() {
+        var target = versioned("3.5.1");
+        var later = versioned("3.5.10");
+        var older = versioned("3.5.0");
+        var ranked = ranker.fuse("Vue 3.5.1 changelog fixes", List.of(later, older, target), List.of(), 3);
+        assertThat(ranked.getFirst().versionLabel()).isEqualTo("3.5.1");
+        assertThat(ranked).hasSize(3);
+    }
+
+    private static KnowledgeEmbeddingStore.SearchResult versioned(String version) {
+        return new KnowledgeEmbeddingStore.SearchResult(UUID.randomUUID(), UUID.randomUUID(), "core", "Vue CHANGELOG",
+                "Vue " + version, "https://raw.githubusercontent.com/vuejs/core/v" + version + "/CHANGELOG.md", "Bug Fixes",
+                "release changes", "en", "T1_PROJECT_DOMAIN", 0.8, version, java.time.Instant.now());
+    }
 }

@@ -38,6 +38,7 @@ public class AgentToolCircuitBreakerRegistry {
     static String group(String toolName) {
         return switch (toolName) {
             case AgentToolNames.GITHUB_RELEASE_LIST -> "github";
+            case AgentToolNames.GITHUB_ISSUE_READ -> "github-mcp";
             case AgentToolNames.KNOWLEDGE_HYBRID_SEARCH -> "knowledge";
             case AgentToolNames.PROJECT_INTELLIGENCE_EVENT_SEARCH -> "database";
             default -> toolName;

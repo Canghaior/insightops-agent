@@ -15,6 +15,7 @@ export interface ResearchReport {
   id: string; title: string; reportType: string; periodStart: string; periodEnd: string
   projectIds: string[]; eventTypes: ReportEventType[]; itemCount: number; highRiskCount: number
   items: ReportItem[]; markdown: string; createdAt: string
+  research?: { sources: string[] } | null
 }
 export interface ReportPage { items: ResearchReport[]; page: number; size: number; total: number }
 export interface CreateReportCommand {
@@ -60,6 +61,9 @@ export async function listReports(): Promise<ReportPage> {
 export async function createReport(command: CreateReportCommand): Promise<ResearchReport> {
   const response = await apiClient.post<{ data: ResearchReport }>('/reports', command)
   return response.data.data
+}
+export async function saveRunReport(runId: string): Promise<ResearchReport> {
+  return (await apiClient.post<{ data: ResearchReport }>(`/runs/${encodeURIComponent(runId)}/report`)).data.data
 }
 export async function downloadReport(reportId: string, format: 'md' | 'pdf'): Promise<Blob> {
   const response = await apiClient.get<Blob>(`/reports/${reportId}/export.${format}`, {

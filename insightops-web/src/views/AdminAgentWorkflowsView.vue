@@ -54,6 +54,9 @@ function defaultArguments(toolName: string) {
   if (toolName === 'github_release_list') {
     return JSON.stringify({ projectIds: [], maxReleasesPerProject: 10, includePrereleases: false }, null, 2)
   }
+  if (toolName === 'github_issue_read') {
+    return JSON.stringify({ projectId: '', issueNumber: 1 }, null, 2)
+  }
   return '{}'
 }
 
@@ -342,6 +345,8 @@ onMounted(() => load())
               <label class="checkbox"><input v-model="node.required" type="checkbox" /> 必须成功节点</label>
             </div>
           </article>
+          <p v-if="error" class="stream-error" role="alert">{{ error }}</p>
+          <p v-if="success" class="success-banner" role="status">{{ success }}</p>
           <footer class="editor-actions">
             <button type="button" class="secondary-button" @click="runPreview">运行预检</button>
             <button class="send-button" :disabled="saving || !form.name.trim()">{{ isNewTemplate ? '保存模板 v1' : '创建不可变新版本' }}</button>

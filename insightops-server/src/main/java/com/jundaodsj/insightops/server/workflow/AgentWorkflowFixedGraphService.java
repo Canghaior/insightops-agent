@@ -177,9 +177,8 @@ public class AgentWorkflowFixedGraphService {
                         orchestrationStore.updateNode(planNode.id(), "SUCCEEDED", stored.toolCallId(), null, Instant.now());
                         listener.onPlanNodeState(planNode.id(), planNode.toolName(), planNode.round(),
                                 "SUCCEEDED", planNode.dependencyIds(), null);
-                        appendix.append(stored.promptAppendix() == null ? "" : stored.promptAppendix());
+                        WorkflowEvidence.append(appendix, citations, stored.promptAppendix(), readCitations(stored.citationsJson()));
                         sources.addAll(readStrings(stored.sourceUrlsJson()));
-                        citations.addAll(readCitations(stored.citationsJson()));
                         continue;
                     }
                     if (!ConditionalTaskGraph.conditionMatches(spec, statuses)) {
@@ -203,6 +202,8 @@ public class AgentWorkflowFixedGraphService {
                                 ++stepNo, ++stepNo, ++invocation, Map.of());
                         NodeOutcome outcome = finishWithoutDispatch(
                                 request, failed, "FAILED", code, listener);
+                        appendix.append("\n资料缺口：").append(spec.logicalId()).append(" 未执行成功：").append(code)
+                                .append("。相关结论无法核实，必须在尚未确认事项中说明。\n");
                         statuses.put(spec.id(), new ConditionalTaskGraph.NodeResult("FAILED", code));
                         if (spec.required() && requiredFailure == null) requiredFailure = code;
                     }
@@ -218,10 +219,12 @@ public class AgentWorkflowFixedGraphService {
                     if (outcome.result() != null) {
                         executed++;
                         outputs.put(outcome.spec().logicalId(), outcome.exposedOutput());
-                        appendix.append(outcome.result().systemPromptAppendix());
+                        WorkflowEvidence.append(appendix, citations, outcome.result().systemPromptAppendix(), outcome.result().citations());
                         sources.addAll(outcome.result().sourceUrls());
-                        citations.addAll(outcome.result().citations());
                     }
+                    if ("FAILED".equals(outcome.status())) appendix.append("\n资料缺口：")
+                            .append(outcome.spec().logicalId()).append(" 失败：").append(outcome.errorCode())
+                            .append("。未取得该来源，必须在尚未确认事项中说明，不得推断成功或保证兼容。\n");
                     if (outcome.spec().required() && "FAILED".equals(outcome.status())
                             && requiredFailure == null) requiredFailure = outcome.errorCode();
                     if ("WAITING_APPROVAL".equals(outcome.status())) waitingApproval = true;

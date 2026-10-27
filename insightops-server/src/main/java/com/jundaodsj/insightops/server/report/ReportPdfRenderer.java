@@ -63,6 +63,12 @@ public class ReportPdfRenderer {
             Font small = font(base, 8.5f, Font.NORMAL, MUTED);
             Font link = font(base, 8.5f, Font.UNDERLINE, ACCENT);
 
+            if (report.research() != null) {
+                renderResearch(document, writer, report.markdown(), base);
+                document.close();
+                return output.toByteArray();
+            }
+
             Paragraph brand = paragraph("INSIGHTOPS · 技术情报报告", eyebrow, 0, 7);
             document.add(brand);
             document.add(paragraph(report.title(), title, 0, 9));
@@ -122,6 +128,92 @@ public class ReportPdfRenderer {
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to render report PDF", exception);
         }
+    }
+
+    private static void renderResearch(Document document, PdfWriter writer, String markdown, BaseFont base) throws Exception {
+        boolean code = false;
+        String[] lines = markdown.split("\\R");
+        for (int index = 0; index < lines.length; index++) {
+            String line = lines[index];
+            if (line.startsWith("```")) { code = !code; continue; }
+            if (line.isBlank()) continue;
+            if (!code && line.strip().startsWith("|") && index + 1 < lines.length
+                    && lines[index + 1].matches("\\s*\\|?\\s*:?-{3,}:?\\s*\\|[\\s:|\\-]*")) {
+                String[] headers = tableCells(line);
+                PdfPTable table = new PdfPTable(headers.length);
+                table.setWidthPercentage(100);
+                table.setSpacingBefore(7);
+                table.setSpacingAfter(10);
+                table.setHeaderRows(1);
+                table.setSplitLate(false);
+                addResearchRow(table, headers, base, true);
+                index += 2;
+                while (index < lines.length && lines[index].strip().startsWith("|")) {
+                    String[] cells = tableCells(lines[index]);
+                    if (cells.length != headers.length) break;
+                    addResearchRow(table, cells, base, false);
+                    index++;
+                }
+                index--;
+                document.add(table);
+                continue;
+            }
+            if (!code && line.matches("\\s*[-*_]{3,}\\s*")) continue;
+            int level = line.startsWith("# ") ? 1 : line.startsWith("## ") ? 2 : line.startsWith("### ") ? 3 : 0;
+            if (level > 0 && writer.getVerticalPosition(true) < 160) document.newPage();
+            String content = code ? line : line.replaceFirst("^#{1,6}\\s+", "").replaceFirst("^>\\s?", "");
+            Font normal = font(base, level == 1 ? (index == 0 ? 20 : 15) : level == 2 ? 14 : level == 3 ? 11 : 9.5f,
+                    level > 0 ? Font.BOLD : Font.NORMAL, level > 0 ? ACCENT : INK);
+            Paragraph paragraph = new Paragraph();
+            paragraph.setLeading(normal.getSize() * 1.55f);
+            paragraph.setSpacingBefore(level > 0 ? 12 : 0);
+            paragraph.setSpacingAfter(level > 0 ? 7 : 5);
+            paragraph.setKeepTogether(level > 0);
+            if (code) paragraph.add(new Chunk(content, normal));
+            else appendResearchInline(paragraph, content, normal, base);
+            document.add(paragraph);
+        }
+    }
+
+    private static String[] tableCells(String line) {
+        return line.strip().replaceAll("^\\||\\|$", "").split("\\|", -1);
+    }
+
+    private static void addResearchRow(PdfPTable table, String[] values, BaseFont base, boolean header) {
+        for (String value : values) {
+            Paragraph paragraph = new Paragraph();
+            paragraph.setLeading(12);
+            appendResearchInline(paragraph, value.strip(), font(base, 8, header ? Font.BOLD : Font.NORMAL, INK), base);
+            PdfPCell cell = new PdfPCell();
+            cell.addElement(paragraph);
+            cell.setPadding(6);
+            cell.setBorderColor(new Color(208, 222, 217));
+            if (header) cell.setBackgroundColor(SOFT);
+            table.addCell(cell);
+        }
+    }
+
+    private static void appendResearchInline(Paragraph paragraph, String text, Font normal, BaseFont base) {
+        var pattern = java.util.regex.Pattern.compile(
+                "\\[([^\\]\\n]+)]\\((https?://[^\\s)]+)\\)|<(https?://[^\\s>]+)>|https?://[^\\s<>\\])）},;，。]+|\\*\\*([^*\\n]+)\\*\\*|`([^`\\n]+)`");
+        var matcher = pattern.matcher(text);
+        int position = 0;
+        while (matcher.find()) {
+            paragraph.add(new Chunk(text.substring(position, matcher.start()), normal));
+            if (matcher.group(4) != null) {
+                paragraph.add(new Chunk(matcher.group(4), font(base, normal.getSize(), Font.BOLD, INK)));
+            } else if (matcher.group(5) != null) {
+                paragraph.add(new Chunk(matcher.group(5), normal));
+            } else {
+                String url = matcher.group(2) != null ? matcher.group(2) : matcher.group(3) != null ? matcher.group(3) : matcher.group();
+                String label = matcher.group(1) != null ? "[" + matcher.group(1) + "]" : url;
+                Anchor anchor = new Anchor(label, font(base, normal.getSize(), Font.UNDERLINE, ACCENT));
+                anchor.setReference(url);
+                paragraph.add(anchor);
+            }
+            position = matcher.end();
+        }
+        paragraph.add(new Chunk(text.substring(position), normal));
     }
 
     private static void metric(PdfPTable table, String label, String value, BaseFont base, boolean danger) {

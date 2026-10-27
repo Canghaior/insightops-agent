@@ -25,6 +25,10 @@ async function submit() {
   } catch (caught) {
     if (axios.isAxiosError(caught) && caught.response?.status === 428) {
       mfaRequired.value = true; error.value = '请输入验证器代码或恢复码'
+    } else if (axios.isAxiosError(caught) && (!caught.response || caught.response.status >= 500)) {
+      error.value = '登录服务暂时不可用，请确认后端已启动后重试。'
+    } else if (axios.isAxiosError(caught) && caught.response?.status === 429) {
+      error.value = '尝试次数过多，请稍后再试。'
     } else error.value = '用户名、密码或 MFA 验证码不正确'
   } finally { loading.value = false }
 }

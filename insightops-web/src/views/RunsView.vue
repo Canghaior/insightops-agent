@@ -12,6 +12,8 @@ import {
   type RunToolCall,
 } from '@/api/runs'
 import MarkdownContent from '@/components/MarkdownContent.vue'
+import ResearchResultActions from '@/components/ResearchResultActions.vue'
+import { researchWarnings } from '@/utils/researchEvidence'
 import { getLatestAgentCheckpoint, pauseAgentRun, type AgentCheckpoint } from '@/api/checkpoints'
 import {
   getWorkflowRun,
@@ -278,7 +280,7 @@ onUnmounted(stopDetailPolling)
           <i class="status-pill" :class="`status-${run.status.toLowerCase()}`">{{ run.status }}</i>
           <code>{{ shortId(run.id) }}</code>
         </span>
-        <span class="run-question">{{ run.question }}</span>
+        <span class="run-question">{{ run.question.split('\n')[0] }}</span>
         <span class="run-facts">
           <strong>{{ run.modelName ?? '—' }}</strong>
           <small>{{ run.toolRounds }} 工具 · {{ totalTokens(run) }} Token · {{ formatDuration(run.durationMs) }}</small>
@@ -305,157 +307,168 @@ onUnmounted(stopDetailPolling)
         <div v-else-if="detailError" class="run-error">{{ detailError }}</div>
         <template v-else-if="selectedRun">
           <div class="detail-status-line">
-            <i class="status-pill" :class="`status-${selectedRun.status.toLowerCase()}`">{{ selectedRun.status }}</i>
+            <i class="status-pill" :class="`status-${selectedRun.status.toLowerCase()}`">{{ selectedRun.status === 'SUCCEEDED' ? '研究已完成' : nodeStatusLabel(selectedRun.status) }}</i>
             <span>{{ formatDate(selectedRun.startedAt) }} · {{ formatDuration(selectedRun.durationMs) }}</span>
             <button v-if="selectedRun.status === 'RUNNING'" class="secondary-button" :disabled="runActionLoading" @click="requestPause">请求暂停</button>
             <button v-if="selectedRun.status === 'PAUSED' && checkpoint" class="primary-button" @click="resumeCheckpoint">从检查点恢复</button>
           </div>
           <p v-if="runActionError" class="checkpoint-notice">{{ runActionError }}</p>
-          <p v-if="checkpoint" class="checkpoint-notice">
+          <p v-if="checkpoint && selectedRun.status === 'PAUSED'" class="checkpoint-notice">
             检查点 #{{ checkpoint.sequence }} · {{ checkpoint.reason }} · {{ formatDate(checkpoint.createdAt) }}
           </p>
 
-          <dl class="detail-metrics">
-            <div><dt>模型</dt><dd>{{ selectedRun.modelName ?? '—' }}</dd></div>
-            <div><dt>Token</dt><dd>{{ totalTokens(selectedRun) }}</dd></div>
-            <div><dt>工具轮次</dt><dd>{{ selectedRun.toolRounds }}</dd></div>
-            <div><dt>估算费用</dt><dd>{{ formatCost(selectedRun.estimatedCostCny) }}</dd></div>
-            <div><dt>价格生效日</dt><dd>{{ selectedRun.pricingEffectiveDate ?? '—' }}</dd></div>
-            <div><dt>Trace ID</dt><dd><code>{{ selectedRun.traceId }}</code></dd></div>
-          </dl>
-
-          <section v-if="workflowRun" class="detail-block workflow-run-block">
-            <div class="detail-block-heading">
-              <span class="eyebrow">Workflow Snapshot · {{ workflowRun.templateName }} v{{ workflowRun.templateVersion }}</span>
-              <small>{{ workflowRun.nodes.length }} 节点 · 合同 {{ workflowRun.toolContractFingerprint.slice(0, 8) }}</small>
-            </div>
-            <p v-if="workflowRun.sourceRunId" class="checkpoint-notice">
-              从 Run
-              <RouterLink :to="`/runs/${workflowRun.sourceRunId}`">{{ shortId(workflowRun.sourceRunId) }}</RouterLink>
-              的失败节点 {{ workflowRun.retryFromNodeId }} 重试；成功节点直接复用。
-            </p>
-            <details><summary>固化入口参数</summary><pre>{{ pretty(workflowRun.inputs) }}</pre></details>
-            <div class="workflow-node-list">
-              <article
-                v-for="node in workflowRun.nodes"
-                :key="node.id"
-                class="workflow-runtime-node"
-                :class="`is-${node.status.toLowerCase()}`"
-              >
-                <header>
-                  <span><strong>{{ node.logicalNodeId }}</strong><code>{{ node.toolName }}@{{ node.toolVersion }}</code></span>
-                  <i class="status-pill" :class="`status-${node.status.toLowerCase()}`">{{ nodeStatusLabel(node.status) }}</i>
-                </header>
-                <p>
-                  {{ node.attemptCount }} 次节点执行 · {{ workflowTokens(node) }} Token ·
-                  {{ formatCost(node.estimatedCostCny) }} · {{ formatDuration(workflowDuration(node)) }}
-                </p>
-                <p v-if="node.errorCode" class="budget-warning">{{ node.errorCode }}</p>
-                <div class="workflow-node-actions">
-                  <button
-                    v-if="selectedRun.status === 'FAILED' && node.status === 'FAILED'"
-                    class="secondary-button"
-                    :disabled="runActionLoading"
-                    @click="retryWorkflow(node)"
-                  >
-                    从此失败节点重试
-                  </button>
-                  <a v-if="node.toolCallId" href="#execution-timeline">查看 Tool Call {{ shortId(node.toolCallId) }}</a>
-                </div>
-                <details><summary>解析后输入</summary><pre>{{ pretty(node.resolvedInput) }}</pre></details>
-                <details><summary>节点输出</summary><pre>{{ pretty(node.output) }}</pre></details>
-                <details><summary>允许下游读取</summary><pre>{{ pretty(node.exposedOutput) }}</pre></details>
-              </article>
-            </div>
-          </section>
-
-          <section v-if="selectedRun.plan" class="detail-block run-plan-block">
-            <div class="detail-block-heading">
-              <span class="eyebrow">Task Graph · v{{ selectedRun.plan.version }}</span>
-              <small>{{ selectedRun.plan.status }} · 并行上限 {{ selectedRun.plan.maxParallelism }}</small>
-            </div>
-            <div v-if="selectedRun.budget" class="orchestration-budget">
-              <div><i :style="{ width: `${budgetPercent(selectedRun)}%` }"></i></div>
-              <span>
-                节点 {{ selectedRun.budget.usedNodes }}/{{ selectedRun.budget.maxNodes }} ·
-                尝试 {{ selectedRun.budget.usedToolAttempts }}/{{ selectedRun.budget.maxToolAttempts }} ·
-                Token {{ selectedRun.budget.usedModelTokens }}/{{ selectedRun.budget.maxModelTokens }} ·
-                ¥{{ selectedRun.budget.estimatedCostCny.toFixed(6) }}/¥{{ selectedRun.budget.maxEstimatedCostCny.toFixed(6) }}
-              </span>
-              <strong v-if="selectedRun.budget.exhaustionReason" class="budget-warning">
-                安全降级：{{ selectedRun.budget.exhaustionReason }}
-              </strong>
-            </div>
-            <div v-for="[round, nodes] in planRounds(selectedRun.plan.nodes)" :key="round" class="plan-layer run-plan-layer">
-              <b>第 {{ round }} 层</b>
-              <span
-                v-for="node in nodes"
-                :key="node.id"
-                class="plan-node"
-                :class="`is-${node.status.toLowerCase()}`"
-                :title="node.dependencyIds.length ? `依赖 ${node.dependencyIds.map(shortId).join(', ')}` : '根节点'"
-              >{{ node.toolName }} · {{ nodeStatusLabel(node.status) }} · {{ node.conditionType }} · r{{ node.revision }}</span>
-            </div>
-          </section>
-
-          <section class="detail-block">
-            <span class="eyebrow">Question</span>
-            <p>{{ selectedRun.question }}</p>
-          </section>
+          <ResearchResultActions
+            :run-id="selectedRun.id" :can-save="selectedRun.status === 'SUCCEEDED' && !!selectedRun.answer"
+            :repeat-url="workflowRun?.templateName === '升级评估（版本范围）' ? `/upgrade-assessment?runId=${selectedRun.id}` : workflowRun ? `/agent-workflows?runId=${selectedRun.id}` : `/chat?question=${encodeURIComponent(selectedRun.question)}`"
+          />
+          <div v-if="researchWarnings(selectedRun.toolCalls, workflowRun?.nodes).length" class="detail-block detail-failure" role="status">
+            <h3>资料缺口与待核实事项</h3><ul><li v-for="warning in researchWarnings(selectedRun.toolCalls, workflowRun?.nodes)" :key="warning">{{ warning }}</li></ul>
+          </div>
           <section v-if="selectedRun.answer" class="detail-block">
-            <span class="eyebrow">Final Answer</span>
-            <MarkdownContent class="detail-answer" :content="selectedRun.answer" />
+            <span class="eyebrow">研究结论</span>
+            <MarkdownContent class="detail-answer" :content="selectedRun.answer" :sources="selectedRun.sources" />
           </section>
           <section v-if="selectedRun.failureCode" class="detail-block detail-failure">
-            <span class="eyebrow">Failure</span>
+            <span class="eyebrow">研究未完成</span>
             <p>{{ selectedRun.failureCode }}<template v-if="selectedRun.failureMessage"> · {{ selectedRun.failureMessage }}</template></p>
           </section>
-
-          <section id="execution-timeline" class="detail-block">
-            <div class="detail-block-heading"><span class="eyebrow">Execution Timeline</span><small>{{ selectedRun.steps.length }} Steps</small></div>
-            <div v-if="selectedRun.steps.length === 0" class="detail-placeholder">本次执行没有调用工具。</div>
-            <article v-for="step in selectedRun.steps" :key="step.id" class="step-card">
-              <header>
-                <span><b>{{ step.stepNo }}</b><strong>{{ step.stepType }}</strong></span>
-                <span><i class="status-pill" :class="`status-${step.status.toLowerCase()}`">{{ step.status }}</i> {{ formatDuration(step.durationMs) }}</span>
-              </header>
-              <div class="payload-grid">
-                <details><summary>Step 输入</summary><pre>{{ pretty(step.inputPayload) }}</pre></details>
-                <details><summary>Step 输出</summary><pre>{{ pretty(step.outputPayload) }}</pre></details>
-              </div>
-              <div v-for="tool in toolsFor(step.id)" :key="tool.id" class="tool-call-card">
-                <div><strong>{{ tool.toolName }}</strong><i class="status-pill" :class="`status-${tool.status.toLowerCase()}`">{{ tool.status }}</i><span>{{ formatDuration(tool.durationMs) }}</span></div>
-                <p v-if="tool.errorMessage">{{ tool.errorMessage }}</p>
-                <div v-if="tool.attempts?.length" class="tool-attempts">
-                  <span>执行尝试 · {{ tool.attempts.length }}</span>
-                  <div v-for="attempt in tool.attempts" :key="attempt.id">
-                    <b>#{{ attempt.attemptNo }}</b>
-                    <i class="status-pill" :class="`status-${attempt.status.toLowerCase()}`">{{ attempt.status }}</i>
-                    <span>{{ formatDuration(attempt.durationMs) }}</span>
-                    <code v-if="attempt.errorCode">{{ attempt.errorCode }}</code>
-                    <small v-if="attempt.retryDelayMs">等待 {{ attempt.retryDelayMs }} ms 后重试</small>
-                  </div>
-                </div>
-                <details><summary>工具请求</summary><pre>{{ pretty(tool.requestPayload) }}</pre></details>
-                <details><summary>工具结果</summary><pre>{{ pretty(tool.resultPayload) }}</pre></details>
-              </div>
-            </article>
-          </section>
-
           <section v-if="selectedRun.citationDetails?.length" class="detail-block detail-sources">
-            <h3>结构化引用</h3>
+            <h3>来源依据</h3>
             <a
               v-for="citation in selectedRun.citationDetails"
               :key="`${citation.label}-${citation.url}`"
               :href="citation.url"
               target="_blank"
               rel="noreferrer"
-            >{{ citation.label }} · {{ citation.project || 'GitHub Release' }} · {{ citation.heading || citation.title }}</a>
+            >{{ citation.label }} · {{ citation.project || 'GitHub Release' }} · {{ citation.heading || citation.title }} · 版本：{{ citation.versionLabel || '未标注' }} · 获取/采集：{{ formatDate(citation.fetchedAt ?? null) }}</a>
           </section>
           <section v-else-if="selectedRun.sources.length" class="detail-block detail-sources">
             <span class="eyebrow">Official Sources</span>
             <a v-for="source in selectedRun.sources" :key="source" :href="source" target="_blank" rel="noreferrer">{{ source }}</a>
           </section>
+          <details class="detail-block">
+            <summary>查看研究参数、任务图与工具过程</summary>
+            <dl class="detail-metrics">
+              <div><dt>模型</dt><dd>{{ selectedRun.modelName ?? '—' }}</dd></div>
+              <div><dt>Token</dt><dd>{{ totalTokens(selectedRun) }}</dd></div>
+              <div><dt>工具轮次</dt><dd>{{ selectedRun.toolRounds }}</dd></div>
+              <div><dt>估算费用</dt><dd>{{ formatCost(selectedRun.estimatedCostCny) }}</dd></div>
+              <div><dt>价格生效日</dt><dd>{{ selectedRun.pricingEffectiveDate ?? '—' }}</dd></div>
+              <div><dt>Trace ID</dt><dd><code>{{ selectedRun.traceId }}</code></dd></div>
+            </dl>
+
+            <section v-if="workflowRun" class="detail-block workflow-run-block">
+              <div class="detail-block-heading">
+                <span class="eyebrow">Workflow Snapshot · {{ workflowRun.templateName }} v{{ workflowRun.templateVersion }}</span>
+                <small>{{ workflowRun.nodes.length }} 节点 · 合同 {{ workflowRun.toolContractFingerprint.slice(0, 8) }}</small>
+              </div>
+              <p v-if="workflowRun.sourceRunId" class="checkpoint-notice">
+                从 Run
+                <RouterLink :to="`/runs/${workflowRun.sourceRunId}`">{{ shortId(workflowRun.sourceRunId) }}</RouterLink>
+                的失败节点 {{ workflowRun.retryFromNodeId }} 重试；成功节点直接复用。
+              </p>
+              <details><summary>固化入口参数</summary><pre>{{ pretty(workflowRun.inputs) }}</pre></details>
+              <div class="workflow-node-list">
+                <article
+                  v-for="node in workflowRun.nodes"
+                  :key="node.id"
+                  class="workflow-runtime-node"
+                  :class="`is-${node.status.toLowerCase()}`"
+                >
+                  <header>
+                    <span><strong>{{ node.logicalNodeId }}</strong><code>{{ node.toolName }}@{{ node.toolVersion }}</code></span>
+                    <i class="status-pill" :class="`status-${node.status.toLowerCase()}`">{{ nodeStatusLabel(node.status) }}</i>
+                  </header>
+                  <p>
+                    {{ node.attemptCount }} 次节点执行 · {{ workflowTokens(node) }} Token ·
+                    {{ formatCost(node.estimatedCostCny) }} · {{ formatDuration(workflowDuration(node)) }}
+                  </p>
+                  <p v-if="node.errorCode" class="budget-warning">{{ node.errorCode }}</p>
+                  <div class="workflow-node-actions">
+                    <button
+                      v-if="selectedRun.status === 'FAILED' && node.status === 'FAILED'"
+                      class="secondary-button"
+                      :disabled="runActionLoading"
+                      @click="retryWorkflow(node)"
+                    >
+                      从此失败节点重试
+                    </button>
+                    <a v-if="node.toolCallId" href="#execution-timeline">查看 Tool Call {{ shortId(node.toolCallId) }}</a>
+                  </div>
+                  <details><summary>解析后输入</summary><pre>{{ pretty(node.resolvedInput) }}</pre></details>
+                  <details><summary>节点输出</summary><pre>{{ pretty(node.output) }}</pre></details>
+                  <details><summary>允许下游读取</summary><pre>{{ pretty(node.exposedOutput) }}</pre></details>
+                </article>
+              </div>
+            </section>
+
+            <section v-if="selectedRun.plan" class="detail-block run-plan-block">
+              <div class="detail-block-heading">
+                <span class="eyebrow">Task Graph · v{{ selectedRun.plan.version }}</span>
+                <small>{{ selectedRun.plan.status }} · 并行上限 {{ selectedRun.plan.maxParallelism }}</small>
+              </div>
+              <div v-if="selectedRun.budget" class="orchestration-budget">
+                <div><i :style="{ width: `${budgetPercent(selectedRun)}%` }"></i></div>
+                <span>
+                  节点 {{ selectedRun.budget.usedNodes }}/{{ selectedRun.budget.maxNodes }} ·
+                  尝试 {{ selectedRun.budget.usedToolAttempts }}/{{ selectedRun.budget.maxToolAttempts }} ·
+                  Token {{ selectedRun.budget.usedModelTokens }}/{{ selectedRun.budget.maxModelTokens }} ·
+                  ¥{{ selectedRun.budget.estimatedCostCny.toFixed(6) }}/¥{{ selectedRun.budget.maxEstimatedCostCny.toFixed(6) }}
+                </span>
+                <strong v-if="selectedRun.budget.exhaustionReason" class="budget-warning">
+                  安全降级：{{ selectedRun.budget.exhaustionReason }}
+                </strong>
+              </div>
+              <div v-for="[round, nodes] in planRounds(selectedRun.plan.nodes)" :key="round" class="plan-layer run-plan-layer">
+                <b>第 {{ round }} 层</b>
+                <span
+                  v-for="node in nodes"
+                  :key="node.id"
+                  class="plan-node"
+                  :class="`is-${node.status.toLowerCase()}`"
+                  :title="node.dependencyIds.length ? `依赖 ${node.dependencyIds.map(shortId).join(', ')}` : '根节点'"
+                >{{ node.toolName }} · {{ nodeStatusLabel(node.status) }} · {{ node.conditionType }} · r{{ node.revision }}</span>
+              </div>
+            </section>
+
+            <section class="detail-block">
+              <span class="eyebrow">Question</span>
+              <p>{{ selectedRun.question }}</p>
+            </section>
+
+
+
+            <section id="execution-timeline" class="detail-block">
+              <div class="detail-block-heading"><span class="eyebrow">Execution Timeline</span><small>{{ selectedRun.steps.length }} Steps</small></div>
+              <div v-if="selectedRun.steps.length === 0" class="detail-placeholder">本次执行没有调用工具。</div>
+              <article v-for="step in selectedRun.steps" :key="step.id" class="step-card">
+                <header>
+                  <span><b>{{ step.stepNo }}</b><strong>{{ step.stepType }}</strong></span>
+                  <span><i class="status-pill" :class="`status-${step.status.toLowerCase()}`">{{ step.status }}</i> {{ formatDuration(step.durationMs) }}</span>
+                </header>
+                <div class="payload-grid">
+                  <details><summary>Step 输入</summary><pre>{{ pretty(step.inputPayload) }}</pre></details>
+                  <details><summary>Step 输出</summary><pre>{{ pretty(step.outputPayload) }}</pre></details>
+                </div>
+                <div v-for="tool in toolsFor(step.id)" :key="tool.id" class="tool-call-card">
+                  <div><strong>{{ tool.toolName }}</strong><i class="status-pill" :class="`status-${tool.status.toLowerCase()}`">{{ tool.status }}</i><span>{{ formatDuration(tool.durationMs) }}</span></div>
+                  <p v-if="tool.errorMessage">{{ tool.errorMessage }}</p>
+                  <div v-if="tool.attempts?.length" class="tool-attempts">
+                    <span>执行尝试 · {{ tool.attempts.length }}</span>
+                    <div v-for="attempt in tool.attempts" :key="attempt.id">
+                      <b>#{{ attempt.attemptNo }}</b>
+                      <i class="status-pill" :class="`status-${attempt.status.toLowerCase()}`">{{ attempt.status }}</i>
+                      <span>{{ formatDuration(attempt.durationMs) }}</span>
+                      <code v-if="attempt.errorCode">{{ attempt.errorCode }}</code>
+                      <small v-if="attempt.retryDelayMs">等待 {{ attempt.retryDelayMs }} ms 后重试</small>
+                    </div>
+                  </div>
+                  <details><summary>工具请求</summary><pre>{{ pretty(tool.requestPayload) }}</pre></details>
+                  <details><summary>工具结果</summary><pre>{{ pretty(tool.resultPayload) }}</pre></details>
+                </div>
+              </article>
+            </section>
+          </details>
         </template>
       </aside>
     </div>

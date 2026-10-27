@@ -50,6 +50,17 @@ public class KnowledgeSearchService {
 
     private SearchResponse searchVisible(UUID runId, UUID workspaceId, UUID viewerUserId,
                                          boolean systemAdmin, String query, int limit) {
+        return searchVisible(runId, workspaceId, viewerUserId, systemAdmin, query, limit, null);
+    }
+
+    public SearchResponse searchScoped(UUID runId, UUID workspaceId, UUID viewerUserId, String query,
+                                        int limit, KnowledgeEmbeddingStore.SearchScope scope) {
+        return searchVisible(runId, workspaceId, viewerUserId, false, query, limit, scope);
+    }
+
+    private SearchResponse searchVisible(UUID runId, UUID workspaceId, UUID viewerUserId,
+                                         boolean systemAdmin, String query, int limit,
+                                         KnowledgeEmbeddingStore.SearchScope scope) {
         Instant startedAt = clock.instant();
         List<KnowledgeEmbeddingStore.SearchResult> vectorResults = List.of();
         boolean vectorAvailable = properties.isEnabled();
@@ -61,7 +72,9 @@ public class KnowledgeSearchService {
                     throw new IllegalStateException("Embedding model returned an invalid vector");
                 }
                 int candidateLimit = Math.max(1, Math.min(50, limit * 2));
-                vectorResults = systemAdmin
+                vectorResults = scope != null
+                        ? store.searchScoped(workspaceId, viewerUserId, properties.getModel(), vectors.getFirst(),
+                                candidateLimit, properties.getMinimumScore(), scope) : systemAdmin
                         ? store.search(workspaceId, properties.getModel(), vectors.getFirst(),
                                 candidateLimit, properties.getMinimumScore())
                         : store.searchVisible(workspaceId, viewerUserId, false, properties.getModel(),
@@ -74,7 +87,8 @@ public class KnowledgeSearchService {
         List<KnowledgeEmbeddingStore.SearchResult> keywordResults;
         try {
             int candidateLimit = Math.max(1, Math.min(50, limit * 2));
-            keywordResults = systemAdmin
+            keywordResults = scope != null
+                    ? store.searchKeywordScoped(workspaceId, viewerUserId, query, candidateLimit, scope) : systemAdmin
                     ? store.searchKeyword(workspaceId, query, candidateLimit)
                     : store.searchKeywordVisible(workspaceId, viewerUserId, false, query, candidateLimit);
         }

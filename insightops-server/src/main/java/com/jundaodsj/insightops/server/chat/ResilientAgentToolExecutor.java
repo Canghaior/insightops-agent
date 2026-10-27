@@ -28,6 +28,7 @@ public class ResilientAgentToolExecutor {
             "TOOL_RATE_LIMITED",
             "TOOL_TRANSIENT_REMOTE",
             "TOOL_TIMEOUT",
+            "MCP_GITHUB_UNAVAILABLE",
             "EMBEDDING_UNAVAILABLE",
             "RETRIEVAL_ERROR",
             "EVENT_RETRIEVAL_ERROR");

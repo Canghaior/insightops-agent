@@ -157,6 +157,7 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
                        max(embedding.updated_at) as last_updated_at
                 from knowledge_chunk chunk
                 join knowledge_document document on document.current_revision_id=chunk.revision_id and document.active=true
+                join knowledge_revision revision on revision.id=document.current_revision_id
                 join knowledge_source source on source.id=document.source_id and source.enabled=true
                 left join knowledge_embedding embedding
                   on embedding.chunk_id=chunk.id and embedding.embedding_model=:model
@@ -176,6 +177,7 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
                        count(*) filter (where embedding.status='FAILED') as failed
                 from knowledge_chunk chunk
                 join knowledge_document document on document.current_revision_id=chunk.revision_id and document.active=true
+                join knowledge_revision revision on revision.id=document.current_revision_id
                 join knowledge_source source on source.id=document.source_id and source.enabled=true
                 join tracked_project project on project.id=source.project_id
                 left join knowledge_embedding embedding
@@ -226,15 +228,28 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
     public List<SearchResult> searchVisible(UUID workspaceId, UUID viewerUserId, boolean systemAdmin,
                                             String model, float[] queryEmbedding,
                                             int limit, double minimumScore) {
+        return searchVisible(workspaceId, viewerUserId, systemAdmin, model, queryEmbedding, limit, minimumScore, null);
+    }
+
+    @Override
+    public List<SearchResult> searchScoped(UUID workspaceId, UUID viewerUserId, String model,
+                                           float[] vector, int limit, double minimumScore, SearchScope scope) {
+        return searchVisible(workspaceId, viewerUserId, false, model, vector, limit, minimumScore, scope);
+    }
+
+    private List<SearchResult> searchVisible(UUID workspaceId, UUID viewerUserId, boolean systemAdmin,
+                                             String model, float[] queryEmbedding, int limit,
+                                             double minimumScore, SearchScope scope) {
         String query = vector(queryEmbedding);
         return jdbc.sql("""
                 select chunk.id as chunk_id, source.project_id, project.repository_name as project_name,
-                       source.name as source_name, document.title, document.canonical_url,
+                       source.name as source_name, document.title, document.canonical_url, document.version_label, revision.collected_at,
                        chunk.heading_path, chunk.content, document.language, source.trust_tier,
                        1 - (embedding.embedding OPERATOR(public.<=>) cast(:query as public.vector)) as score
                 from knowledge_embedding embedding
                 join knowledge_chunk chunk on chunk.id=embedding.chunk_id
                 join knowledge_document document on document.current_revision_id=chunk.revision_id and document.active=true
+                join knowledge_revision revision on revision.id=document.current_revision_id
                 join knowledge_source source on source.id=document.source_id and source.enabled=true
                 join tracked_project project on project.id=source.project_id
                 left join knowledge_upload upload on upload.source_id=source.id
@@ -242,6 +257,9 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
                   and embedding.status='SUCCEEDED'
                   and (source.source_type <> 'USER_UPLOAD' or :systemAdmin
                        or upload.visibility='WORKSPACE' or upload.uploaded_by=:viewerUserId)
+                  and (not :scoped or
+                       (:onlyUploads and upload.id=any(:selectedUploads)) or
+                       (not :onlyUploads and source.source_type <> 'USER_UPLOAD' and source.project_id=:scopeProjectId))
                   and 1 - (embedding.embedding OPERATOR(public.<=>) cast(:query as public.vector)) >= :minimumScore
                 order by embedding.embedding OPERATOR(public.<=>) cast(:query as public.vector)
                 limit :limit
@@ -250,6 +268,10 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
                 .param("model", model)
                 .param("viewerUserId", viewerUserId)
                 .param("systemAdmin", systemAdmin)
+                .param("scoped", scope != null)
+                .param("onlyUploads", scope != null && !scope.uploadIds().isEmpty())
+                .param("selectedUploads", scope == null ? new UUID[0] : scope.uploadIds().toArray(UUID[]::new))
+                .param("scopeProjectId", scope == null ? workspaceId : scope.projectId())
                 .param("query", query)
                 .param("minimumScore", Math.max(-1.0, Math.min(1.0, minimumScore)))
                 .param("limit", Math.max(1, Math.min(20, limit)))
@@ -258,7 +280,8 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
                         rs.getString("project_name"), rs.getString("source_name"),
                         rs.getString("title"), rs.getString("canonical_url"),
                         rs.getString("heading_path"), rs.getString("content"),
-                        rs.getString("language"), rs.getString("trust_tier"), rs.getDouble("score")))
+                        rs.getString("language"), rs.getString("trust_tier"), rs.getDouble("score"),
+                        rs.getString("version_label"), instant(rs, "collected_at")))
                 .list();
     }
 
@@ -270,6 +293,17 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
     @Override
     public List<SearchResult> searchKeywordVisible(UUID workspaceId, UUID viewerUserId,
                                                    boolean systemAdmin, String query, int limit) {
+        return searchKeywordVisible(workspaceId, viewerUserId, systemAdmin, query, limit, null);
+    }
+
+    @Override
+    public List<SearchResult> searchKeywordScoped(UUID workspaceId, UUID viewerUserId, String query,
+                                                  int limit, SearchScope scope) {
+        return searchKeywordVisible(workspaceId, viewerUserId, false, query, limit, scope);
+    }
+
+    private List<SearchResult> searchKeywordVisible(UUID workspaceId, UUID viewerUserId,
+                                                     boolean systemAdmin, String query, int limit, SearchScope scope) {
         String keywordQuery = keywordExpression(query);
         if (keywordQuery.isBlank()) {
             return List.of();
@@ -277,19 +311,23 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
         return jdbc.sql("""
                 select chunk.id as chunk_id, source.project_id,
                        project.repository_name as project_name, source.name as source_name,
-                       document.title, document.canonical_url, chunk.heading_path, chunk.content,
+                       document.title, document.canonical_url, document.version_label, revision.collected_at, chunk.heading_path, chunk.content,
                        document.language, source.trust_tier,
                        ts_rank_cd(to_tsvector('simple', coalesce(chunk.content, '')),
                            websearch_to_tsquery('simple', :query), 32) as score
                 from knowledge_chunk chunk
                 join knowledge_document document
                   on document.current_revision_id=chunk.revision_id and document.active=true
+                join knowledge_revision revision on revision.id=document.current_revision_id
                 join knowledge_source source on source.id=document.source_id and source.enabled=true
                 join tracked_project project on project.id=source.project_id
                 left join knowledge_upload upload on upload.source_id=source.id
                 where source.workspace_id=:workspaceId
                   and (source.source_type <> 'USER_UPLOAD' or :systemAdmin
                        or upload.visibility='WORKSPACE' or upload.uploaded_by=:viewerUserId)
+                  and (not :scoped or
+                       (:onlyUploads and upload.id=any(:selectedUploads)) or
+                       (not :onlyUploads and source.source_type <> 'USER_UPLOAD' and source.project_id=:scopeProjectId))
                   and to_tsvector('simple', coalesce(chunk.content, ''))
                       @@ websearch_to_tsquery('simple', :query)
                 order by score desc, chunk.id
@@ -298,6 +336,10 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
                 .param("workspaceId", workspaceId)
                 .param("viewerUserId", viewerUserId)
                 .param("systemAdmin", systemAdmin)
+                .param("scoped", scope != null)
+                .param("onlyUploads", scope != null && !scope.uploadIds().isEmpty())
+                .param("selectedUploads", scope == null ? new UUID[0] : scope.uploadIds().toArray(UUID[]::new))
+                .param("scopeProjectId", scope == null ? workspaceId : scope.projectId())
                 .param("query", keywordQuery)
                 .param("limit", Math.max(1, Math.min(50, limit)))
                 .query((rs, rowNum) -> new SearchResult(
@@ -305,7 +347,8 @@ public class JdbcKnowledgeEmbeddingStore implements KnowledgeEmbeddingStore {
                         rs.getString("project_name"), rs.getString("source_name"),
                         rs.getString("title"), rs.getString("canonical_url"),
                         rs.getString("heading_path"), rs.getString("content"),
-                        rs.getString("language"), rs.getString("trust_tier"), rs.getDouble("score")))
+                        rs.getString("language"), rs.getString("trust_tier"), rs.getDouble("score"),
+                        rs.getString("version_label"), instant(rs, "collected_at")))
                 .list();
     }
 

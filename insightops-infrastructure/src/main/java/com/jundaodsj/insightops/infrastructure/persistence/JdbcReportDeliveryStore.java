@@ -116,6 +116,33 @@ public class JdbcReportDeliveryStore implements ReportDeliveryStore {
     }
 
     @Override
+    @Transactional
+    public ReportRecord createResearchReport(ActorContext actor, UUID reportId, String title,
+                                             ResearchSnapshot snapshot, String markdown, Instant now) {
+        // Guard again at the persistence boundary: reports never broaden Run visibility.
+        int inserted = jdbc.sql("""
+                insert into research_report
+                    (id,user_id,workspace_id,title,report_type,period_start,period_end,
+                     item_count,high_risk_count,snapshot,markdown_content,created_at,source_run_id,research_snapshot)
+                select :id,:userId,:workspaceId,:title,'RESEARCH',:start,:end,
+                       1,0,'[]'::jsonb,:markdown,:now,run.id,cast(:snapshot as jsonb)
+                from agent_run run where run.id=:runId and run.workspace_id=:workspaceId
+                    and run.owner_user_id=:userId and run.status='SUCCEEDED'
+                on conflict (workspace_id,user_id,source_run_id) where source_run_id is not null do nothing
+                """).param("id", reportId).param("userId", actor.userId())
+                .param("workspaceId", actor.workspaceId()).param("title", title)
+                .param("start", timestamp(snapshot.startedAt()))
+                .param("end", timestamp(snapshot.finishedAt().isAfter(snapshot.startedAt())
+                        ? snapshot.finishedAt() : snapshot.startedAt().plusMillis(1)))
+                .param("markdown", markdown).param("now", timestamp(now))
+                .param("runId", snapshot.runId()).param("snapshot", write(snapshot)).update();
+        return jdbc.sql(reportSelect() + " where report.source_run_id=:runId and report.workspace_id=:workspaceId and report.user_id=:userId")
+                .param("runId", snapshot.runId()).param("workspaceId", actor.workspaceId())
+                .param("userId", actor.userId()).query(this::report).optional()
+                .orElseThrow(() -> new IllegalArgumentException("Research run is unavailable"));
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public Optional<ReportRecord> findReport(ActorContext actor, UUID reportId) {
         return jdbc.sql(reportSelect() + " where report.id=:id and report.user_id=:userId and report.workspace_id=:workspaceId")
@@ -400,7 +427,14 @@ public class JdbcReportDeliveryStore implements ReportDeliveryStore {
         return new ReportRecord(rs.getObject("id", UUID.class), rs.getString("title"), rs.getString("report_type"),
                 instant(rs, "period_start"), instant(rs, "period_end"), uuidArray(rs.getArray("project_ids")),
                 stringArray(rs.getArray("event_types")), rs.getInt("item_count"), rs.getInt("high_risk_count"),
-                readItems(rs.getString("snapshot")), rs.getString("markdown_content"), instant(rs, "created_at"));
+                readItems(rs.getString("snapshot")), rs.getString("markdown_content"), instant(rs, "created_at"),
+                readResearch(rs.getString("research_snapshot")));
+    }
+
+    private ResearchSnapshot readResearch(String value) {
+        if (value == null) return null;
+        try { return json.readValue(value, ResearchSnapshot.class); }
+        catch (JsonProcessingException exception) { throw new IllegalStateException("Invalid research snapshot", exception); }
     }
 
     private DeliveryChannel channel(ResultSet rs, int row) throws SQLException {

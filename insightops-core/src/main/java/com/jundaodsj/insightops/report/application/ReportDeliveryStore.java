@@ -1,11 +1,13 @@
 package com.jundaodsj.insightops.report.application;
 
 import com.jundaodsj.insightops.identity.application.ActorContext;
+import com.jundaodsj.insightops.conversation.application.ChatCitation;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Map;
 import java.util.UUID;
 
 public interface ReportDeliveryStore {
@@ -18,6 +20,9 @@ public interface ReportDeliveryStore {
     ReportPage listReports(ActorContext actor, int page, int size);
 
     Optional<ReportRecord> findReport(ActorContext actor, UUID reportId);
+
+    ReportRecord createResearchReport(ActorContext actor, UUID reportId, String title,
+                                      ResearchSnapshot snapshot, String markdown, Instant now);
 
     List<DeliveryChannel> listChannels(ActorContext actor);
 
@@ -72,13 +77,23 @@ public interface ReportDeliveryStore {
     record ReportRecord(
             UUID id, String title, String reportType, Instant periodStart, Instant periodEnd,
             List<UUID> projectIds, List<String> eventTypes, int itemCount, int highRiskCount,
-            List<ReportItem> items, String markdown, Instant createdAt) {
+            List<ReportItem> items, String markdown, Instant createdAt, ResearchSnapshot research) {
+        public ReportRecord(UUID id, String title, String reportType, Instant periodStart, Instant periodEnd,
+                            List<UUID> projectIds, List<String> eventTypes, int itemCount, int highRiskCount,
+                            List<ReportItem> items, String markdown, Instant createdAt) {
+            this(id, title, reportType, periodStart, periodEnd, projectIds, eventTypes, itemCount,
+                    highRiskCount, items, markdown, createdAt, null);
+        }
         public ReportRecord {
             projectIds = projectIds == null ? List.of() : List.copyOf(projectIds);
             eventTypes = eventTypes == null ? List.of() : List.copyOf(eventTypes);
             items = items == null ? List.of() : List.copyOf(items);
         }
     }
+
+    record ResearchSnapshot(UUID runId, String question, String answer, Map<String, Object> inputs,
+                            List<ChatCitation> citations, List<String> sources, List<String> uncertainties,
+                            List<Map<String, Object>> evidence, Instant startedAt, Instant finishedAt) { }
 
     record ReportPage(List<ReportRecord> items, int page, int size, long total) { }
 

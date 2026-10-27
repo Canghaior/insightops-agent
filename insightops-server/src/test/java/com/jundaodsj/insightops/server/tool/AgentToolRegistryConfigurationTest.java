@@ -17,6 +17,7 @@ class AgentToolRegistryConfigurationTest {
         assertThat(registry.definitions())
                 .extracting(definition -> definition.name())
                 .containsExactly(
+                        AgentToolNames.GITHUB_ISSUE_READ,
                         AgentToolNames.GITHUB_RELEASE_LIST,
                         AgentToolNames.KNOWLEDGE_HYBRID_SEARCH,
                         AgentToolNames.MCP_READ_CALL,
@@ -42,5 +43,23 @@ class AgentToolRegistryConfigurationTest {
                 .extracting(definition -> definition.name())
                 .doesNotContain(AgentToolNames.KNOWLEDGE_HYBRID_SEARCH)
                 .hasSize(4);
+    }
+
+    @Test
+    void shouldOnlyExposeIssueToolWhenMcpIsConfiguredAndRejectUnexpectedInputs() {
+        AgentToolRegistry disabled = new AgentToolRegistry(
+                AgentToolRegistryConfiguration.definitions(true));
+        assertThat(disabled.availableTo(AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER))
+                .extracting(AgentToolDefinition::name)
+                .doesNotContain(AgentToolNames.GITHUB_ISSUE_READ);
+        AgentToolRegistry enabled = new AgentToolRegistry(
+                AgentToolRegistryConfiguration.definitions(true, true));
+        assertThat(enabled.availableTo(AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER))
+                .extracting(AgentToolDefinition::name)
+                .contains(AgentToolNames.GITHUB_ISSUE_READ, AgentToolNames.GITHUB_RELEASE_LIST);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> enabled.validateInput(
+                AgentToolNames.GITHUB_ISSUE_READ, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER,
+                java.util.Map.of("projectId", "spring-projects/spring-ai", "issueNumber", 0)))
+                .isInstanceOf(AgentToolRegistry.ToolRegistryException.class);
     }
 }

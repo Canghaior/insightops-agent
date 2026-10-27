@@ -36,6 +36,15 @@ public interface KnowledgeEmbeddingStore {
         return searchKeyword(workspaceId, query, limit);
     }
 
+    List<SearchResult> searchScoped(UUID workspaceId, UUID viewerUserId, String model, float[] vector,
+                                    int limit, double minimumScore, SearchScope scope);
+    List<SearchResult> searchKeywordScoped(UUID workspaceId, UUID viewerUserId, String query,
+                                           int limit, SearchScope scope);
+
+    record SearchScope(UUID projectId, List<UUID> uploadIds) {
+        public SearchScope { uploadIds = uploadIds == null ? List.of() : List.copyOf(uploadIds); }
+    }
+
     void recordRetrieval(UUID runId, UUID workspaceId, String query, String mode, int resultCount,
                          long durationMs, List<SearchResult> results, Instant createdAt);
 
@@ -59,6 +68,12 @@ public interface KnowledgeEmbeddingStore {
 
     record SearchResult(UUID chunkId, UUID projectId, String projectName, String sourceName,
                         String title, String canonicalUrl, String headingPath, String content,
-                        String language, String trustTier, double score) {
+                        String language, String trustTier, double score, String versionLabel, Instant collectedAt) {
+        public SearchResult(UUID chunkId, UUID projectId, String projectName, String sourceName,
+                            String title, String canonicalUrl, String headingPath, String content,
+                            String language, String trustTier, double score) {
+            this(chunkId, projectId, projectName, sourceName, title, canonicalUrl, headingPath,
+                    content, language, trustTier, score, null, null);
+        }
     }
 }

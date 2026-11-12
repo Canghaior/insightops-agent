@@ -54,6 +54,12 @@ spring:
           max-retries: ${MODEL_MAX_RETRIES:2}
 
 insightops:
+  public-beta:
+    workspace-budget:
+      daily-token-limit: ${PUBLIC_BETA_DAILY_TOKEN_LIMIT:100000}
+      monthly-token-limit: ${PUBLIC_BETA_MONTHLY_TOKEN_LIMIT:1000000}
+      daily-cost-limit-cny: ${PUBLIC_BETA_DAILY_COST_LIMIT_CNY:2.000000}
+      monthly-cost-limit-cny: ${PUBLIC_BETA_MONTHLY_COST_LIMIT_CNY:20.000000}
   agent:
     orchestration:
       enabled: ${AGENT_ORCHESTRATION_ENABLED:true}

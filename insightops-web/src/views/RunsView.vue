@@ -4,7 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 
 import {
   getRun,
+  getRunEvidenceQualities,
   listRuns,
+  type EvidenceQuality,
   type RunDetail,
   type RunPlanNode,
   type RunStatus,
@@ -13,6 +15,8 @@ import {
 } from '@/api/runs'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import ResearchResultActions from '@/components/ResearchResultActions.vue'
+import RunEvidenceQuality from '@/components/RunEvidenceQuality.vue'
+import EvidenceQualityPanel from '@/components/EvidenceQualityPanel.vue'
 import { researchWarnings } from '@/utils/researchEvidence'
 import { getLatestAgentCheckpoint, pauseAgentRun, type AgentCheckpoint } from '@/api/checkpoints'
 import {
@@ -25,6 +29,8 @@ import {
 const route = useRoute()
 const router = useRouter()
 const runs = ref<RunSummary[]>([])
+const qualities = ref<Record<string, EvidenceQuality>>({})
+const qualityLoadFailed = ref(false)
 const selectedRun = ref<RunDetail | null>(null)
 const loading = ref(false)
 const detailLoading = ref(false)
@@ -56,6 +62,10 @@ async function loadRuns() {
     runs.value = result.items
     total.value = result.total
     totalPages.value = result.totalPages
+    qualities.value = {}
+    qualityLoadFailed.value = false
+    try { qualities.value = await getRunEvidenceQualities(result.items.map(item => item.id)) }
+    catch { qualityLoadFailed.value = true }
   } catch {
     error.value = '执行记录加载失败，请确认后端和数据库已启动。'
   } finally {
@@ -277,10 +287,13 @@ onUnmounted(stopDetailPolling)
         @click="openRun(run.id)"
       >
         <span class="run-identity">
-          <i class="status-pill" :class="`status-${run.status.toLowerCase()}`">{{ run.status }}</i>
+          <i class="status-pill" :class="`status-${run.status.toLowerCase()}`">{{ run.status === 'SUCCEEDED' ? '执行完成' : nodeStatusLabel(run.status) }}</i>
           <code>{{ shortId(run.id) }}</code>
         </span>
-        <span class="run-question">{{ run.question.split('\n')[0] }}</span>
+        <span class="run-question">{{ run.question.split('\n')[0] }}
+          <EvidenceQualityPanel v-if="qualities[run.id]" :quality="qualities[run.id]!" compact />
+          <small v-else>{{ qualityLoadFailed ? '资料完整性检查暂不可用' : '正在检查资料完整性…' }}</small>
+        </span>
         <span class="run-facts">
           <strong>{{ run.modelName ?? '—' }}</strong>
           <small>{{ run.toolRounds }} 工具 · {{ totalTokens(run) }} Token · {{ formatDuration(run.durationMs) }}</small>
@@ -307,7 +320,7 @@ onUnmounted(stopDetailPolling)
         <div v-else-if="detailError" class="run-error">{{ detailError }}</div>
         <template v-else-if="selectedRun">
           <div class="detail-status-line">
-            <i class="status-pill" :class="`status-${selectedRun.status.toLowerCase()}`">{{ selectedRun.status === 'SUCCEEDED' ? '研究已完成' : nodeStatusLabel(selectedRun.status) }}</i>
+            <i class="status-pill" :class="`status-${selectedRun.status.toLowerCase()}`">{{ selectedRun.status === 'SUCCEEDED' ? '执行完成' : nodeStatusLabel(selectedRun.status) }}</i>
             <span>{{ formatDate(selectedRun.startedAt) }} · {{ formatDuration(selectedRun.durationMs) }}</span>
             <button v-if="selectedRun.status === 'RUNNING'" class="secondary-button" :disabled="runActionLoading" @click="requestPause">请求暂停</button>
             <button v-if="selectedRun.status === 'PAUSED' && checkpoint" class="primary-button" @click="resumeCheckpoint">从检查点恢复</button>
@@ -321,6 +334,7 @@ onUnmounted(stopDetailPolling)
             :run-id="selectedRun.id" :can-save="selectedRun.status === 'SUCCEEDED' && !!selectedRun.answer"
             :repeat-url="workflowRun?.templateName === '升级评估（版本范围）' ? `/upgrade-assessment?runId=${selectedRun.id}` : workflowRun ? `/agent-workflows?runId=${selectedRun.id}` : `/chat?question=${encodeURIComponent(selectedRun.question)}`"
           />
+          <RunEvidenceQuality :key="`${selectedRun.id}:${selectedRun.status}`" :run-id="selectedRun.id" />
           <div v-if="researchWarnings(selectedRun.toolCalls, workflowRun?.nodes).length" class="detail-block detail-failure" role="status">
             <h3>资料缺口与待核实事项</h3><ul><li v-for="warning in researchWarnings(selectedRun.toolCalls, workflowRun?.nodes)" :key="warning">{{ warning }}</li></ul>
           </div>

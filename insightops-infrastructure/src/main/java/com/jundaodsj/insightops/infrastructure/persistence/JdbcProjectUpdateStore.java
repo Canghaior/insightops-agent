@@ -480,6 +480,28 @@ public class JdbcProjectUpdateStore implements ProjectUpdateStore {
     }
 
     @Override
+    public java.util.Optional<ResearchEvent> findResearchEvent(ActorContext actor, UUID eventId) {
+        return jdbcClient.sql("""
+                select event.id as event_id, project.id as project_id,
+                       project.repository_owner, project.repository_name, event.event_type,
+                       snapshot.version_tag, event.title, event.summary, snapshot.source_url,
+                       event.occurred_at, snapshot.collected_at
+                from intelligence_event event
+                join tracked_project project on project.id = event.project_id and project.enabled = true
+                join source_snapshot snapshot on snapshot.id = event.snapshot_id
+                join user_project_watch watch on watch.project_id = project.id
+                     and watch.workspace_id = :workspaceId and watch.user_id = :userId and watch.enabled = true
+                where event.id = :eventId and project.workspace_id = :workspaceId
+                """)
+                .param("workspaceId", actor.workspaceId()).param("userId", actor.userId()).param("eventId", eventId)
+                .query((rs, rowNum) -> new ResearchEvent(rs.getObject("event_id", UUID.class),
+                        rs.getObject("project_id", UUID.class), rs.getString("repository_owner"),
+                        rs.getString("repository_name"), rs.getString("event_type"), rs.getString("version_tag"),
+                        rs.getString("title"), rs.getString("summary"), rs.getString("source_url"),
+                        instant(rs, "occurred_at"), instant(rs, "collected_at"))).optional();
+    }
+
+    @Override
     public List<EventEvidence> searchEvents(
             UUID workspaceId, String query, int limit, List<String> eventTypes) {
         String normalized = query == null ? "" : query.replace("\u0000", "").trim();

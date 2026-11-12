@@ -139,3 +139,31 @@ export async function getRun(runId: string): Promise<RunDetail> {
   const response = await apiClient.get<ApiResponse<RunDetail>>(`/runs/${runId}`)
   return response.data.data
 }
+
+export interface EvidenceQuality {
+  status: 'INSUFFICIENT_EVIDENCE' | 'REQUIRES_VALIDATION' | 'REVIEW_READY' | 'NOT_ASSESSED'
+  label: string
+  summary: string
+  reasons: Array<{ code: string; message: string }>
+  compatibilityVerified: boolean
+  assessmentVersion: string
+}
+
+// Deduplicate only concurrent requests; later checks always fetch a fresh assessment.
+const qualityRequests = new Map<string, Promise<EvidenceQuality>>()
+export function getRunEvidenceQuality(runId: string): Promise<EvidenceQuality> {
+  const pending = qualityRequests.get(runId)
+  if (pending) return pending
+  const request = apiClient.get<ApiResponse<EvidenceQuality>>(`/runs/${encodeURIComponent(runId)}/evidence-quality`)
+    .then(response => response.data.data).finally(() => qualityRequests.delete(runId))
+  qualityRequests.set(runId, request)
+  return request
+}
+
+export async function getRunEvidenceQualities(runIds: string[]): Promise<Record<string, EvidenceQuality>> {
+  if (!runIds.length) return {}
+  const response = await apiClient.get<ApiResponse<Record<string, EvidenceQuality>>>('/runs/evidence-quality', {
+    params: { runIds: [...new Set(runIds)].join(',') },
+  })
+  return response.data.data
+}

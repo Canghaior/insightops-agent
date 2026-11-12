@@ -19,6 +19,7 @@ public class ResearchReportService {
     private final ReportDeliveryStore reports;
     private final ObjectMapper json;
     private final String publicUrl;
+    private final ResearchEvidenceQuality evidenceQuality;
 
     public ResearchReportService(AgentRunQuery runs, AgentWorkflowRunStore workflows,
                                  ReportDeliveryStore reports, ObjectMapper json,
@@ -28,6 +29,7 @@ public class ResearchReportService {
         this.reports = reports;
         this.json = json;
         this.publicUrl = publicUrl.replaceAll("/+$", "");
+        this.evidenceQuality = new ResearchEvidenceQuality(json);
     }
 
     public ReportDeliveryStore.ReportRecord create(ActorContext actor, UUID runId) {
@@ -83,7 +85,8 @@ public class ResearchReportService {
         var snapshot = new ReportDeliveryStore.ResearchSnapshot(runId, run.question(), run.answer(), inputs,
                 run.citationDetails(), run.sources(), uncertainties.stream().distinct().toList(), evidence,
                 run.startedAt() == null ? run.createdAt() : run.startedAt(),
-                run.finishedAt() == null ? run.createdAt() : run.finishedAt());
+                run.finishedAt() == null ? run.createdAt() : run.finishedAt(),
+                evidenceQuality.assess(run, inputs, workflow == null ? List.of() : workflow.nodes()));
         String title = workflow != null ? workflow.templateName() : "研究报告 · " + run.question();
         if (inputs.containsKey("targetVersion")) title += " · " + inputs.getOrDefault("projectName", "")
                 + " " + inputs.getOrDefault("currentVersion", "") + " → " + inputs.get("targetVersion");
@@ -94,13 +97,32 @@ public class ResearchReportService {
 
     private String markdown(String title, ReportDeliveryStore.ResearchSnapshot snapshot) {
         StringBuilder result = new StringBuilder("# ").append(title).append("\n\n")
-                .append("研究完成时间：").append(snapshot.finishedAt()).append("\n\n")
-                .append(snapshot.answer()).append("\n\n## 研究输入快照\n\n");
+                .append("研究完成时间：").append(snapshot.finishedAt()).append("\n\n");
+        if (snapshot.evidenceQuality() != null) {
+            var quality = snapshot.evidenceQuality();
+            result.append("## 资料完整性检查\n\n执行状态：已完成。证据状态：").append(quality.label()).append("。\n\n")
+                    .append(quality.summary()).append("\n\n");
+            quality.reasons().forEach(reason -> result.append("- ").append(reason.message()).append('\n'));
+            result.append("\n此检查随报告保存，后续重新研究不会改写本快照。\n\n");
+        }
+        result.append(snapshot.answer());
+        if (snapshot.inputs().get("sourceEvent") instanceof Map<?, ?> event && !event.isEmpty()) {
+            result.append("\n\n## 触发事件\n\n");
+            for (var field : List.of(Map.entry("title", "更新标题"), Map.entry("versionTag", "事件版本"),
+                    Map.entry("occurredAt", "发布时间"), Map.entry("collectedAt", "采集时间"))) {
+                Object value = event.get(field.getKey());
+                if (value != null && !String.valueOf(value).isBlank()) result.append("- ").append(field.getValue()).append("：").append(value).append('\n');
+            }
+            if (event.get("sourceUrl") instanceof String link && link.startsWith("https://"))
+                result.append("- 原始来源：<").append(link).append(">\n");
+            result.append("\n此事件是发起研究的入口；升级结论仍以本报告实际取得的证据为准。\n");
+        }
+        result.append("\n\n## 研究输入快照\n\n");
         snapshot.inputs().forEach((key, value) -> {
             if ("context".equals(key) && value instanceof Map<?, ?> context) {
                 context.forEach((field, fact) -> result.append("- ").append(com.jundaodsj.insightops.server.workflow.ResearchProfiles.label(String.valueOf(field)))
                         .append(": ").append(fact).append('\n'));
-            } else if (!List.of("focus", "projectId", "profileId", "researchTerms").contains(key)
+            } else if (!List.of("focus", "projectId", "profileId", "researchTerms", "eventId", "sourceEvent").contains(key)
                     && !(snapshot.inputs().containsKey("context") && List.of("javaVersion", "springBootVersion").contains(key)))
                 result.append("- ").append(inputLabel(key)).append(": ").append(value).append('\n');
         });

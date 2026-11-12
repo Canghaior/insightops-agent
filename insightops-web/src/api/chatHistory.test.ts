@@ -15,7 +15,7 @@ describe('getChatSessionHistory', () => {
           hasEarlierMessages: false,
           messages: [
             { id: 'm1', role: 'USER', content: '问题', sequenceNo: 1, createdAt: '2026-08-16T00:00:00Z' },
-            { id: 'm2', role: 'ASSISTANT', content: '回答', sequenceNo: 2, createdAt: '2026-08-16T00:00:01Z' },
+            { id: 'm2', role: 'ASSISTANT', content: '回答', runId: 'run-exact-answer', sequenceNo: 2, createdAt: '2026-08-16T00:00:01Z' },
           ],
         },
       },
@@ -24,6 +24,7 @@ describe('getChatSessionHistory', () => {
     const history = await getChatSessionHistory('session-1')
 
     expect(history?.messages.map((message) => message.role)).toEqual(['USER', 'ASSISTANT'])
+    expect(history?.messages[1]?.runId).toBe('run-exact-answer')
     expect(apiClient.get).toHaveBeenCalledWith(
       '/chat/sessions/session-1/messages',
       { params: { limit: 100 } },

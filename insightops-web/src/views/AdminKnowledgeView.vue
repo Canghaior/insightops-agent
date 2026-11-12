@@ -270,6 +270,7 @@ function evaluationStatus(): string {
 
 function failedCase(item: RagEvaluationCase): boolean {
   return !item.answerabilityCorrect || (item.expectedAnswerable && !item.projectHit)
+    || item.answerContract?.passed === false
     || (item.citationPrecision != null && item.citationPrecision < 0.9)
     || (item.faithfulness != null && item.faithfulness < 0.75)
 }
@@ -384,16 +385,20 @@ onBeforeUnmount(() => { if (refreshTimer) globalThis.clearInterval(refreshTimer)
           <span><small>MRR</small><b>{{ percent(evaluation.summary.meanReciprocalRank) }}</b></span>
           <span><small>术语覆盖</small><b>{{ percent(evaluation.summary.termCoverage) }}</b></span>
           <span><small>拒答准确率</small><b>{{ percent(evaluation.summary.noAnswerAccuracy) }}</b></span>
-          <span><small>引用准确率</small><b>{{ percent(evaluation.summary.citationPrecision) }}</b></span>
-          <span><small>引用覆盖率</small><b>{{ percent(evaluation.summary.citationCoverage) }}</b></span>
+          <span><small>引用编号有效率</small><b>{{ percent(evaluation.summary.citationPrecision) }}</b></span>
+          <span><small>来源使用率</small><b>{{ percent(evaluation.summary.citationCoverage) }}</b></span>
           <span><small>忠实度</small><b>{{ percent(evaluation.summary.faithfulness) }}</b></span>
         </div>
         <small>数据集 {{ evaluation.datasetName }} · {{ evaluation.caseCount }} 题 · {{ time(evaluation.finishedAt || evaluation.startedAt) }} · {{ evaluation.summary.modelName || '仅检索' }}</small>
+        <p class="muted-copy">最终答案规则检查：{{ evaluation.cases.filter(item => item.answerContract?.passed).length }} / {{ evaluation.cases.filter(item => item.answerContract).length }} 项通过。只检查必要文本与引用规则；引用编号有效不代表原文支持结论。未生成回答或旧记录未保存规则结果时，不计为已检查。</p>
         <details v-if="evaluation.cases.some(failedCase)" class="evaluation-failures">
           <summary>查看未达标题目（{{ evaluation.cases.filter(failedCase).length }}）</summary>
           <div v-for="item in evaluation.cases.filter(failedCase)" :key="item.caseKey">
             <b>{{ item.caseKey }} · {{ item.question }}</b>
             <span>预期 {{ item.expectedProject || '拒答' }} · 实际 {{ item.predictedAnswerable ? (item.topProjects[0] || '有结果') : '拒答' }}</span>
+            <p v-if="item.answerContract?.missingRequired.length">缺少必要内容：{{ item.answerContract.missingRequired.join('、') }}</p>
+            <p v-if="item.answerContract?.forbiddenMatches.length">出现禁止断言：{{ item.answerContract.forbiddenMatches.join('、') }}</p>
+            <p v-if="item.answerContract?.citationViolations.length">引用规则问题：{{ item.answerContract.citationViolations.join('、') }}</p>
           </div>
         </details>
       </template>

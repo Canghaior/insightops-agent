@@ -1,10 +1,10 @@
 package com.jundaodsj.insightops.infrastructure.identity;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -16,9 +16,17 @@ import java.util.UUID;
 public class PublicBetaRepository {
     private static final long REGISTRATION_LOCK = 724031L;
     private final JdbcClient jdbc;
+    private final PublicBetaBudgetProperties budget;
 
     public PublicBetaRepository(JdbcClient jdbc) {
+        this(jdbc, new PublicBetaBudgetProperties());
+    }
+
+    @Autowired
+    public PublicBetaRepository(JdbcClient jdbc, PublicBetaBudgetProperties budget) {
+        budget.validate();
         this.jdbc = jdbc;
+        this.budget = budget;
     }
 
     public Control control() {
@@ -112,10 +120,11 @@ public class PublicBetaRepository {
                     (workspace_id,enabled,daily_token_limit,daily_cost_limit_cny,
                      monthly_token_limit,monthly_cost_limit_cny,max_concurrent_runs,
                      warning_percent,hard_limit_enabled,version,updated_by,created_at,updated_at)
-                values (:workspaceId,true,9223372036854775807,:cost,
-                        9223372036854775807,:cost,1,80,true,1,:userId,:now,:now)
+                values (:workspaceId,true,:dailyTokens,:dailyCost,
+                        :monthlyTokens,:monthlyCost,1,80,true,1,:userId,:now,:now)
                 """).param("workspaceId", command.workspaceId())
-                .param("cost", new BigDecimal("999999999999.000000"))
+                .param("dailyTokens", budget.getDailyTokenLimit()).param("dailyCost", budget.getDailyCostLimitCny())
+                .param("monthlyTokens", budget.getMonthlyTokenLimit()).param("monthlyCost", budget.getMonthlyCostLimitCny())
                 .param("userId", command.userId()).param("now", timestamp(command.createdAt())).update();
         return new Registration(command.userId(), command.workspaceId(), slot, "PENDING",
                 command.verificationExpiresAt(), null);

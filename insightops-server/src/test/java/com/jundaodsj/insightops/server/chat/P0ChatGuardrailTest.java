@@ -1,16 +1,59 @@
 package com.jundaodsj.insightops.server.chat;
 
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
+import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 class P0ChatGuardrailTest {
 
     private final P0ChatGuardrail guardrail = new P0ChatGuardrail();
+
+    @Test
+    void sharedCitationVerificationAcceptsReleaseEventsAndKnowledgeIncludingPrivateUploads() {
+        assertThatCode(() -> guardrail.verifyCitationSources(List.of(
+                citation("GITHUB_RELEASE", "https://github.com/vuejs/core/releases/tag/v3.5.1"),
+                citation("GITHUB_ISSUE", "https://github.com/vuejs/core/issues/1"),
+                citation("GITHUB_PULL_REQUEST", "https://github.com/vuejs/core/pull/2"),
+                citation("GITHUB_SECURITY_ADVISORY", "https://github.com/vuejs/core/security/advisories/GHSA-example"),
+                citation("OFFICIAL_DOCUMENT", "https://vuejs.org/guide/introduction.html"),
+                citation("USER_UPLOAD", "/api/v1/knowledge/uploads/123e4567-e89b-12d3-a456-426614174000/content#page=3"),
+                citation(null, "https://docs.spring.io/spring-ai/reference/")))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void sharedVerificationDoesNotDowngradeGitHubTypesToTheMoreGeneralKnowledgeRule() {
+        for (ChatCitation citation : List.of(
+                citation("GITHUB_RELEASE", "https://github.com/vuejs/core/issues/1"),
+                citation("GITHUB_RELEASE", "https://docs.spring.io/spring-ai/reference/"),
+                citation("GITHUB_ISSUE", "https://github.com/vuejs/core/releases/tag/v3.5.1"),
+                citation("GITHUB_PULL_REQUEST", "https://github.com.evil.example/vuejs/core/pull/2"),
+                citation("OFFICIAL_DOCUMENT", "http://vuejs.org/guide/introduction.html"),
+                citation("USER_UPLOAD", "/api/v1/knowledge/uploads/not-a-uuid/content"),
+                citation(null, "javascript:alert(1)"),
+                citation("GITHUB_RELEASE", null))) {
+            assertThatThrownBy(() -> guardrail.verifyCitationSources(List.of(citation)))
+                    .isInstanceOf(P0ChatGuardrail.GuardrailViolation.class)
+                    .extracting("code").isEqualTo("OUTPUT_SOURCE_NOT_ALLOWED");
+        }
+    }
+
+    @Test
+    void sharedResearchPromptRetainsTheSameEvidenceAndSecurityBoundaries() {
+        assertThat(guardrail.researchSystemPrompt())
+                .startsWith("你是 InsightOps Agent")
+                .contains("只能基于该证据回答可验证事实", "不得声称查询了系统证据中没有出现的来源")
+                .endsWith(guardrail.systemPolicy());
+    }
+
+    private static ChatCitation citation(String type, String url) {
+        return new ChatCitation("S1", "evidence", url, null, null, type, null);
+    }
 
     @Test
     void shouldNormalizeOrdinaryInputAndAllowSafeWhitespace() {

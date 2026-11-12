@@ -4,6 +4,7 @@ import com.jundaodsj.insightops.agent.application.AgentWorkflowTemplateStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeUploadStore;
 import com.jundaodsj.insightops.project.application.UserProjectWatchStore;
+import com.jundaodsj.insightops.project.application.ProjectUpdateStore;
 import com.jundaodsj.insightops.server.tool.AgentToolRegistryConfiguration;
 import com.jundaodsj.insightops.tool.application.github.GitHubReleaseGateway;
 import com.jundaodsj.insightops.tool.application.registry.*;
@@ -25,9 +26,10 @@ class UpgradeAssessmentServiceTest {
     private final ObjectMapper json = new ObjectMapper();
     private final com.jundaodsj.insightops.agent.application.AgentWorkflowProductStore products = mock(com.jundaodsj.insightops.agent.application.AgentWorkflowProductStore.class);
     private final AgentToolRegistry registry = new AgentToolRegistry(AgentToolRegistryConfiguration.definitions(true, true));
+    private final ProjectUpdateStore updates = mock(ProjectUpdateStore.class);
     private final UpgradeAssessmentService service = new UpgradeAssessmentService(templates, runs, projects, uploads,
             mock(GitHubReleaseGateway.class), registry, json, products, mock(AgentWorkflowProductService.class),
-            mock(com.jundaodsj.insightops.knowledge.application.KnowledgeStore.class));
+            mock(com.jundaodsj.insightops.knowledge.application.KnowledgeStore.class), updates);
 
     @Test void preparesRealReleaseDocsAndIssueToolsWithValidatedArguments() {
         watched();
@@ -90,7 +92,7 @@ class UpgradeAssessmentServiceTest {
     @Test void oldPresetsRemainAvailableAcrossTemplateVersionsWithoutBeingRewritten() {
         UUID oldVersion = UUID.randomUUID(), activeVersion = UUID.randomUUID(), templateId = UUID.randomUUID();
         Instant now = Instant.now();
-        var versions = List.of(new AgentWorkflowTemplateStore.WorkflowVersion(activeVersion, templateId, 2, "ACTIVE", "", "", "{\"profileId\":{}}", actor.userId(), now, now),
+        var versions = List.of(new AgentWorkflowTemplateStore.WorkflowVersion(activeVersion, templateId, 2, "ACTIVE", "", "", "{\"profileId\":{},\"sourceEvent\":{}}", actor.userId(), now, now),
                 new AgentWorkflowTemplateStore.WorkflowVersion(oldVersion, templateId, 1, "ARCHIVED", "", "", "{}", actor.userId(), now, now));
         var template = new AgentWorkflowTemplateStore.WorkflowTemplate(templateId, actor.workspaceId(), UpgradeAssessmentService.NAME, "", "UPGRADE_ASSESSMENT", "ACTIVE", activeVersion, actor.userId(), now, now, versions);
         when(templates.overview(actor.workspaceId())).thenReturn(List.of(template));
@@ -104,6 +106,51 @@ class UpgradeAssessmentServiceTest {
         verify(products, never()).savePreset(any());
     }
     private void watched() { when(projects.list(actor)).thenReturn(List.of(new UserProjectWatchStore.ProjectWatch(projectId, "spring-projects", "spring-ai", "https://github.com/spring-projects/spring-ai", 1, true, Instant.now()))); }
+
+    @Test void resolvesTheExactEventAsUntrustedResearchContextAndRejectsUnavailableOrForeignSources() {
+        UUID eventId = UUID.randomUUID();
+        var event = event(eventId, projectId, "GITHUB_ISSUE", "https://github.com/spring-projects/spring-ai/issues/6620");
+        when(updates.findResearchEvent(actor, eventId)).thenReturn(Optional.of(event));
+        var result = service.researchEvent(actor, eventId);
+        assertThat(result.researchQuestion()).contains(event.sourceUrl(), eventId.toString(), "2026-10-26", "不可信数据", "不能用同名或最新事件替代");
+        assertThat(result.sourceUrl()).isEqualTo(event.sourceUrl());
+        verify(updates).findResearchEvent(actor, eventId);
+        assertThatThrownBy(() -> service.researchEvent(new ActorContext(UUID.randomUUID(), UUID.randomUUID()), eventId)).hasMessageContaining("无权访问");
+        when(updates.findResearchEvent(actor, eventId)).thenReturn(Optional.of(event(eventId, projectId, "GITHUB_ISSUE", "https://github.com/other/repo/issues/6620")));
+        assertThatThrownBy(() -> service.researchEvent(actor, eventId)).hasMessageContaining("来源与登记项目不一致");
+    }
+
+    @Test void storesServerResolvedEventSnapshotAndRevalidatesProjectBeforeLaunch() {
+        watched();
+        UUID eventId = UUID.randomUUID();
+        var event = event(eventId, projectId, "GITHUB_RELEASE", "https://github.com/spring-projects/spring-ai/releases/tag/v1.1.0");
+        when(updates.findResearchEvent(actor, eventId)).thenReturn(Optional.of(event));
+        var template = new AgentWorkflowTemplateStore.WorkflowTemplate(UUID.randomUUID(), actor.workspaceId(), UpgradeAssessmentService.NAME,
+                "", "UPGRADE_ASSESSMENT", "ACTIVE", UUID.randomUUID(), actor.userId(), Instant.now(), Instant.now(), List.of());
+        when(templates.overview(actor.workspaceId())).thenReturn(List.of(template));
+        var command = new UpgradeAssessmentService.Command(projectId, "1.0.0", "1.1.0", "21", "3.4.5", "订单服务",
+                List.of("兼容性"), List.of(), List.of(), UUID.randomUUID(), "java_backend", Map.of(), eventId);
+        service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, "event-trace");
+        var graph = ArgumentCaptor.forClass(String.class);
+        @SuppressWarnings("unchecked") ArgumentCaptor<Map<String, Object>> inputs = ArgumentCaptor.forClass(Map.class);
+        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), anyString(), inputs.capture(), any(), eq("event-trace"));
+        assertThat(inputs.getValue()).containsEntry("eventId", eventId.toString()).containsEntry("currentVersion", "1.0.0").containsEntry("businessProject", "订单服务");
+        var snapshot = (Map<?, ?>) inputs.getValue().get("sourceEvent");
+        assertThat(snapshot.get("sourceUrl")).isEqualTo(event.sourceUrl());
+        assertThat(snapshot.get("eventId")).isEqualTo(eventId.toString());
+        var expressions = new AgentWorkflowExpressionService(json, registry);
+        assertThatCode(() -> expressions.validateInputs(expressions.validateGraph(graph.getValue()), inputs.getValue())).doesNotThrowAnyException();
+        when(updates.findResearchEvent(actor, eventId)).thenReturn(Optional.of(event(eventId, UUID.randomUUID(), "GITHUB_RELEASE", event.sourceUrl())));
+        assertThatThrownBy(() -> service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, "other")).hasMessageContaining("不属于该框架");
+        when(updates.findResearchEvent(actor, eventId)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, "deleted")).hasMessageContaining("无权访问");
+        verifyNoMoreInteractions(runs);
+    }
+
+    private ProjectUpdateStore.ResearchEvent event(UUID id, UUID eventProject, String type, String url) {
+        return new ProjectUpdateStore.ResearchEvent(id, eventProject, "spring-projects", "spring-ai", type, "v1.1.0",
+                "同名更新", "外部摘要，不能代替已核实的事实。", url, Instant.parse("2026-10-26T00:00:00Z"), Instant.parse("2026-10-26T01:00:00Z"));
+    }
     private UpgradeAssessmentService.Command command(List<UUID> files, List<String> issues) {
         return new UpgradeAssessmentService.Command(projectId, "1.0.0", "1.1.0", "21", "3.4.5", "订单服务", List.of("兼容性"), files, issues, UUID.randomUUID());
     }

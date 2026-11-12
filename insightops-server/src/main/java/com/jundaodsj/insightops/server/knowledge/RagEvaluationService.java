@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.server.knowledge;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeEmbeddingStore;
+import com.jundaodsj.insightops.knowledge.application.AnswerContractCheck;
 import com.jundaodsj.insightops.knowledge.application.QualityReviewStore;
 import com.jundaodsj.insightops.knowledge.application.RagEvaluationStore;
 import com.jundaodsj.insightops.model.application.ChatModelGateway;
@@ -99,6 +100,7 @@ public class RagEvaluationService {
                 Double faithfulness = null;
                 String judgeReason = null;
                 String answer = null;
+                AnswerContractCheck answerContract = null;
                 if (generatedCases.contains(item.id())) {
                     List<KnowledgeEmbeddingStore.SearchResult> evidence = response.results().stream()
                             .limit(6).toList();
@@ -108,6 +110,7 @@ public class RagEvaluationService {
                     var citationScore = RagQualityMetrics.citations(answer, evidence.size());
                     citationPrecision = citationScore.precision();
                     citationCoverage = citationScore.coverage();
+                    answerContract = FinalAnswerContractEvaluator.requiredText(answer, item.answerMustInclude(), evidence.size());
                     if (judgeFaithfulness) {
                         FaithfulnessScore judged = judge(model, item.question(), evidence, answer);
                         faithfulness = judged.score();
@@ -119,7 +122,7 @@ public class RagEvaluationService {
                         retrieval.predictedAnswerable(), retrieval.answerabilityCorrect(),
                         retrieval.projectHit(), retrieval.reciprocalRank(), retrieval.termCoverage(),
                         response.mode(), retrieval.topProjects(), retrieval.sourceUrls(),
-                        citationPrecision, citationCoverage, faithfulness, judgeReason, answer);
+                        citationPrecision, citationCoverage, faithfulness, judgeReason, answer, answerContract);
                 store.saveCase(runId, result);
                 results.add(result);
             }

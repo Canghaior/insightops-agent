@@ -1,4 +1,4 @@
-import type { UpgradeInput } from '@/api/upgradeAssessments'
+import type { ResearchEventContext, UpgradeInput } from '@/api/upgradeAssessments'
 
 export function suggestResearchProfile(owner: string, name: string): string {
   const repo = `${owner}/${name}`.toLowerCase()
@@ -19,5 +19,13 @@ export function restoreUpgradeInput(raw: Record<string, unknown>): UpgradeInput 
   return { projectId: text('projectId'), currentVersion: text('currentVersion'), targetVersion: text('targetVersion'),
     businessProject: text('businessProject'), javaVersion: profileId === 'java_backend' ? context.javaVersion ?? '' : '',
     springBootVersion: profileId === 'java_backend' ? context.springBootVersion ?? '' : '',
-    profileId, context, concerns: strings('concerns'), uploadIds: strings('uploadIds'), issueUrls: strings('issueUrls') }
+    profileId, context, concerns: strings('concerns'), uploadIds: strings('uploadIds'), issueUrls: strings('issueUrls'),
+    ...(text('eventId') ? { eventId: text('eventId') } : {}) }
+}
+
+/** Only apply an event resolved by the authenticated server, never raw URL query metadata. */
+export function applyReleaseEvent(input: UpgradeInput, event: ResearchEventContext): UpgradeInput {
+  if (event.eventType !== 'GITHUB_RELEASE' || !event.versionTag) throw new Error('该事件没有可用于升级评估的 Release 版本。')
+  if (input.projectId && input.projectId !== event.projectId) throw new Error('请选择与本次 Release 相同框架的业务配置。')
+  return { ...input, context: { ...input.context }, projectId: event.projectId, targetVersion: event.versionTag, eventId: event.eventId }
 }

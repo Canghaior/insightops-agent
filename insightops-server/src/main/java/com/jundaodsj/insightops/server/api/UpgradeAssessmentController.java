@@ -30,6 +30,11 @@ public class UpgradeAssessmentController {
     public ApiResponse<?> presets(HttpServletRequest request) {
         return response(request, service.presets(CurrentAccount.actor(request)));
     }
+    @GetMapping("/events/{eventId}")
+    public ApiResponse<?> researchEvent(@PathVariable UUID eventId, HttpServletRequest request) {
+        try { return response(request, service.researchEvent(CurrentAccount.actor(request), eventId)); }
+        catch (IllegalArgumentException exception) { throw new ResponseStatusException(HttpStatus.NOT_FOUND, exception.getMessage()); }
+    }
     @PostMapping("/presets")
     public ApiResponse<?> savePreset(@RequestBody SavePreset input, HttpServletRequest request) {
         try { return response(request, service.savePreset(CurrentAccount.actor(request), input.name(), input.input())); }

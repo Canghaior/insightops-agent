@@ -43,7 +43,7 @@ class P32PublicBetaDatabaseGateTest {
         dataSource = new DriverManagerDataSource(schemaUrl, username, password);
         var result = Flyway.configure().dataSource(dataSource).schemas(SCHEMA).defaultSchema(SCHEMA)
                 .createSchemas(true).locations("classpath:db/migration").load().migrate();
-        assertThat(result.migrationsExecuted).isEqualTo(41);
+        assertThat(result.migrationsExecuted).isEqualTo(43);
     }
 
     @AfterAll
@@ -74,6 +74,14 @@ class P32PublicBetaDatabaseGateTest {
                 .param("id", workspaceId).query(Integer.class).single()).isEqualTo(1);
         assertThat(jdbc.sql("select hard_limit_enabled from agent_cost_policy where workspace_id=:id")
                 .param("id", workspaceId).query(Boolean.class).single()).isTrue();
+        assertThat(jdbc.sql("select daily_token_limit from agent_cost_policy where workspace_id=:id")
+                .param("id", workspaceId).query(Long.class).single()).isEqualTo(100_000L);
+        assertThat(jdbc.sql("select monthly_token_limit from agent_cost_policy where workspace_id=:id")
+                .param("id", workspaceId).query(Long.class).single()).isEqualTo(1_000_000L);
+        assertThat(jdbc.sql("select daily_cost_limit_cny from agent_cost_policy where workspace_id=:id")
+                .param("id", workspaceId).query(java.math.BigDecimal.class).single()).isEqualByComparingTo("2");
+        assertThat(jdbc.sql("select monthly_cost_limit_cny from agent_cost_policy where workspace_id=:id")
+                .param("id", workspaceId).query(java.math.BigDecimal.class).single()).isEqualByComparingTo("20");
 
         identities.saveToken(UUID.randomUUID(), userId, "EMAIL_VERIFICATION", "a".repeat(64),
                 now.plusSeconds(3600), now);

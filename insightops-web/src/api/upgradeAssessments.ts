@@ -10,7 +10,13 @@ export interface ResearchProfile {
 }
 export interface SourceCoverage {
   projectId: string; name: string; sourceType: string; url: string; status: string; documentCount: number; lastSyncAt: string | null
-  enabled: boolean; consecutiveFailures: number
+  enabled: boolean; consecutiveFailures: number; nextSyncAt?: string | null; syncIntervalHours?: number; chunkCount?: number
+}
+
+export interface ResearchEventContext {
+  eventId: string; projectId: string; repositoryOwner: string; repositoryName: string
+  eventType: string; versionTag: string | null; title: string; sourceUrl: string
+  occurredAt: string | null; collectedAt: string | null; researchQuestion: string
 }
 
 export interface UpgradeSetup {
@@ -21,6 +27,10 @@ export interface UpgradeInput {
   projectId: string; currentVersion: string; targetVersion: string; businessProject: string
   javaVersion: string; springBootVersion: string; concerns: string[]; uploadIds: string[]; issueUrls: string[]
   profileId: string; context: Record<string, string>
+  eventId?: string
+}
+export async function getResearchEvent(eventId: string): Promise<ResearchEventContext> {
+  return (await apiClient.get(`/upgrade-assessments/events/${encodeURIComponent(eventId)}`)).data.data
 }
 export async function listUpgradePresets(): Promise<WorkflowPreset[]> {
   return (await apiClient.get('/upgrade-assessments/presets')).data.data

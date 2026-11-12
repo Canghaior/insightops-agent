@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import {
   cancelChat,
@@ -17,10 +17,14 @@ import {
   type ConversationSummary,
 } from '@/api/conversations'
 import MarkdownContent from '@/components/MarkdownContent.vue'
+import ResearchResultActions from '@/components/ResearchResultActions.vue'
+import RunEvidenceQuality from '@/components/RunEvidenceQuality.vue'
+import { getResearchEvent, type ResearchEventContext } from '@/api/upgradeAssessments'
 import { submitAnswerFeedback, submitCitationFeedback } from '@/api/feedback'
 import { sourceHeading } from '@/utils/sourceClassification'
 
 const route = useRoute()
+const router = useRouter()
 
 type StreamStatus = 'idle' | 'connecting' | 'queued' | 'streaming' | 'paused' | 'completed' | 'cancelled' | 'error'
 
@@ -94,6 +98,9 @@ const sessionsLoading = ref(false)
 const messages = ref<ConversationMessage[]>([])
 const historyLoading = ref(false)
 const historyError = ref('')
+const researchEvent = ref<ResearchEventContext | null>(null)
+const eventLoading = ref(false), eventError = ref('')
+let eventRequestVersion = 0
 const resumeCheckpointId = ref(
   typeof route.query.checkpoint === 'string' ? route.query.checkpoint : '',
 )
@@ -111,7 +118,8 @@ const suggestions = [
 
 const streaming = computed(() => status.value === 'connecting'
   || status.value === 'queued' || status.value === 'streaming')
-const canSend = computed(() => question.value.trim().length > 0 && !streaming.value)
+const composerLimit = computed(() => Math.max(0, 4000 - (researchEvent.value ? researchEvent.value.researchQuestion.length + 16 : 0)))
+const canSend = computed(() => question.value.trim().length > 0 && !streaming.value && !eventLoading.value && !eventError.value)
 
 const errorLabels: Record<string, string> = {
   REQUEST_REJECTED: '模型拒绝了本次请求，请检查输入或模型配置。',
@@ -144,15 +152,16 @@ const errorLabels: Record<string, string> = {
 }
 
 function statusLabel(message: ConversationMessage) {
-  if (message.orchestration?.nodes.some((item) => item.status === 'RUNNING')) return 'Agent 正在并行执行任务图'
-  if (message.toolExecutions?.some((item) => item.status === 'running')) return 'Agent 正在执行工具'
-  if (message.ragRunning) return '正在检索官方知识库'
-  if (message.toolRunning) return '正在执行工具'
+  const activeTool = message.toolExecutions?.find(item => item.status === 'running')
+  if (activeTool?.name === 'github_release_list') return '正在查找版本变化'
+  if (activeTool?.name === 'github_issue_read') return '正在核对已知问题'
+  if (message.ragRunning || activeTool?.name === 'knowledge_hybrid_search') return '正在核对相关资料'
+  if (activeTool || message.toolRunning || message.orchestration?.nodes.some(item => item.status === 'RUNNING')) return '正在收集研究依据'
   return ({
     idle: '历史回答',
-    connecting: '正在创建 Agent Run',
-    queued: '已入队，Agent 正在处理',
-    streaming: '正在生成',
+    connecting: '正在准备研究',
+    queued: '研究已排队，请稍候',
+    streaming: '正在整理研究结论',
     completed: '生成完成',
     paused: '已暂停并保存检查点',
     cancelled: '已停止生成',
@@ -381,6 +390,9 @@ async function loadConversations(selectLatest = false) {
 
 async function selectConversation(conversation: ConversationSummary) {
   if (streaming.value) return
+  if (researchEvent.value || eventLoading.value || eventError.value) question.value = ''
+  detachResearchEvent()
+  consumeEntryRoute()
   const requestVersion = ++historyRequestVersion
   if (conversation.status === 'ARCHIVED') {
     await updateConversation(conversation.id, { archived: false })
@@ -427,6 +439,8 @@ async function loadHistory(selectedSessionId: string, requestVersion: number) {
       createdAt: message.createdAt,
       sources: message.citations ?? [],
       citations: message.citationDetails ?? [],
+      runId: message.runId ?? undefined,
+      status: message.role === 'ASSISTANT' ? 'completed' : undefined,
     }))
     hasEarlierMessages.value = history.hasEarlierMessages
     await scrollConversationToBottom()
@@ -451,11 +465,18 @@ function startNewConversation() {
   messages.value = []
   historyError.value = ''
   hasEarlierMessages.value = false
+  researchEvent.value = null
+  eventError.value = ''
+  eventLoading.value = false
+  eventRequestVersion += 1
 }
 
 async function sendQuestion() {
-  const message = question.value.trim()
-  if (!message || streaming.value) return
+  if (!canSend.value) return
+  const userQuestion = question.value.trim()
+  const message = researchEvent.value
+    ? `${researchEvent.value.researchQuestion}\n用户补充问题：\n${userQuestion}` : userQuestion
+  if (message.length > 4000) { historyError.value = '问题与事件背景合计超过长度限制，请缩短补充问题。'; return }
 
   const userMessageId = `local-user-${globalThis.crypto.randomUUID()}`
   currentAssistantId = `local-assistant-${globalThis.crypto.randomUUID()}`
@@ -491,6 +512,7 @@ async function sendQuestion() {
     await streamChat(
       message, handleEvent, streamController.signal, sessionId.value, checkpointId || undefined,
       (acceptedRunId) => {
+        consumeEntryRoute()
         runId.value = acceptedRunId
         const assistant = currentAssistant()
         if (assistant) assistant.runId = acceptedRunId
@@ -513,7 +535,7 @@ async function sendQuestion() {
       messages.value = messages.value.filter(
         (item) => item.id !== userMessageId && item.id !== currentAssistantId,
       )
-      question.value = message
+      question.value = userQuestion
       historyError.value = error instanceof Error
         ? error.message : '无法连接聊天服务，请稍后重试。'
     } else if (assistant) {
@@ -622,12 +644,52 @@ async function rateCitation(message: ConversationMessage, citation: ChatCitation
   } catch { message.feedbackError = '引用反馈提交失败，请稍后重试。' }
 }
 
+async function applyResearchEntry() {
+  if (streaming.value) return
+  const eventId = typeof route.query.eventId === 'string' ? route.query.eventId : ''
+  const entryQuestion = typeof route.query.question === 'string' ? route.query.question : ''
+  if (!eventId && !entryQuestion) return
+  startNewConversation()
+  if (!eventId) { question.value = entryQuestion.slice(0, 4000); return }
+  const version = ++eventRequestVersion
+  eventLoading.value = true
+  try {
+    const event = await getResearchEvent(eventId)
+    if (version !== eventRequestVersion) return
+    researchEvent.value = event
+    question.value = '请分析这条事件对我的项目可能有哪些影响，以及需要进一步验证什么。'
+  } catch {
+    if (version === eventRequestVersion) eventError.value = '无法读取这条事件，可能已取消关注或没有访问权限。请返回更新列表重新选择。'
+  } finally {
+    if (version === eventRequestVersion) eventLoading.value = false
+  }
+}
+function detachResearchEvent() {
+  eventRequestVersion += 1
+  researchEvent.value = null
+  eventLoading.value = false
+  eventError.value = ''
+}
+function consumeEntryRoute() {
+  if (!route.query.eventId && !route.query.question && !route.query.checkpoint) return
+  const query = { ...route.query }
+  delete query.eventId; delete query.question; delete query.checkpoint
+  void router.replace({ query })
+}
+function newConversation() {
+  if (streaming.value) return
+  startNewConversation()
+  consumeEntryRoute()
+}
+watch(() => [route.query.eventId, route.query.question], () => { void applyResearchEntry() })
 onMounted(() => {
-  if (typeof route.query.question === 'string') question.value = route.query.question.slice(0, 4000)
-  void loadConversations(true)
+  const hasEntry = typeof route.query.eventId === 'string' || typeof route.query.question === 'string'
+  void loadConversations(!hasEntry)
+  void applyResearchEntry()
 })
 
 onBeforeUnmount(() => {
+  eventRequestVersion += 1
   streamController?.abort()
 })
 </script>
@@ -637,7 +699,7 @@ onBeforeUnmount(() => {
     <aside class="conversation-sidebar">
       <div class="conversation-sidebar-heading">
         <div><span class="eyebrow">我的会话</span><strong>{{ conversations.length }}</strong></div>
-        <button class="secondary-button" :disabled="streaming" @click="startNewConversation">＋ 新建</button>
+        <button class="secondary-button" :disabled="streaming" @click="newConversation">＋ 新建</button>
       </div>
       <p v-if="sessionsLoading" class="subtle">加载中…</p>
       <div class="conversation-list">
@@ -660,9 +722,16 @@ onBeforeUnmount(() => {
       </div>
     </aside>
     <div class="research-main">
-      <span class="eyebrow">研究问答 · P1 个人工作区</span>
-      <h2>与 DeepSeek 多轮实时问答</h2>
-      <p class="lead">Agent Run 在后台持久执行；刷新、断网或实例切换后会从事件序号继续，只有点击“停止生成”才会取消任务。</p>
+      <span class="eyebrow">研究问答</span>
+      <h2>围绕你的项目继续研究</h2>
+      <p class="lead">描述问题与项目背景，核对来源后保存研究报告。连接中断会尝试恢复；需要结束任务时点击“停止生成”。</p>
+      <p v-if="eventLoading" role="status">正在读取所选事件…</p>
+      <p v-if="eventError" role="alert" class="stream-error">{{ eventError }} <RouterLink to="/updates">返回更新列表</RouterLink></p>
+      <div v-if="researchEvent" class="scope-warning">
+        <strong>本次研究事件：{{ researchEvent.title }}</strong>
+        <p><a :href="researchEvent.sourceUrl" target="_blank" rel="noreferrer">查看事件原文</a> · 发送时会同时携带准确事件背景与下方补充问题。</p>
+        <button class="text-button" :disabled="streaming" @click="detachResearchEvent(); consumeEntryRoute()">改为独立问题</button>
+      </div>
 
       <div v-if="resumeCheckpointId" class="checkpoint-resume-banner">
         <strong>准备从检查点 {{ resumeCheckpointId.slice(0, 8) }} 恢复</strong>
@@ -674,7 +743,7 @@ onBeforeUnmount(() => {
         <button
           v-for="item in suggestions"
           :key="item"
-          :disabled="streaming"
+          :disabled="streaming || eventLoading || !!researchEvent"
           @click="question = item"
         >
           {{ item }}
@@ -707,52 +776,57 @@ onBeforeUnmount(() => {
                 </span>
                 <h3>DeepSeek 回答</h3>
               </div>
-              <code v-if="message.runId">Run {{ message.runId.slice(0, 8) }}</code>
             </header>
 
-            <section v-if="message.orchestration" class="orchestration-panel">
-              <header>
-                <span>任务图 · v{{ message.orchestration.version }}</span>
-                <strong>并行上限 {{ message.orchestration.maxParallelism }}</strong>
-              </header>
-              <div class="orchestration-budget">
-                <div><i :style="{ width: `${budgetPercentage(message)}%` }"></i></div>
-                <span>
-                  节点 {{ message.orchestration.usedNodes }}/{{ message.orchestration.maxNodes }} ·
-                  工具尝试 {{ message.orchestration.usedToolAttempts }} ·
-                  规划 Token {{ message.orchestration.usedModelTokens }} ·
-                  ¥{{ message.orchestration.estimatedCostCny.toFixed(6) }}
-                </span>
-              </div>
-              <div v-for="[round, nodes] in planRounds(message)" :key="round" class="plan-layer">
-                <b>第 {{ round }} 层</b>
-                <span
-                  v-for="node in nodes"
-                  :key="node.id"
-                  class="plan-node"
-                  :class="`is-${node.status.toLowerCase()}`"
-                  :title="errorLabels[node.errorCode ?? ''] ?? node.errorCode ?? node.dependencyIds.join(', ')"
-                >{{ toolExecutionLabel({ id: node.id, name: node.name, status: 'running' }) }} · {{ planNodeStatus(node.status) }}</span>
-              </div>
-              <p v-if="message.orchestration.exhaustionReason" class="budget-warning">
-                已安全停止新增节点：{{ message.orchestration.exhaustionReason }}
-              </p>
-            </section>
+            <RunEvidenceQuality v-if="message.status === 'completed' && message.runId" :run-id="message.runId" />
+            <details v-if="message.orchestration || message.toolExecutions?.length" class="research-diagnostics">
+              <summary>查看资料获取过程</summary>
+              <section v-if="message.orchestration" class="orchestration-panel">
+                <header>
+                  <span>任务图 · v{{ message.orchestration.version }}</span>
+                  <strong>并行上限 {{ message.orchestration.maxParallelism }}</strong>
+                </header>
+                <div class="orchestration-budget">
+                  <div><i :style="{ width: `${budgetPercentage(message)}%` }"></i></div>
+                  <span>
+                    节点 {{ message.orchestration.usedNodes }}/{{ message.orchestration.maxNodes }} ·
+                    工具尝试 {{ message.orchestration.usedToolAttempts }} ·
+                    规划 Token {{ message.orchestration.usedModelTokens }} ·
+                    ¥{{ message.orchestration.estimatedCostCny.toFixed(6) }}
+                  </span>
+                </div>
+                <div v-for="[round, nodes] in planRounds(message)" :key="round" class="plan-layer">
+                  <b>第 {{ round }} 层</b>
+                  <span
+                    v-for="node in nodes"
+                    :key="node.id"
+                    class="plan-node"
+                    :class="`is-${node.status.toLowerCase()}`"
+                    :title="errorLabels[node.errorCode ?? ''] ?? node.errorCode ?? node.dependencyIds.join(', ')"
+                  >{{ toolExecutionLabel({ id: node.id, name: node.name, status: 'running' }) }} · {{ planNodeStatus(node.status) }}</span>
+                </div>
+                <p v-if="message.orchestration.exhaustionReason" class="budget-warning">
+                  已安全停止新增节点：{{ message.orchestration.exhaustionReason }}
+                </p>
+              </section>
 
-            <div
-              v-for="execution in message.toolExecutions"
-              :key="execution.id"
-              class="tool-summary"
-              :class="{ 'is-running': execution.status === 'running', 'is-failed': execution.status === 'failed' }"
-            >
-              <span>Agent 工具 · {{ toolExecutionLabel(execution) }}</span>
-              <strong>{{ toolExecutionResult(execution) }}</strong>
-              <RouterLink v-if="execution.status === 'waiting_approval'" class="text-button" to="/approvals">前往审批</RouterLink>
-            </div>
+              <div
+                v-for="execution in message.toolExecutions"
+                :key="execution.id"
+                class="tool-summary"
+                :class="{ 'is-running': execution.status === 'running', 'is-failed': execution.status === 'failed' }"
+              >
+                <span>Agent 工具 · {{ toolExecutionLabel(execution) }}</span>
+                <strong>{{ toolExecutionResult(execution) }}</strong>
+                <RouterLink v-if="execution.status === 'waiting_approval'" class="text-button" to="/approvals">前往审批</RouterLink>
+              </div>
+            </details>
+            <p v-if="message.toolExecutions?.some(item => item.status === 'waiting_approval')" class="scope-warning">有操作需要你确认。<RouterLink to="/approvals">查看待确认操作</RouterLink></p>
+            <p v-if="message.toolExecutions?.some(item => item.status === 'failed')" class="scope-warning">部分资料未能获取，请结合证据检查与资料缺口阅读结果。</p>
 
             <div v-if="message.status === 'paused' && message.checkpointId" class="checkpoint-resume-banner">
-              <strong>Run 已在安全点暂停</strong>
-              <span>检查点 {{ message.checkpointId.slice(0, 8) }} 已持久化，可在执行记录中恢复。</span>
+              <strong>研究已暂停并保存进度</strong>
+              <span>可以查看已获取的资料并继续研究。</span>
               <RouterLink class="text-button" :to="`/runs/${message.runId}`">查看检查点</RouterLink>
             </div>
             <p v-if="message.errorMessage" class="stream-error">{{ message.errorMessage }}</p>
@@ -764,12 +838,17 @@ onBeforeUnmount(() => {
               <span v-if="message.status === 'streaming'" class="stream-cursor"></span>
             </div>
 
-            <dl v-if="message.status === 'completed' && message.usage" class="stream-metrics">
-              <div><dt>模型</dt><dd>{{ message.model || 'deepseek-v4-flash' }}</dd></div>
-              <div><dt>首 Token</dt><dd>{{ message.timeToFirstTokenMs ?? '—' }} ms</dd></div>
-              <div><dt>总耗时</dt><dd>{{ message.durationMs ?? '—' }} ms</dd></div>
-              <div><dt>Token</dt><dd>{{ message.usage.totalTokens ?? '—' }}</dd></div>
-            </dl>
+            <ResearchResultActions v-if="message.status === 'completed' && message.runId" :run-id="message.runId" :can-save="!!message.content.trim()" />
+            <details v-if="message.usage || message.traceId" class="research-diagnostics">
+              <summary>运行用量与诊断信息</summary>
+              <dl v-if="message.status === 'completed' && message.usage" class="stream-metrics">
+                <div><dt>模型</dt><dd>{{ message.model || 'deepseek-v4-flash' }}</dd></div>
+                <div><dt>首 Token</dt><dd>{{ message.timeToFirstTokenMs ?? '—' }} ms</dd></div>
+                <div><dt>总耗时</dt><dd>{{ message.durationMs ?? '—' }} ms</dd></div>
+                <div><dt>Token</dt><dd>{{ message.usage.totalTokens ?? '—' }}</dd></div>
+              </dl>
+              <p v-if="message.traceId" class="trace-line">运行 {{ message.runId }} · TraceId {{ message.traceId }}</p>
+            </details>
             <div v-if="message.status === 'completed' && message.runId" class="feedback-row">
               <span>{{ message.feedback ? '感谢反馈' : '这个回答有帮助吗？' }}</span>
               <button class="secondary-button" :disabled="!!message.feedback" @click="rateAnswer(message, true)">有帮助</button>
@@ -777,7 +856,7 @@ onBeforeUnmount(() => {
               <small v-if="message.feedbackError" class="stream-error">{{ message.feedbackError }}</small>
             </div>
             <div v-if="message.citations?.length" class="source-list">
-              <strong>结构化官方引用</strong>
+              <strong>研究引用与资料来源</strong>
               <div class="citation-grid">
                 <div
                   v-for="citation in message.citations"
@@ -785,9 +864,9 @@ onBeforeUnmount(() => {
                   class="citation-feedback-card"
                 >
                   <a class="citation-card" :href="citation.url" target="_blank" rel="noreferrer">
-                    <span>{{ citation.label }} · {{ citation.sourceType === 'GITHUB_RELEASE' ? 'Release' : citation.sourceType === 'GITHUB_ISSUE' ? 'Issue' : citation.project }}</span>
+                    <span>{{ citation.label }} · {{ citation.sourceType === 'USER_UPLOAD' ? '上传资料 · 需访问权限' : citation.sourceType === 'GITHUB_RELEASE' ? 'Release' : citation.sourceType === 'GITHUB_ISSUE' ? 'Issue' : citation.project }}</span>
                     <b>{{ citation.heading || citation.title }}</b>
-                    <small v-if="citation.score != null">融合得分 {{ citation.score.toFixed(3) }}</small>
+                    <small>资料版本：{{ citation.versionLabel || '未标注' }}<template v-if="citation.fetchedAt"> · 获取于 {{ formatMessageTime(citation.fetchedAt) }}</template></small>
                   </a>
                   <div v-if="message.runId" class="citation-feedback"><button class="text-button" @click="rateCitation(message, citation, true)">引用正确</button><button class="text-button" @click="rateCitation(message, citation, false)">引用有误</button></div>
                 </div>
@@ -799,9 +878,6 @@ onBeforeUnmount(() => {
                 {{ source }}
               </a>
             </div>
-            <p v-if="message.traceId" class="trace-line">
-              会话 · {{ sessionId.slice(0, 8) }} · TraceId · {{ message.traceId }}
-            </p>
           </article>
         </template>
       </section>
@@ -815,15 +891,15 @@ onBeforeUnmount(() => {
         <textarea
           v-model="question"
           rows="4"
-          maxlength="4000"
-          placeholder="输入关于 Spring AI、LangChain4j、Dify 或 Agent 架构的问题…"
+          :maxlength="composerLimit"
+          placeholder="描述你关注的框架、版本和需要确认的问题…"
           @keydown.enter="handleComposerEnter"
         ></textarea>
         <div>
-          <span>{{ question.length }}/4000 · Enter 发送 · Shift + Enter 换行 · 90 秒超时</span>
+          <span>{{ question.length }}/{{ composerLimit }} · Enter 发送 · Shift + Enter 换行</span>
           <div class="composer-actions">
             <button v-if="streaming" class="stop-button" @click="stopGeneration">停止生成</button>
-            <button v-else-if="sessionId" class="secondary-button" @click="startNewConversation">新建会话</button>
+            <button v-else-if="sessionId" class="secondary-button" @click="newConversation">新建会话</button>
             <button v-if="!streaming" class="send-button" :disabled="!canSend" @click="sendQuestion">发送问题</button>
           </div>
         </div>
@@ -831,27 +907,24 @@ onBeforeUnmount(() => {
     </div>
 
     <aside class="evidence-panel">
-      <span class="eyebrow">本步能力</span>
-      <h3>多轮 Agent、可追溯、可回看</h3>
+      <span class="eyebrow">研究提示</span>
+      <h3>让结论更贴近你的项目</h3>
       <ul>
-        <li>发送后立即清空输入框</li>
-        <li>多轮问题与回答连续展示</li>
-        <li>刷新后从数据库恢复会话</li>
-        <li>复用最近 12 条消息理解追问</li>
-        <li>DeepSeek Function Calling 动态选择只读工具</li>
-        <li>分层 DAG、多只读工具受限并行与写操作独占</li>
-        <li>节点、工具尝试、Token 与成本预算治理</li>
-        <li>bge-m3 + PostgreSQL 全文混合检索</li>
-        <li>RRF 融合排序与结构化引用卡片</li>
-        <li>DeepSeek 基于证据生成并附官方来源</li>
-        <li>记录 Token、耗时与 TraceId</li>
-        <li>跨实例租约接管与安全点恢复</li>
-        <li>断线自动续传；用户显式取消才终止</li>
+        <li>写明框架、当前版本和目标版本。</li>
+        <li>补充运行环境、使用的能力与关注风险。</li>
+        <li>打开关键引用，核对资料版本与原文。</li>
+        <li>将有价值的结果保存或下载，供之后复核。</li>
       </ul>
       <div class="scope-warning">
-        <strong>当前限制</strong>
-        <p>知识库当前覆盖 Spring AI、LangChain4j 与 Dify 官方文档；未命中的问题会明确证据不足或降级为普通问答。</p>
+        <strong>准备评估一次升级？</strong>
+        <p><RouterLink to="/upgrade-assessment">使用升级评估表单</RouterLink>，可以保存项目背景供下次复用。资料覆盖取决于当前工作区实际采集的内容。</p>
+        <p><RouterLink to="/getting-started">查看使用指南与试用反馈</RouterLink></p>
       </div>
     </aside>
   </section>
 </template>
+
+<style scoped>
+.research-diagnostics { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.research-diagnostics summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+</style>

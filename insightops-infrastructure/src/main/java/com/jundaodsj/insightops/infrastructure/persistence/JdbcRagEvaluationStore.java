@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.infrastructure.persistence;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.knowledge.application.RagEvaluationStore;
+import com.jundaodsj.insightops.knowledge.application.AnswerContractCheck;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,13 +52,13 @@ public class JdbcRagEvaluationStore implements RagEvaluationStore {
                      predicted_answerable, answerability_correct, project_hit, reciprocal_rank,
                      term_coverage, retrieval_mode, top_projects, source_urls,
                      citation_precision, citation_coverage, faithfulness, judge_reason,
-                     generated_answer)
+                     generated_answer, answer_contract)
                 values
                     (:id, :runId, :caseKey, :question, :expectedAnswerable, :expectedProject,
                      :predictedAnswerable, :answerabilityCorrect, :projectHit, :reciprocalRank,
                      :termCoverage, :retrievalMode, cast(:topProjects as jsonb),
                      cast(:sourceUrls as jsonb), :citationPrecision, :citationCoverage,
-                     :faithfulness, :judgeReason, :generatedAnswer)
+                     :faithfulness, :judgeReason, :generatedAnswer, cast(:answerContract as jsonb))
                 """)
                 .param("id", UUID.randomUUID())
                 .param("runId", runId)
@@ -78,6 +79,7 @@ public class JdbcRagEvaluationStore implements RagEvaluationStore {
                 .param("faithfulness", result.faithfulness())
                 .param("judgeReason", result.judgeReason())
                 .param("generatedAnswer", result.generatedAnswer())
+                .param("answerContract", result.answerContract() == null ? null : write(result.answerContract()))
                 .update();
     }
 
@@ -163,7 +165,7 @@ public class JdbcRagEvaluationStore implements RagEvaluationStore {
                         number(rs.getObject("citation_precision")),
                         number(rs.getObject("citation_coverage")),
                         number(rs.getObject("faithfulness")), rs.getString("judge_reason"),
-                        rs.getString("generated_answer")))
+                        rs.getString("generated_answer"), readAnswerContract(rs.getString("answer_contract"))))
                 .list();
         Summary summary = row.recallAtK() == null ? null : new Summary(
                 row.recallAtK(), row.mrr(), row.projectHitRate(), row.termCoverage(),
@@ -182,6 +184,11 @@ public class JdbcRagEvaluationStore implements RagEvaluationStore {
     private List<String> readList(String value) {
         try { return value == null ? List.of() : json.readValue(value, new TypeReference<List<String>>() { }); }
         catch (Exception exception) { throw new IllegalStateException("Unable to read RAG evaluation JSON", exception); }
+    }
+
+    private AnswerContractCheck readAnswerContract(String value) {
+        try { return value == null ? null : json.readValue(value, AnswerContractCheck.class); }
+        catch (Exception exception) { throw new IllegalStateException("Unable to read final-answer contract", exception); }
     }
 
     private static OffsetDateTime timestamp(Instant value) {

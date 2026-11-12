@@ -1,5 +1,7 @@
 # InsightOps Agent
 
+2026-11-09 产品优化：事件可直接进入升级评估，研究执行状态与资料完整性分开；聊天可直接保存/下载报告，刷新后保留准确运行关联。常用导航收敛，新增 `/getting-started` 使用指南与自愿试用记录。实现范围、迁移及真实用户验证安排见 [本轮优化与验收](docs/manual/product-optimization-2026-11-09.md)。以下章节保留各阶段实现背景，实际部署能力以当前配置与验证结果为准。
+
 [![CI](https://github.com/Canghaior/insightops-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Canghaior/insightops-agent/actions/workflows/ci.yml)
 
 ## 生产化部署（P1.5 方案二）

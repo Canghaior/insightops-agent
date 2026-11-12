@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { saveRunReport, downloadReport } from '@/api/reports'
-const props = defineProps<{ runId: string; canSave: boolean; repeatUrl: string }>()
+const props = defineProps<{ runId: string; canSave: boolean; repeatUrl?: string }>()
 const busy = ref(false), reportId = ref(''), message = ref(''), failed = ref(false)
 watch(() => props.runId, () => { reportId.value = ''; message.value = '' })
 async function deliver(format?: 'md' | 'pdf') {
@@ -31,7 +31,8 @@ async function deliver(format?: 'md' | 'pdf') {
       <button v-if="canSave" class="secondary-button" :disabled="busy" @click="deliver()">{{ reportId ? '研究报告已保存' : '保存为研究报告' }}</button>
       <button v-if="canSave" class="primary-button" :disabled="busy" @click="deliver('md')">下载 Markdown</button>
       <button v-if="canSave" class="secondary-button" :disabled="busy" @click="deliver('pdf')">下载 PDF</button>
-      <RouterLink class="secondary-button" :to="repeatUrl">使用当前参数再次研究</RouterLink>
+      <RouterLink v-if="repeatUrl" class="secondary-button" :to="repeatUrl">使用当前参数再次研究</RouterLink>
+      <RouterLink class="secondary-button" :to="`/runs/${runId}`">查看研究详情</RouterLink>
     </div>
     <p v-if="busy" role="status">正在准备报告…</p>
     <p v-if="message" :role="failed ? 'alert' : 'status'">{{ message }} <RouterLink v-if="reportId" to="/reports">查看报告</RouterLink></p>

@@ -100,7 +100,7 @@ public class JdbcChatRunStore implements ChatRunStore {
 
         List<HistoryMessage> latestFirst = jdbcClient.sql("""
                         select id, role, content, citations, citation_details,
-                               sequence_no, created_at
+                               sequence_no, created_at, run_id
                         from conversation_message
                         where session_id = :sessionId
                         order by sequence_no desc
@@ -115,7 +115,8 @@ public class JdbcChatRunStore implements ChatRunStore {
                         citations(resultSet.getString("citations")),
                         citationDetails(resultSet.getString("citation_details")),
                         resultSet.getInt("sequence_no"),
-                        resultSet.getObject("created_at", OffsetDateTime.class).toInstant()))
+                        resultSet.getObject("created_at", OffsetDateTime.class).toInstant(),
+                        resultSet.getObject("run_id", UUID.class)))
                 .list();
         boolean hasEarlierMessages = latestFirst.size() > limit;
         List<HistoryMessage> messages = new java.util.ArrayList<>(
@@ -269,14 +270,15 @@ public class JdbcChatRunStore implements ChatRunStore {
         jdbcClient.sql("""
                         insert into conversation_message
                             (id, session_id, role, content, citations, citation_details,
-                             sequence_no, created_at)
+                             sequence_no, created_at, run_id)
                         values
                             (:id, :sessionId, 'ASSISTANT', :content,
                              cast(:citations as jsonb), cast(:citationDetails as jsonb),
-                             :sequenceNo, :createdAt)
+                             :sequenceNo, :createdAt, :runId)
                         """)
                 .param("id", UUID.randomUUID())
                 .param("sessionId", run.sessionId())
+                .param("runId", runId)
                 .param("content", answer)
                 .param("citations", jsonArray(citations))
                 .param("citationDetails", json(citationDetails))

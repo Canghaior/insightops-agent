@@ -1,0 +1,10 @@
+[
+  {"id":"java-complete-still-needs-project-tests","project":"Spring AI","current":"1.0.0","target":"1.1.1","versions":["1.0.0","1.1.1"],"expectedStatus":"REQUIRES_VALIDATION","expectedCode":"PROJECT_VALIDATION_REQUIRED"},
+  {"id":"vue-release-failed-answer-generated","project":"Vue","current":"3.4.38","target":"3.5.1","versions":["3.5.1"],"toolStatus":"FAILED","expectedStatus":"INSUFFICIENT_EVIDENCE","expectedCode":"TOOL_INCOMPLETE"},
+  {"id":"java-missing-target-release","project":"Spring AI","current":"1.0.0","target":"1.1.1","versions":["1.1.1"],"targetFound":false,"expectedStatus":"INSUFFICIENT_EVIDENCE","expectedCode":"VERSION_ENDPOINT_MISSING"},
+  {"id":"vue-later-fix-is-not-target-fix","project":"Vue","current":"3.4.38","target":"3.5.1","versions":["3.5.1","3.5.2"],"expectedStatus":"REQUIRES_VALIDATION","expectedCode":"LATER_VERSION_SOURCE"},
+  {"id":"java-other-maintenance-branch","project":"Spring AI","current":"1.0.0","target":"1.2.0","versions":["1.2.0","1.1.9"],"expectedStatus":"REQUIRES_VALIDATION","expectedCode":"OTHER_BRANCH_SOURCE"},
+  {"id":"vue-current-docs-cannot-prove-target","project":"Vue","current":"3.4.38","target":"3.5.1","versions":["未标注","3.5"],"expectedStatus":"INSUFFICIENT_EVIDENCE","expectedCode":"TARGET_VERSION_EVIDENCE_MISSING"},
+  {"id":"java-scan-limit","project":"Spring AI","current":"1.0.0","target":"1.1.1","versions":["1.1.1"],"truncated":true,"expectedStatus":"INSUFFICIENT_EVIDENCE","expectedCode":"VERSION_RANGE_INCOMPLETE"},
+  {"id":"vue-unsupported-citation","project":"Vue","current":"3.4.38","target":"3.5.1","versions":["3.5.1"],"answer":"升级结论 [S99]","expectedStatus":"INSUFFICIENT_EVIDENCE","expectedCode":"UNKNOWN_CITATION"}
+]

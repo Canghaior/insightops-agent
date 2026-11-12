@@ -35,7 +35,17 @@ public interface RagEvaluationStore {
             Double citationCoverage,
             Double faithfulness,
             String judgeReason,
-            String generatedAnswer) {
+            String generatedAnswer,
+            AnswerContractCheck answerContract) {
+        public CaseResult(String caseKey, String question, boolean expectedAnswerable, String expectedProject,
+                          boolean predictedAnswerable, boolean answerabilityCorrect, boolean projectHit,
+                          double reciprocalRank, double termCoverage, String retrievalMode, List<String> topProjects,
+                          List<String> sourceUrls, Double citationPrecision, Double citationCoverage,
+                          Double faithfulness, String judgeReason, String generatedAnswer) {
+            this(caseKey, question, expectedAnswerable, expectedProject, predictedAnswerable, answerabilityCorrect,
+                    projectHit, reciprocalRank, termCoverage, retrievalMode, topProjects, sourceUrls,
+                    citationPrecision, citationCoverage, faithfulness, judgeReason, generatedAnswer, null);
+        }
     }
 
     record Summary(

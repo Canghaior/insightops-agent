@@ -13,6 +13,7 @@ const router = createRouter({
     { path: '/invitation', name: 'invitation', component: () => import('@/views/InvitationView.vue'), meta: { public: true } },
     { path: '/legal/:document(terms|privacy|acceptable-use)', name: 'legal', component: () => import('@/views/LegalDocumentView.vue'), meta: { public: true } },
     { path: '/', name: 'dashboard', component: () => import('@/views/DashboardView.vue') },
+    { path: '/getting-started', name: 'getting-started', component: () => import('@/views/GettingStartedView.vue') },
     { path: '/projects', name: 'projects', component: () => import('@/views/ProjectsView.vue') },
     { path: '/updates', name: 'updates', component: () => import('@/views/UpdatesView.vue') },
     { path: '/watch-rules', name: 'watch-rules', component: () => import('@/views/WatchRulesView.vue') },

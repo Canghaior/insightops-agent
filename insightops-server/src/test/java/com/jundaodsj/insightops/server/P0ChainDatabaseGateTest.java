@@ -153,7 +153,7 @@ class P0ChainDatabaseGateTest {
                 .locations("classpath:db/migration")
                 .load()
                 .migrate();
-        assertThat(migration.migrationsExecuted).isEqualTo(41);
+        assertThat(migration.migrationsExecuted).isEqualTo(43);
 
         jdbcClient = JdbcClient.create(dataSource);
         assertThat(jdbcClient.sql("select count(*) from tracked_project")
@@ -248,6 +248,18 @@ class P0ChainDatabaseGateTest {
         });
         UUID eventId = updates.items().stream().filter(update -> update.versionTag().equals("v2.1.0"))
                 .findFirst().orElseThrow().eventId();
+        assertThat(projectUpdateStore.findResearchEvent(ACTOR, eventId)).hasValueSatisfying(event -> {
+            assertThat(event.projectId()).isEqualTo(spring.id());
+            assertThat(event.versionTag()).isEqualTo("v2.1.0");
+            assertThat(event.sourceUrl()).isEqualTo(release.url());
+            assertThat(event.collectedAt()).isBetween(now.minusMillis(1), now.plusMillis(1));
+        });
+        assertThat(projectUpdateStore.findResearchEvent(new ActorContext(ACTOR.userId(), UUID.randomUUID()), eventId)).isEmpty();
+        assertThat(projectUpdateStore.findResearchEvent(new ActorContext(UUID.randomUUID(), ACTOR.workspaceId()), eventId)).isEmpty();
+        projectWatchStore.setEnabled(secondActor, spring.id(), false, now);
+        assertThat(projectUpdateStore.findResearchEvent(secondActor, eventId)).isEmpty();
+        projectWatchStore.setEnabled(secondActor, spring.id(), true, now);
+        assertThat(projectUpdateStore.findResearchEvent(secondActor, eventId)).isPresent();
         assertThat(projectUpdateStore.markRead(ACTOR, eventId, now.plusSeconds(1))).isTrue();
         assertThat(projectUpdateStore.unreadCount(ACTOR)).isEqualTo(actorUnreadBefore);
         assertThat(projectUpdateStore.unreadCount(secondActor)).isEqualTo(secondUnreadBefore + 1);
@@ -458,6 +470,8 @@ class P0ChainDatabaseGateTest {
         assertThat(history.messages())
                 .extracting(ChatRunStore.HistoryMessage::sequenceNo)
                 .containsExactly(1, 2);
+        assertThat(history.messages().getFirst().runId()).isNull();
+        assertThat(history.messages().getLast().runId()).isEqualTo(summary.id());
     }
 
     @Test

@@ -85,4 +85,26 @@ class ResearchReportsDatabaseGateTest {
         assertThat(embeddings.searchScoped(WORKSPACE, USER, "scope-test", vector, 10, 0.1, selected)).extracting(KnowledgeEmbeddingStore.SearchResult::chunkId).containsExactly(chunk);
         assertThat(embeddings.searchScoped(WORKSPACE, UUID.randomUUID(), "scope-test", vector, 10, 0.1, selected)).isEmpty();
     }
+
+    @Test void finalAnswerContractsRoundTripWhileHistoricalUnassessedCasesRemainNull() {
+        var store = new JdbcRagEvaluationStore(jdbc, JSON);
+        Instant now = Instant.now();
+        UUID evaluation = UUID.randomUUID();
+        store.start(evaluation, WORKSPACE, "answer-contract-fixture", 1, 1, now);
+        var check = new AnswerContractCheck(false, List.of("目标版本限定"), List.of(), List.of("FACT_CITATION_MISMATCH:修复"),
+                "REQUIRED_TEXT_AND_CITATION_ASSOCIATION", false);
+        store.saveCase(evaluation, new RagEvaluationStore.CaseResult("final-answer", "question", true, "vue", true, true, true,
+                1, 1, "FIXTURE", List.of("vue"), List.of("https://example.com/fixed-evidence"), 1.0, 1.0, null, null, "错误答案 [S1]", check));
+        store.complete(evaluation, new RagEvaluationStore.Summary(1, 1, 1, 1, 1, 1.0, 1.0, null, false, "fixture"), now);
+        var loaded = store.latest(WORKSPACE).orElseThrow();
+        assertThat(loaded.summary().passed()).isFalse();
+        assertThat(loaded.cases().getFirst().answerContract()).isEqualTo(check);
+        assertThat(store.latest(UUID.randomUUID())).isEmpty();
+
+        UUID legacy = UUID.randomUUID();
+        store.start(legacy, WORKSPACE, "historical-fixture", 1, 0, now.plusSeconds(1));
+        store.saveCase(legacy, new RagEvaluationStore.CaseResult("old", "old question", true, "vue", true, true, true,
+                1, 1, "FIXTURE", List.of(), List.of(), null, null, null, null, null));
+        assertThat(store.latest(WORKSPACE).orElseThrow().cases().getFirst().answerContract()).isNull();
+    }
 }

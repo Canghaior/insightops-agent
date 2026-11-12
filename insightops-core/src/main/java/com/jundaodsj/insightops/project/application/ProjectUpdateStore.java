@@ -7,6 +7,7 @@ import com.jundaodsj.insightops.tool.application.github.GitHubProjectEvent;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface ProjectUpdateStore {
@@ -53,6 +54,11 @@ public interface ProjectUpdateStore {
     default List<EventEvidence> searchEvents(
             UUID workspaceId, String query, int limit, List<String> eventTypes) {
         return List.of();
+    }
+
+    /** Resolves a selected event within the actor's workspace and enabled watches. */
+    default Optional<ResearchEvent> findResearchEvent(ActorContext actor, UUID eventId) {
+        return Optional.empty();
     }
 
     long unreadCount(ActorContext actor);
@@ -152,4 +158,8 @@ public interface ProjectUpdateStore {
             int importance,
             Instant occurredAt) {
     }
+
+    record ResearchEvent(UUID eventId, UUID projectId, String repositoryOwner, String repositoryName,
+                         String eventType, String versionTag, String title, String summary, String sourceUrl,
+                         Instant occurredAt, Instant collectedAt) { }
 }

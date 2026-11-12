@@ -93,7 +93,14 @@ public interface ReportDeliveryStore {
 
     record ResearchSnapshot(UUID runId, String question, String answer, Map<String, Object> inputs,
                             List<ChatCitation> citations, List<String> sources, List<String> uncertainties,
-                            List<Map<String, Object>> evidence, Instant startedAt, Instant finishedAt) { }
+                            List<Map<String, Object>> evidence, Instant startedAt, Instant finishedAt,
+                            ResearchEvidenceAssessment evidenceQuality) {
+        public ResearchSnapshot(UUID runId, String question, String answer, Map<String, Object> inputs,
+                                List<ChatCitation> citations, List<String> sources, List<String> uncertainties,
+                                List<Map<String, Object>> evidence, Instant startedAt, Instant finishedAt) {
+            this(runId, question, answer, inputs, citations, sources, uncertainties, evidence, startedAt, finishedAt, null);
+        }
+    }
 
     record ReportPage(List<ReportRecord> items, int page, int size, long total) { }
 

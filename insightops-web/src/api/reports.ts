@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import type { EvidenceQuality } from './runs'
 
 export type ReportEventType = 'GITHUB_RELEASE' | 'GITHUB_ISSUE' | 'GITHUB_PULL_REQUEST' | 'GITHUB_SECURITY_ADVISORY'
 export type DeliveryStatus = 'PENDING' | 'RUNNING' | 'RETRY_WAIT' | 'SUCCEEDED' | 'FAILED'
@@ -15,7 +16,7 @@ export interface ResearchReport {
   id: string; title: string; reportType: string; periodStart: string; periodEnd: string
   projectIds: string[]; eventTypes: ReportEventType[]; itemCount: number; highRiskCount: number
   items: ReportItem[]; markdown: string; createdAt: string
-  research?: { sources: string[] } | null
+  research?: { sources: string[]; evidenceQuality?: EvidenceQuality | null; inputs?: { sourceEvent?: { sourceUrl?: string } } } | null
 }
 export interface ReportPage { items: ResearchReport[]; page: number; size: number; total: number }
 export interface CreateReportCommand {

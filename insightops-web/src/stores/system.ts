@@ -14,7 +14,8 @@ export const useSystemStore = defineStore('system', () => {
     try {
       status.value = await getSystemStatus()
     } catch {
-      error.value = '后端暂未启动'
+      status.value = null
+      error.value = '暂时无法读取能力状态，请稍后重试。'
     } finally {
       loading.value = false
     }

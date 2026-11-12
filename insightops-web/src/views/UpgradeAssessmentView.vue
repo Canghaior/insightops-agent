@@ -2,9 +2,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
-import { launchUpgrade, setupUpgrade, upgradeVersions, listUpgradePresets, saveUpgradePreset, type SourceCoverage, type UpgradeInput, type UpgradeSetup } from '@/api/upgradeAssessments'
+import { getResearchEvent, launchUpgrade, setupUpgrade, upgradeVersions, listUpgradePresets, saveUpgradePreset, type ResearchEventContext, type SourceCoverage, type UpgradeInput, type UpgradeSetup } from '@/api/upgradeAssessments'
 import type { WorkflowPreset } from '@/api/workflowProducts'
-import { restoreUpgradeInput, suggestResearchProfile } from '@/utils/upgradeProfiles'
+import { applyReleaseEvent, restoreUpgradeInput, suggestResearchProfile } from '@/utils/upgradeProfiles'
 import { getWorkflowRun } from '@/api/workflowRuns'
 
 const router = useRouter(), route = useRoute()
@@ -14,11 +14,16 @@ const form = ref<UpgradeInput>({ projectId: '', currentVersion: '', targetVersio
   javaVersion: '', springBootVersion: '', concerns: ['API 与配置变更', '依赖与兼容性'], uploadIds: [], issueUrls: [], profileId: 'java_backend', context: {} })
 const issuesText = ref(''), presets = ref<WorkflowPreset[]>([]), selectedPreset = ref(''), presetName = ref('')
 const versions = ref<string[]>([]), versionLoading = ref(false), versionNote = ref('')
+const sourceEvent = ref<ResearchEventContext | null>(null), eventFailed = ref(false), refreshingSources = ref(false)
+const availablePresets = computed(() => sourceEvent.value ? presets.value.filter(item => item.values.projectId === sourceEvent.value?.projectId) : presets.value)
 const selectedProject = computed(() => setup.value?.projects.find(item => item.id === form.value.projectId))
 const selectedProfile = computed(() => setup.value?.profiles.find(item => item.id === form.value.profileId))
 const concernOptions = computed(() => [...new Set([...(selectedProfile.value?.concerns ?? []), ...form.value.concerns])])
 const projectSources = computed(() => setup.value?.sources.filter(item => item.projectId === form.value.projectId) ?? [])
 const usableUploads = computed(() => setup.value?.uploads.filter(item => item.status === 'SUCCEEDED') ?? [])
+const unfinishedUploads = computed(() => setup.value?.uploads.filter(item => item.projectId === form.value.projectId && item.status !== 'SUCCEEDED') ?? [])
+const collectedSources = computed(() => projectSources.value.filter(item => item.documentCount > 0))
+const attentionSources = computed(() => projectSources.value.filter(item => !item.enabled || item.status === 'FAILED' || item.consecutiveFailures > 0 || isRefreshDue(item)))
 let versionRequest = 0, lastPayload = '', requestId = globalThis.crypto.randomUUID()
 
 function sourceState(source: SourceCoverage) {
@@ -27,6 +32,21 @@ function sourceState(source: SourceCoverage) {
   if (source.status === 'FAILED') return '采集失败'
   if (source.status === 'RETRY_WAIT' && source.consecutiveFailures > 0) return '上次采集失败，等待重试'
   return source.documentCount ? `已有 ${source.documentCount} 篇文档` : '尚未采集完成'
+}
+function isRefreshDue(source: SourceCoverage) {
+  return source.enabled && source.status !== 'RUNNING' && !!source.nextSyncAt && new Date(source.nextSyncAt).getTime() < Date.now()
+}
+async function refreshSources() {
+  refreshingSources.value = true
+  try { setup.value = await setupUpgrade(); notice.value = '资料状态已刷新。本操作不会触发采集或发起研究。' }
+  catch (reason) { error.value = message(reason, '资料状态刷新失败，请重试。') }
+  finally { refreshingSources.value = false }
+}
+async function detachEvent() {
+  sourceEvent.value = null; delete form.value.eventId
+  const query = { ...route.query }; delete query.eventId
+  await router.replace({ query })
+  notice.value = '已改为独立升级评估；当前业务背景与版本仍保留。'
 }
 function message(reason: unknown, fallback: string) {
   return isAxiosError(reason) ? String(reason.response?.data?.detail ?? reason.response?.data?.message ?? fallback) : fallback
@@ -77,8 +97,13 @@ function restore(raw: Record<string, unknown>) {
   }
 }
 function applyPreset() {
-  const preset = presets.value.find(item => item.id === selectedPreset.value)
-  if (preset) { restore(preset.values); presetName.value = preset.name }
+  const preset = availablePresets.value.find(item => item.id === selectedPreset.value)
+  if (preset) {
+    restore(preset.values)
+    if (sourceEvent.value) form.value = applyReleaseEvent(form.value, sourceEvent.value)
+    presetName.value = preset.name
+    notice.value = sourceEvent.value ? '已保留业务配置中的当前版本与背景，目标版本采用本次 Release。' : '已载入业务配置。'
+  }
 }
 async function savePreset() {
   if (!setup.value || !presetName.value.trim()) { error.value = '请填写配置名称，例如「支付团队 · 订单服务」。'; return }
@@ -111,6 +136,25 @@ onMounted(async () => {
       if (previous.inputs && typeof previous.inputs === 'object') restore(previous.inputs as Record<string, unknown>)
       notice.value ||= '已带入上次研究参数。修改目标版本后即可再次研究；会重新查询 Release 和知识库，文档采集时间可在引用中查看。'
     }
+    if (typeof route.query.eventId === 'string') {
+      try {
+        sourceEvent.value = await getResearchEvent(route.query.eventId)
+        if (!setup.value.projects.some(item => item.id === sourceEvent.value?.projectId)) throw new Error('事件对应的框架已不在关注列表。')
+        if (typeof route.query.runId !== 'string') {
+          form.value.projectId = sourceEvent.value.projectId
+          if (selectedProject.value) form.value.profileId = suggestResearchProfile(selectedProject.value.owner, selectedProject.value.name)
+          changeProfile()
+        }
+        form.value = applyReleaseEvent(form.value, sourceEvent.value)
+        notice.value = '已从所选事件带入框架与目标版本。选择已有业务配置可保留当前版本和项目背景。'
+      } catch (reason) {
+        eventFailed.value = true
+        error.value = message(reason, reason instanceof Error ? reason.message : '所选事件无法读取，请从更新列表重新选择。')
+      }
+    } else if (form.value.eventId) {
+      try { sourceEvent.value = await getResearchEvent(form.value.eventId) }
+      catch { delete form.value.eventId; notice.value += ' 原触发事件已不可访问，本次作为独立研究；历史报告仍保留原来源快照。' }
+    }
   } catch (reason) { error.value = message(reason, '升级评估加载失败，请刷新重试。') }
   finally { loading.value = false }
 })
@@ -124,10 +168,18 @@ onMounted(async () => {
     <p v-if="notice" role="status" class="notice">{{ notice }}</p>
     <div v-if="loading" class="panel padded">正在加载关注框架与保存的配置…</div>
     <div v-else-if="setup && !setup.projects.length" class="panel padded">还没有关注的框架。<RouterLink to="/projects">先选择关注项目</RouterLink>，再回来填写版本。</div>
+    <div v-else-if="eventFailed" class="panel padded"><p>无法确认所选事件，尚未发起研究。</p><RouterLink to="/updates">返回更新列表重新选择</RouterLink></div>
     <form v-else-if="setup" class="panel padded" @submit.prevent="launch">
-      <div v-if="presets.length" class="saved-config"><label for="saved-config">复用项目配置</label><select id="saved-config" v-model="selectedPreset" @change="applyPreset"><option value="">新建一次研究</option><option v-for="preset in presets" :key="preset.id" :value="preset.id">{{ preset.name }}</option></select></div>
+      <div v-if="sourceEvent" class="event-context">
+        <strong>本次研究来自：{{ sourceEvent.repositoryOwner }}/{{ sourceEvent.repositoryName }} · {{ sourceEvent.versionTag }}</strong>
+        <a :href="sourceEvent.sourceUrl" target="_blank" rel="noreferrer">{{ sourceEvent.title }} · 打开原始事件</a>
+        <p class="hint">发布：{{ sourceEvent.occurredAt ? new Date(sourceEvent.occurredAt).toLocaleString('zh-CN') : '未记录' }} · 采集：{{ sourceEvent.collectedAt ? new Date(sourceEvent.collectedAt).toLocaleString('zh-CN') : '未记录' }}。来源线索会随研究保存；其内容仍须核实。</p>
+        <p v-if="form.targetVersion !== sourceEvent.versionTag" class="hint">目标版本已修改；原事件仅作为本次研究的触发来源，不代表其变更均适用于新目标版本。</p>
+        <button type="button" class="text-button" @click="detachEvent">改为独立研究</button>
+      </div>
+      <div v-if="availablePresets.length" class="saved-config"><label for="saved-config">复用项目配置{{ sourceEvent ? '（当前框架）' : '' }}</label><select id="saved-config" v-model="selectedPreset" @change="applyPreset"><option value="">新建一次研究</option><option v-for="preset in availablePresets" :key="preset.id" :value="preset.id">{{ preset.name }}</option></select></div>
       <div class="fields">
-        <label>关注的框架 <span>必填</span><select v-model="form.projectId" required @change="changeProject"><option value="" disabled>选择框架</option><option v-for="project in setup.projects" :key="project.id" :value="project.id">{{ project.owner }}/{{ project.name }}</option></select></label>
+        <label>关注的框架 <span>必填</span><select v-model="form.projectId" required :disabled="!!sourceEvent" @change="changeProject"><option value="" disabled>选择框架</option><option v-for="project in setup.projects" :key="project.id" :value="project.id">{{ project.owner }}/{{ project.name }}</option></select></label>
         <label>业务项目 <span>选填</span><input v-model="form.businessProject" maxlength="120" placeholder="例如：订单服务 / 智能客服" /></label>
         <label>当前版本 <span>必填</span><input v-model="form.currentVersion" maxlength="80" placeholder="例如：1.0.0" required /></label>
         <label>目标版本 <span>必填</span><input v-model="form.targetVersion" list="release-versions" maxlength="80" placeholder="选择已发布版本或手动填写" required /><datalist id="release-versions"><option v-for="version in versions" :key="version" :value="version" /></datalist></label>
@@ -147,12 +199,21 @@ onMounted(async () => {
         <label>已知 Issue 链接（每行一个，最多 3 个）<textarea v-model="issuesText" rows="3" :placeholder="`https://github.com/${selectedProject?.owner ?? 'owner'}/${selectedProject?.name ?? 'repo'}/issues/123`" /></label>
         <p class="hint">读取所选框架 Issue 的正文与状态。评论和相关 PR 不在本次读取范围内。{{ setup.issueAvailable ? '' : '当前 Issue 工具不可用。' }}</p>
       </details>
-      <details class="optional">
-        <summary>查看已配置的官方资料（{{ projectSources.length }} 个来源）</summary>
-        <p class="hint">Release 会在研究时获取；以下文档来自知识库。采集成功不等于已经覆盖当前与目标版本。</p>
-        <p v-if="!projectSources.length" class="notice">尚未配置该框架的官方文档来源，评估可能缺少迁移依据。</p>
-        <ul v-else class="source-list"><li v-for="source in projectSources" :key="source.url"><a :href="source.url" target="_blank" rel="noreferrer">{{ source.name }}</a><span>{{ sourceState(source) }} · {{ source.lastSyncAt ? `最近采集：${new Date(source.lastSyncAt).toLocaleString('zh-CN')}` : '尚无成功采集时间' }}</span></li></ul>
-      </details>
+      <section class="source-readiness" aria-labelledby="source-readiness-title">
+        <div class="readiness-heading"><h3 id="source-readiness-title">研究前的资料准备</h3><button type="button" class="text-button" :disabled="refreshingSources" @click="refreshSources">{{ refreshingSources ? '刷新中…' : '刷新资料状态' }}</button></div>
+        <ul class="readiness-checklist">
+          <li><strong>版本信息</strong><span>发起研究时重新读取官方 Release；{{ versionLoading ? '版本列表读取中' : versions.length ? `当前可选 ${versions.length} 个近期版本` : '当前未取得版本列表，可手动填写' }}。</span></li>
+          <li><strong>官方文档</strong><span>{{ collectedSources.length }} / {{ projectSources.length }} 个来源已有文档{{ attentionSources.length ? `；${attentionSources.length} 个来源有同步提醒` : '' }}。</span></li>
+          <li><strong>版本适用性</strong><span>尚未核实文档是否覆盖 {{ form.currentVersion || '当前版本' }} → {{ form.targetVersion || '目标版本' }}。文档数量和采集成功不能替代版本匹配；研究结果会列出资料缺口。</span></li>
+          <li><strong>业务资料</strong><span>已选择 {{ form.uploadIds.length }} 份；{{ unfinishedUploads.length ? `${unfinishedUploads.length} 份当前框架资料尚未处理完成，暂不参与检索。` : '可在上方补充背景与资料。' }}没有执行你的业务构建或测试。</span></li>
+        </ul>
+        <p v-if="unfinishedUploads.length" class="hint"><RouterLink to="/knowledge-files">查看资料处理状态</RouterLink>，处理完成后刷新本页资料状态再勾选。</p>
+        <details class="optional">
+          <summary>查看 {{ projectSources.length }} 个来源的同步详情</summary>
+          <p v-if="!projectSources.length" class="notice">尚未配置该框架的官方文档来源，评估可能缺少迁移依据。</p>
+          <ul v-else class="source-list"><li v-for="source in projectSources" :key="source.url"><a :href="source.url" target="_blank" rel="noreferrer">{{ source.name }}</a><span>{{ sourceState(source) }} · {{ source.lastSyncAt ? `最近采集：${new Date(source.lastSyncAt).toLocaleString('zh-CN')}` : '尚无成功采集时间' }}{{ isRefreshDue(source) ? ' · 已到计划刷新时间，等待同步' : '' }}</span></li></ul>
+        </details>
+      </section>
       <details class="optional"><summary>保存配置，下次复用</summary><p class="hint">配置按当前工作区和你的账号保存；用团队与业务项目命名，方便切换。</p><div class="save-config"><input v-model="presetName" maxlength="80" aria-label="配置名称" placeholder="例如：支付团队 · 订单服务" /><button type="button" class="secondary-button" :disabled="saving" @click="savePreset">{{ saving ? '保存中…' : '保存当前配置' }}</button></div></details>
       <div class="launch-row"><button class="primary-button" type="submit" :disabled="busy">{{ busy ? '正在启动研究…' : '开始升级评估' }}</button><p class="hint">输出主要变化、可能影响、验证清单、来源依据和尚未确认事项。资料不足会明确提示。</p></div>
     </form>
@@ -161,6 +222,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.event-context,.source-readiness{margin-bottom:24px;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel-soft)}.event-context>a{display:block;margin-top:8px;color:var(--accent);overflow-wrap:anywhere}.readiness-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.readiness-heading h3{margin:0}.readiness-checklist{padding:0;list-style:none;display:grid;gap:12px}.readiness-checklist li{display:grid;grid-template-columns:90px 1fr;gap:12px;line-height:1.6}.readiness-checklist span{color:var(--muted)}
 input:not([type="checkbox"]),select,textarea{padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel-soft);color:inherit;font:inherit}input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}input[type="checkbox"]{accent-color:var(--accent)}
 .profile-block{border-top:1px solid var(--line);padding:20px 0 0}.profile-block>label{display:block;font-weight:600;margin-bottom:8px}.profile-block>select{max-width:300px}.source-list{padding-left:20px}.source-list li{margin:12px 0}.source-list span{display:block;color:var(--muted);font-size:12px;margin-top:5px}
 .upgrade-page{max-width:1080px;margin:auto}.intro,.hint{color:var(--muted);line-height:1.7}.padded{padding:28px}.fields{display:grid;grid-template-columns:1fr 1fr;gap:20px}.fields label,.saved-config,label:has(textarea){display:grid;gap:8px}.fields label span{font-size:12px;color:var(--muted)}input,select,textarea{width:100%;box-sizing:border-box}fieldset{border:0;padding:16px 0;margin:10px 0}legend{font-weight:600}.checks{display:flex;gap:14px 24px;flex-wrap:wrap}.checks label{display:flex;align-items:center;gap:8px}.checks input{width:auto}.files{display:grid}.optional{border-top:1px solid var(--line);padding:18px 0}.optional summary{cursor:pointer;margin-bottom:14px}.save-config{display:flex;gap:10px}.save-config input{flex:1}.launch-row{display:flex;align-items:center;gap:20px;margin-top:14px}.launch-row button{min-width:175px}.launch-row p{font-size:13px}.saved-config{margin-bottom:24px}.error{padding:14px;background:rgba(220,80,80,.1);color:#d86b6b;border-radius:10px}.notice{padding:14px;background:rgba(80,180,140,.12);border-radius:10px}.other-workflows{display:inline-block;margin-top:20px}@media(max-width:700px){.fields{grid-template-columns:1fr}.padded{padding:18px}.launch-row,.save-config{flex-direction:column;align-items:stretch}}

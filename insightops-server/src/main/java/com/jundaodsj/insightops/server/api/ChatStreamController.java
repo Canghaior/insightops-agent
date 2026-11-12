@@ -59,14 +59,6 @@ public class ChatStreamController {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ChatStreamController.class);
 
-    private static final String SYSTEM_PROMPT = """
-            你是 InsightOps Agent，面向 Java 开发者、架构师和技术负责人回答 AI 开源项目问题。
-            当前可使用 GitHub Release、Issue、Pull Request、Security Advisory、官方文档、官方博客/RSS、Roadmap 与当前用户有权访问的上传资料。
-            不得声称查询了系统证据中没有出现的来源。
-            如果系统提示中附有工具或知识库证据，只能基于该证据回答可验证事实，并为关键事实保留 [S#] 引用或官方 URL。
-            如果没有证据，不要编造实时版本、发布日期、接口能力或来源链接；其他问题使用中文清晰、简洁地回答。
-            """;
-
     private final StreamingChatModelGateway streamingGateway;
     private final ChatStreamSessionRegistry sessionRegistry;
     private final DeepSeekModelProperties modelProperties;
@@ -489,7 +481,7 @@ public class ChatStreamController {
         final ModelUsage planningUsage = loopResult == null
                 ? ModelUsage.unknown() : loopResult.planningUsage();
 
-        String systemPrompt = SYSTEM_PROMPT + guardrail.systemPolicy()
+        String systemPrompt = guardrail.researchSystemPrompt()
                 + userMemoryStore.prompt(actor, 20) + evidenceAppendix;
         try {
             if (loopResult == null) {
@@ -501,18 +493,7 @@ public class ChatStreamController {
                         guardrail.verifyTrustedProjectEventSources(evidenceItem.sourceUrls()));
             }
             else {
-                guardrail.verifyTrustedReleaseSources(citationDetails.stream()
-                        .filter(item -> "GITHUB_RELEASE".equals(item.sourceType()))
-                        .map(ChatCitation::url).toList());
-                guardrail.verifyTrustedProjectEventSources(citationDetails.stream()
-                        .filter(item -> item.sourceType() != null
-                                && item.sourceType().startsWith("GITHUB_")
-                                && !"GITHUB_RELEASE".equals(item.sourceType()))
-                        .map(ChatCitation::url).toList());
-                guardrail.verifyTrustedKnowledgeSources(citationDetails.stream()
-                        .filter(item -> item.sourceType() == null
-                                || !item.sourceType().startsWith("GITHUB_"))
-                        .map(ChatCitation::url).toList());
+                guardrail.verifyCitationSources(citationDetails);
             }
         }
         catch (P0ChatGuardrail.GuardrailViolation exception) {

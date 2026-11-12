@@ -12,7 +12,7 @@ const detail=ref<AnalysisDetail|null>(null)
 async function load(target=0){loading.value=true;error.value='';try{page.value=await listIntelligence({page:target,size:20,projectId:projectId.value||undefined,riskLevel:risk.value||undefined})}catch{error.value='情报列表加载失败'}finally{loading.value=false}}
 async function open(id:string){await router.push({name:'intelligence-detail',params:{analysisId:id}})}
 async function loadDetail(){const id=String(route.params.analysisId??'');if(!id){detail.value=null;return}try{detail.value=await getIntelligence(id)}catch{error.value='情报详情加载失败'}}
-async function research(value:AnalysisDetail){const s=value.summary;await router.push({name:'chat',query:{question:`请基于官方 Release 证据深入研究 ${s.projectName} ${s.versionTag}，核实这份情报的风险、升级价值和推荐行动。`}})}
+async function research(value:AnalysisDetail){await router.push({name:'upgrade-assessment',query:{eventId:value.summary.eventId}})}
 function label(value:string|null){return ({LOW:'低风险',MEDIUM:'中风险',HIGH:'高风险',WATCH:'继续观察',TRY:'建议试用',UPGRADE:'建议升级'} as Record<string,string>)[value??'']??value??'-'}
 onMounted(async()=>{projects.value=await listProjects();await load();await loadDetail()})
 watch(()=>route.params.analysisId,loadDetail)
@@ -45,7 +45,7 @@ watch(()=>route.params.analysisId,loadDetail)
         <section class="detail-block"><span class="eyebrow">推荐行动</span><ol><li v-for="x in detail.recommendedActions" :key="x">{{ x }}</li></ol></section>
         <section class="detail-block"><span class="eyebrow">官方证据</span><div class="detail-sources"><a v-for="url in detail.evidenceUrls" :key="url" :href="url" target="_blank" rel="noreferrer">{{ url }}</a></div></section>
         <dl class="detail-metrics"><div><dt>模型</dt><dd>{{ detail.modelName??'-' }}</dd></div><div><dt>输入/输出 Token</dt><dd>{{ detail.promptTokens??'-' }} / {{ detail.completionTokens??'-' }}</dd></div><div><dt>估算费用</dt><dd>¥{{ detail.estimatedCostCny??0 }}</dd></div><div><dt>尝试次数</dt><dd>{{ detail.attempts }}</dd></div></dl>
-        <button class="send-button intelligence-research" @click="research(detail)">继续深入研究</button>
+        <button class="send-button intelligence-research" @click="research(detail)">评估对我的项目影响</button>
       </aside>
     </div>
   </section>

@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.server.chat;
 
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
+import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -11,6 +12,14 @@ import java.util.UUID;
 public class P0ChatGuardrail {
 
     public static final int MAX_INPUT_CHARACTERS = 4_000;
+
+    private static final String RESEARCH_SYSTEM_PROMPT = """
+            你是 InsightOps Agent，面向 Java 开发者、架构师和技术负责人回答 AI 开源项目问题。
+            当前可使用 GitHub Release、Issue、Pull Request、Security Advisory、官方文档、官方博客/RSS、Roadmap 与当前用户有权访问的上传资料。
+            不得声称查询了系统证据中没有出现的来源。
+            如果系统提示中附有工具或知识库证据，只能基于该证据回答可验证事实，并为关键事实保留 [S#] 引用或官方 URL。
+            如果没有证据，不要编造实时版本、发布日期、接口能力或来源链接；其他问题使用中文清晰、简洁地回答。
+            """;
 
     private static final String SYSTEM_POLICY = """
 
@@ -41,6 +50,28 @@ public class P0ChatGuardrail {
 
     public String systemPolicy() {
         return SYSTEM_POLICY;
+    }
+
+    public String researchSystemPrompt() {
+        return RESEARCH_SYSTEM_PROMPT + SYSTEM_POLICY;
+    }
+
+    /** Shared by legacy and durable execution. Tool/retrieval authorization still happens upstream. */
+    public void verifyCitationSources(List<ChatCitation> citations) {
+        if (citations == null) throw new GuardrailViolation("OUTPUT_SOURCE_NOT_ALLOWED");
+        for (ChatCitation citation : citations) {
+            if (citation == null || citation.url() == null) {
+                throw new GuardrailViolation("OUTPUT_SOURCE_NOT_ALLOWED");
+            }
+            List<String> source = List.of(citation.url());
+            if ("GITHUB_RELEASE".equals(citation.sourceType())) {
+                verifyTrustedReleaseSources(source);
+            } else if (citation.sourceType() != null && citation.sourceType().startsWith("GITHUB_")) {
+                verifyTrustedProjectEventSources(source);
+            } else {
+                verifyTrustedKnowledgeSources(source);
+            }
+        }
     }
 
     public String contextualUserPrompt(

@@ -41,7 +41,10 @@ public final class RagQualityMetrics {
         Set<String> used = new LinkedHashSet<>();
         while (matcher.find()) {
             references++;
-            int index = Integer.parseInt(matcher.group(1).substring(1));
+            String indexText = matcher.group(1).substring(1);
+            long index;
+            try { index = Long.parseLong(indexText); }
+            catch (NumberFormatException invalid) { continue; }
             if (index >= 1 && index <= evidenceCount) {
                 valid++;
                 used.add(matcher.group(1));
@@ -74,7 +77,8 @@ public final class RagQualityMetrics {
                 .filter(item -> item.faithfulness() != null).toList();
         Double faithfulness = judged.isEmpty() ? null
                 : average(judged, item -> item.faithfulness());
-        boolean passed = recall >= properties.getMinimumRecallAtK()
+        boolean answerContractsPassed = generated.stream().allMatch(item -> item.answerContract() != null && item.answerContract().passed());
+        boolean passed = answerContractsPassed && recall >= properties.getMinimumRecallAtK()
                 && mrr >= properties.getMinimumMrr()
                 && termCoverage >= properties.getMinimumTermCoverage()
                 && noAnswer >= properties.getMinimumNoAnswerAccuracy()

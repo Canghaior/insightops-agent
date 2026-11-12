@@ -44,14 +44,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class DurableChatRunExecutionService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DurableChatRunExecutionService.class);
-    private static final String SYSTEM_PROMPT = """
-            你是 InsightOps Agent，面向 Java 开发者、架构师和技术负责人回答 AI 开源项目问题。
-            当前可使用 GitHub Release、Issue、Pull Request、Security Advisory、官方文档、官方博客/RSS、Roadmap 与当前用户有权访问的上传资料。
-            不得声称查询了系统证据中没有出现的来源。
-            如果系统提示中附有工具或知识库证据，只能基于该证据回答可验证事实，并为关键事实保留 [S#] 引用或官方 URL。
-            如果没有证据，不要编造实时版本、发布日期、接口能力或来源链接；其他问题使用中文清晰、简洁地回答。
-            """;
-
     private final DurableChatRunStore store;
     private final AgentLoopService agentLoop;
     private final StreamingChatModelGateway streamingGateway;
@@ -183,10 +175,10 @@ public class DurableChatRunExecutionService {
                         progress(lease), guard::isActive);
             }
             guard.renewNow();
-            verifySources(loopResult.citations());
+            guardrail.verifyCitationSources(loopResult.citations());
 
             ActorContext actor = new ActorContext(lease.ownerUserId(), lease.workspaceId());
-            String systemPrompt = SYSTEM_PROMPT + guardrail.systemPolicy()
+            String systemPrompt = guardrail.researchSystemPrompt()
                     + userMemoryStore.prompt(actor, 20) + loopResult.systemPromptAppendix();
             Completion completion = streamAnswer(
                     lease, guard, answer, systemPrompt, lease.contextualPrompt(),
@@ -343,19 +335,6 @@ public class DurableChatRunExecutionService {
                 append(lease, budgetEvent("budget_exhausted", lease, budget));
             }
         };
-    }
-
-    private void verifySources(List<ChatCitation> citations) {
-        guardrail.verifyTrustedReleaseSources(citations.stream()
-                .filter(item -> "GITHUB_RELEASE".equals(item.sourceType()))
-                .map(ChatCitation::url).toList());
-        guardrail.verifyTrustedProjectEventSources(citations.stream()
-                .filter(item -> item.sourceType() != null && item.sourceType().startsWith("GITHUB_")
-                        && !"GITHUB_RELEASE".equals(item.sourceType()))
-                .map(ChatCitation::url).toList());
-        guardrail.verifyTrustedKnowledgeSources(citations.stream()
-                .filter(item -> item.sourceType() == null || !item.sourceType().startsWith("GITHUB_"))
-                .map(ChatCitation::url).toList());
     }
 
     private void append(DurableChatRunStore.WorkLease lease, ChatSseEvent event) {

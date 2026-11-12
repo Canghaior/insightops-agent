@@ -215,6 +215,14 @@ export interface RagEvaluationCase {
   faithfulness: number | null
   judgeReason: string | null
   generatedAnswer: string | null
+  answerContract?: {
+    passed: boolean
+    missingRequired: string[]
+    forbiddenMatches: string[]
+    citationViolations: string[]
+    scope: string
+    semanticVerified: boolean
+  } | null
 }
 
 export interface RagEvaluationSummary {

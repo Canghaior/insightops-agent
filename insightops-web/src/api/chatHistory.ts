@@ -9,6 +9,7 @@ export interface ChatHistoryMessage {
   citationDetails: ChatCitation[]
   sequenceNo: number
   createdAt: string
+  runId?: string | null
 }
 
 export interface ChatSessionHistory {

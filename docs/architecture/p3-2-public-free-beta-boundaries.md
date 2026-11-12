@@ -23,7 +23,7 @@ P3.2 把 P3.1 的邀请制身份体系扩展为最多 100 人的免费公开 Bet
 - PostgreSQL 在事务内原子分配 1–100 的注册名额，防止多实例并发超售。
 - 新账号先进入 `PENDING_VERIFICATION`；个人 Workspace 和成员关系在同一事务内建立但在用户激活前不可登录访问。邮箱令牌消费后，调度器在同一事务内激活用户与公开注册记录。
 - 未验证申请默认 24 小时过期并释放名额；用户名或邮箱冲突、容量耗尽和验证码失败均不会产生半完成账号。
-- 每个公开 Beta Workspace 继续受现有 Workspace 配额约束，并以 `hard_limit_enabled=true` 强制同时最多创建 1 个 Agent Run；Token/费用月额度在本阶段使用明确的大上限，不作为普通使用限制。
+- 每个新公开 Beta Workspace 受有限的初始配额约束：每日 100,000 Token / 2 元估算费用、每月 1,000,000 Token / 20 元估算费用，任一额度用尽即限制继续运行；保持 `hard_limit_enabled=true`、同时最多 1 个 Agent Run。管理员可通过 `PUBLIC_BETA_DAILY_TOKEN_LIMIT`、`PUBLIC_BETA_MONTHLY_TOKEN_LIMIT`、`PUBLIC_BETA_DAILY_COST_LIMIT_CNY`、`PUBLIC_BETA_MONTHLY_COST_LIMIT_CNY` 调整新工作区默认值。2026-11-09 的代码调整不会覆盖既有工作区策略；上线时需在管理页复核历史公开工作区额度。估算费用不是供应商账单或平台总预算。
 
 ## 4. 邮件与机器人防护
 

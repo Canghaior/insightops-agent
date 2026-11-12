@@ -1,0 +1,54 @@
+{
+  "version": "upgrade-report-contracts-v1",
+  "scope": "合成固定证据，用于检查最终答案规则回归；不声明以下内容是真实项目发布事实。",
+  "cases": [
+    {
+      "id": "java-upgrade-boundaries",
+      "question": "根据给定合成证据，评估 Java 项目从 1.0.0 升级到 1.1.0。区分目标版本、更晚版本与 Issue 状态；没有执行业务测试。",
+      "evidence": [
+        {"label":"R1","version":"1.1.0","text":"【合成证据】1.1.0 新增重试开关。"},
+        {"label":"R2","version":"1.2.0","text":"【合成证据】批处理异常修复首次出现在 1.2.0，未提供其回移到 1.1.0 的证据。"},
+        {"label":"I1","version":null,"text":"【合成证据】Issue 已关闭但未注明修复版本。未取得评论或关联 PR。"}
+      ],
+      "requiredFacts": ["1.1.0", "1.2.0", "未执行业务测试", "不能保证兼容"],
+      "forbiddenFacts": ["1.1.0 已包含批处理异常修复", "Issue 已关闭，因此可以保证兼容"],
+      "citedFacts": [
+        {"fact":"新增重试开关","allowedLabels":["R1"]},
+        {"fact":"批处理异常修复首次出现在 1.2.0","allowedLabels":["R2"]},
+        {"fact":"Issue 已关闭但未注明修复版本","allowedLabels":["I1"]}
+      ],
+      "referenceAnswer": "## 主要变化\n1.1.0 新增重试开关 [R1]。\n## 版本边界\n批处理异常修复首次出现在 1.2.0 [R2]。不能认定目标 1.1.0 已包含该修复。\nIssue 已关闭但未注明修复版本 [I1]。\n## 验证清单\n未执行业务测试，不能保证兼容。请验证重试行为与批处理回归。",
+      "negativeAnswers": [
+        {"id":"later-fix-promoted-to-target","answer":"1.1.0 新增重试开关 [R1]。批处理异常修复首次出现在 1.2.0 [R2]。1.1.0 已包含批处理异常修复 [R2]。Issue 已关闭但未注明修复版本 [I1]。未执行业务测试，不能保证兼容。","expectedFailure":"forbidden"},
+        {"id":"closed-issue-used-as-guarantee","answer":"1.1.0 新增重试开关 [R1]。批处理异常修复首次出现在 1.2.0 [R2]。Issue 已关闭但未注明修复版本 [I1]。Issue 已关闭，因此可以保证兼容 [I1]。未执行业务测试，不能保证兼容。","expectedFailure":"forbidden"},
+        {"id":"valid-label-attached-to-wrong-fact","answer":"1.1.0 新增重试开关 [R2]。批处理异常修复首次出现在 1.2.0 [R1]。Issue 已关闭但未注明修复版本 [I1]。未执行业务测试，不能保证兼容。","expectedFailure":"citation"},
+        {"id":"drops-project-validation-boundary","answer":"1.1.0 新增重试开关 [R1]。批处理异常修复首次出现在 1.2.0 [R2]。Issue 已关闭但未注明修复版本 [I1]。","expectedFailure":"required"}
+      ]
+    },
+    {
+      "id": "vue-upgrade-branches",
+      "question": "根据给定合成证据，评估 Vue 示例项目从 3.4.38 升级到 3.5.1。区分其他维护分支、更晚版本、关闭 Issue；未运行业务构建或浏览器测试。",
+      "evidence": [
+        {"label":"R1","version":"3.5.1","text":"【合成证据】3.5.1 包含模板引用修复。"},
+        {"label":"R2","version":"3.5.2","text":"【合成证据】队列调度修复首次出现在 3.5.2，未说明回移。"},
+        {"label":"R3","version":"3.4.40","text":"【合成证据】3.4.40 维护分支增加缓存修复；没有其合入 3.5.1 的证据。"},
+        {"label":"I1","version":null,"text":"【合成证据】Issue 已关闭但未注明修复版本；没有评论、关联 PR 或业务测试结果。"}
+      ],
+      "requiredFacts": ["3.5.1", "3.5.2", "3.4.40", "未执行业务测试", "不能保证兼容"],
+      "forbiddenFacts": ["3.5.1 已包含队列调度修复", "3.4.40 的缓存修复已合入 3.5.1", "Issue 已关闭，因此可以保证兼容"],
+      "citedFacts": [
+        {"fact":"包含模板引用修复","allowedLabels":["R1"]},
+        {"fact":"队列调度修复首次出现在 3.5.2","allowedLabels":["R2"]},
+        {"fact":"3.4.40 维护分支增加缓存修复","allowedLabels":["R3"]},
+        {"fact":"Issue 已关闭但未注明修复版本","allowedLabels":["I1"]}
+      ],
+      "referenceAnswer": "## 主要变化\n3.5.1 包含模板引用修复 [R1]。\n## 版本边界\n队列调度修复首次出现在 3.5.2 [R2]。3.4.40 维护分支增加缓存修复 [R3]。没有证据说明这两项修复已进入目标版本。\nIssue 已关闭但未注明修复版本 [I1]。\n## 验证清单\n未执行业务测试，不能保证兼容。需要构建、类型检查和浏览器回归。",
+      "negativeAnswers": [
+        {"id":"later-fix-promoted-to-target","answer":"3.5.1 包含模板引用修复 [R1]。队列调度修复首次出现在 3.5.2 [R2]。3.5.1 已包含队列调度修复 [R2]。3.4.40 维护分支增加缓存修复 [R3]。Issue 已关闭但未注明修复版本 [I1]。未执行业务测试，不能保证兼容。","expectedFailure":"forbidden"},
+        {"id":"maintenance-branch-assumed-merged","answer":"3.5.1 包含模板引用修复 [R1]。队列调度修复首次出现在 3.5.2 [R2]。3.4.40 维护分支增加缓存修复 [R3]。3.4.40 的缓存修复已合入 3.5.1 [R3]。Issue 已关闭但未注明修复版本 [I1]。未执行业务测试，不能保证兼容。","expectedFailure":"forbidden"},
+        {"id":"closed-issue-used-as-guarantee","answer":"3.5.1 包含模板引用修复 [R1]。队列调度修复首次出现在 3.5.2 [R2]。3.4.40 维护分支增加缓存修复 [R3]。Issue 已关闭但未注明修复版本 [I1]。Issue 已关闭，因此可以保证兼容 [I1]。未执行业务测试，不能保证兼容。","expectedFailure":"forbidden"},
+        {"id":"valid-label-attached-to-wrong-fact","answer":"3.5.1 包含模板引用修复 [R2]。队列调度修复首次出现在 3.5.2 [R1]。3.4.40 维护分支增加缓存修复 [R3]。Issue 已关闭但未注明修复版本 [I1]。未执行业务测试，不能保证兼容。","expectedFailure":"citation"}
+      ]
+    }
+  ]
+}

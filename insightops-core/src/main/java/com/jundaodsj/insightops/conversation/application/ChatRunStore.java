@@ -75,10 +75,15 @@ public interface ChatRunStore {
             List<String> citations,
             List<ChatCitation> citationDetails,
             int sequenceNo,
-            Instant createdAt) {
+            Instant createdAt,
+            UUID runId) {
+        public HistoryMessage(UUID id, String role, String content, List<String> citations,
+                              List<ChatCitation> citationDetails, int sequenceNo, Instant createdAt) {
+            this(id, role, content, citations, citationDetails, sequenceNo, createdAt, null);
+        }
         public HistoryMessage(UUID id, String role, String content, List<String> citations,
                               int sequenceNo, Instant createdAt) {
-            this(id, role, content, citations, List.of(), sequenceNo, createdAt);
+            this(id, role, content, citations, List.of(), sequenceNo, createdAt, null);
         }
     }
 }

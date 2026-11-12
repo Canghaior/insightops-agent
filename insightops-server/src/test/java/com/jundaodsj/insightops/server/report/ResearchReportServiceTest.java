@@ -49,6 +49,9 @@ class ResearchReportServiceTest {
         assertThat(snapshot.getValue().uncertainties()).anyMatch(item -> item.contains("关键词检索"))
                 .anyMatch(item -> item.contains("未标注版本"));
         assertThat(markdown.getValue()).contains("[S1]", "http://127.0.0.1:15173" + url, "仍需登录原工作区");
+        assertThat(snapshot.getValue().evidenceQuality().status()).isEqualTo("REQUIRES_VALIDATION");
+        assertThat(snapshot.getValue().evidenceQuality().compatibilityVerified()).isFalse();
+        assertThat(markdown.getValue()).contains("资料完整性检查", "执行状态：已完成", "尚未逐条核验结论", "后续重新研究不会改写本快照");
     }
     @Test void frontendContextIsSnapshottedAndReadableWithoutExposingTheInternalPrompt() {
         var run = mock(AgentRunQuery.RunDetail.class);
@@ -63,6 +66,8 @@ class ResearchReportServiceTest {
         when(workflow.inputJson()).thenReturn("""
                 {"profileId":"web_frontend","profileName":"Web 前端","projectName":"Vue",
                  "currentVersion":"3.4.38","targetVersion":"3.5.0","javaVersion":"",
+                 "eventId":"event-internal-id","sourceEvent":{"title":"Vue 3.5 发布","versionTag":"v3.5.0",
+                 "sourceUrl":"https://github.com/vuejs/core/releases/tag/v3.5.0","collectedAt":"2026-11-09T00:00:00Z"},
                  "context":{"nodeVersion":"22","renderMode":"SPA","notes":"业务样例"}}
                 """);
         when(workflows.find(runId)).thenReturn(Optional.of(workflow));
@@ -73,6 +78,7 @@ class ResearchReportServiceTest {
         assertThat(snapshot.getValue().inputs().get("context")).isEqualTo(Map.of("nodeVersion", "22", "renderMode", "SPA", "notes", "业务样例"));
         assertThat(snapshot.getValue().question()).isEqualTo(run.question());
         assertThat(markdown.getValue()).contains("Node.js 版本: 22", "渲染与部署方式: SPA", "尚缺插件兼容性资料", "3.4.38", "3.5.0")
-                .doesNotContain("internal instructions", "Java 版本:");
+                .contains("## 触发事件", "更新标题：Vue 3.5 发布", "事件版本：v3.5.0", "https://github.com/vuejs/core/releases/tag/v3.5.0")
+                .doesNotContain("internal instructions", "Java 版本:", "sourceEvent:", "eventId:", "event-internal-id");
     }
 }

@@ -13,6 +13,8 @@ import {
   type RunSummary,
   type RunToolCall,
 } from '@/api/runs'
+import SystemBackgroundPanel from '@/components/SystemBackground.vue'
+import { systemSnapshotOf } from '@/utils/upgradeProfiles'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import ResearchResultActions from '@/components/ResearchResultActions.vue'
 import RunEvidenceQuality from '@/components/RunEvidenceQuality.vue'
@@ -43,8 +45,17 @@ const totalPages = ref(0)
 const status = ref<RunStatus | ''>('')
 const checkpoint = ref<AgentCheckpoint | null>(null)
 const workflowRun = ref<WorkflowRunDetail | null>(null)
+const linkedSystem = computed(() => systemSnapshotOf(workflowRun.value))
+const assessmentRange = computed(() => {
+  const inputs = workflowRun.value?.inputs
+  if (!linkedSystem.value || !inputs || typeof inputs !== 'object') return ''
+  const values = inputs as Record<string, unknown>
+  return `${values.projectName} · ${values.currentVersion} → ${values.targetVersion}`
+})
 const runActionLoading = ref(false)
 const runActionError = ref('')
+let detailSequence = 0
+let pendingDetail: string | null = null
 let detailPoll: ReturnType<typeof globalThis.setInterval> | undefined
 
 const rangeLabel = computed(() => {
@@ -84,6 +95,9 @@ function startDetailPolling(runId: string) {
 }
 
 async function loadDetail(runId: string, quiet = false) {
+  if (quiet && pendingDetail === runId) return
+  const sequence = ++detailSequence
+  pendingDetail = runId
   if (!quiet) {
     detailLoading.value = true
     detailError.value = null
@@ -93,27 +107,21 @@ async function loadDetail(runId: string, quiet = false) {
     runActionError.value = ''
   }
   try {
-    selectedRun.value = await getRun(runId)
-    try {
-      workflowRun.value = await getWorkflowRun(runId)
-    } catch {
-      workflowRun.value = null
-    }
-    if (selectedRun.value.status === 'PAUSED' || workflowRun.value) {
-      try {
-        checkpoint.value = await getLatestAgentCheckpoint(runId)
-      } catch {
-        checkpoint.value = null
-      }
-    }
+    const run = await getRun(runId)
+    const workflow = await getWorkflowRun(runId).catch(() => null)
+    const latest = run.status === 'PAUSED' || workflow ? await getLatestAgentCheckpoint(runId).catch(() => null) : null
+    if (sequence !== detailSequence) return
+    selectedRun.value = run
+    workflowRun.value = workflow
+    checkpoint.value = latest
   } catch {
-    if (!quiet) detailError.value = '该执行记录不存在或暂时无法读取。'
+    if (sequence === detailSequence && !quiet) detailError.value = '该执行记录不存在或暂时无法读取。'
   } finally {
-    if (!quiet) detailLoading.value = false
-    if (selectedRun.value?.id === runId && selectedRun.value.status === 'RUNNING') {
-      startDetailPolling(runId)
-    } else {
-      stopDetailPolling()
+    if (sequence === detailSequence) {
+      pendingDetail = null
+      detailLoading.value = false
+      if (selectedRun.value?.status === 'RUNNING') startDetailPolling(runId)
+      else stopDetailPolling()
     }
   }
 }
@@ -239,13 +247,20 @@ watch(
     stopDetailPolling()
     const runId = Array.isArray(value) ? value[0] : value
     if (runId) void loadDetail(runId)
-    else selectedRun.value = null
+    else {
+      ++detailSequence
+      pendingDetail = null
+      selectedRun.value = null
+    }
   },
   { immediate: true },
 )
 
 onMounted(loadRuns)
-onUnmounted(stopDetailPolling)
+onUnmounted(() => {
+  ++detailSequence
+  stopDetailPolling()
+})
 </script>
 
 <template>
@@ -330,6 +345,10 @@ onUnmounted(stopDetailPolling)
             检查点 #{{ checkpoint.sequence }} · {{ checkpoint.reason }} · {{ formatDate(checkpoint.createdAt) }}
           </p>
 
+          <div v-if="linkedSystem && workflowRun?.runId === selectedRun.id" class="detail-block">
+            <p class="assessment-range">本次评估 · {{ assessmentRange }}</p>
+            <SystemBackgroundPanel :system="linkedSystem" />
+          </div>
           <ResearchResultActions
             :run-id="selectedRun.id" :can-save="selectedRun.status === 'SUCCEEDED' && !!selectedRun.answer"
             :repeat-url="workflowRun?.templateName === '升级评估（版本范围）' ? `/upgrade-assessment?runId=${selectedRun.id}` : workflowRun ? `/agent-workflows?runId=${selectedRun.id}` : `/chat?question=${encodeURIComponent(selectedRun.question)}`"
@@ -381,7 +400,7 @@ onUnmounted(stopDetailPolling)
                 <RouterLink :to="`/runs/${workflowRun.sourceRunId}`">{{ shortId(workflowRun.sourceRunId) }}</RouterLink>
                 的失败节点 {{ workflowRun.retryFromNodeId }} 重试；成功节点直接复用。
               </p>
-              <details><summary>固化入口参数</summary><pre>{{ pretty(workflowRun.inputs) }}</pre></details>
+              <details v-if="!linkedSystem"><summary>固化入口参数</summary><pre>{{ pretty(workflowRun.inputs) }}</pre></details>
               <div class="workflow-node-list">
                 <article
                   v-for="node in workflowRun.nodes"
@@ -447,7 +466,7 @@ onUnmounted(stopDetailPolling)
 
             <section class="detail-block">
               <span class="eyebrow">Question</span>
-              <p>{{ selectedRun.question }}</p>
+              <p>{{ linkedSystem ? selectedRun.question.split('\n')[0] : selectedRun.question }}</p>
             </section>
 
 
@@ -488,3 +507,7 @@ onUnmounted(stopDetailPolling)
     </div>
   </section>
 </template>
+
+<style scoped>
+.assessment-range { margin: 0 0 14px; color: var(--muted); }
+</style>

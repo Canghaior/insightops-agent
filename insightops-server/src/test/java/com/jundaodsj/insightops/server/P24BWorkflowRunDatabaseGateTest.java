@@ -47,7 +47,7 @@ class P24BWorkflowRunDatabaseGateTest {
         var result = Flyway.configure().dataSource(dataSource).schemas(SCHEMA)
                 .defaultSchema(SCHEMA).createSchemas(true)
                 .locations("classpath:db/migration").load().migrate();
-        assertThat(result.migrationsExecuted).isEqualTo(43);
+        assertThat(result.migrationsExecuted).isEqualTo(44);
     }
 
     @AfterAll
@@ -103,7 +103,7 @@ class P24BWorkflowRunDatabaseGateTest {
 
         UUID workflowNodeId = UUID.randomUUID();
         store.create(new AgentWorkflowRunStore.WorkflowRunDraft(
-                        runId, WORKSPACE, USER, null, null, "Snapshot template", 2,
+                        runId, WORKSPACE, USER, null, null, null, "Snapshot template", 2,
                         "Research ${inputs.topic}",
                         "{\"inputs\":{\"topic\":{\"type\":\"string\",\"required\":true}},\"nodes\":[]}",
                         "{\"topic\":\"Spring AI\"}", "a".repeat(64), UUID.randomUUID(),

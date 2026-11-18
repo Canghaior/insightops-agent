@@ -70,6 +70,7 @@ export interface WorkflowRunNode {
 
 export interface WorkflowRunDetail {
   runId: string
+  businessSystemId?: string | null
   templateId: string | null
   templateVersionId: string | null
   templateName: string

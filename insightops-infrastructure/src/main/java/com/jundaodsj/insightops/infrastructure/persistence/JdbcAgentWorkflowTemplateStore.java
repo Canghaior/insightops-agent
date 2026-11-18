@@ -57,7 +57,7 @@ public class JdbcAgentWorkflowTemplateStore implements AgentWorkflowTemplateStor
     @Transactional
     public WorkflowTemplate create(
             UUID workspaceId, UUID userId, TemplateDraft draft, Instant now) {
-        lock("agent-workflow:name:" + workspaceId + ":" + draft.name());
+        lockName(workspaceId, draft.name());
         UUID templateId = UUID.randomUUID();
         UUID versionId = UUID.randomUUID();
         Map<String, Object> params = new HashMap<>();
@@ -170,6 +170,11 @@ public class JdbcAgentWorkflowTemplateStore implements AgentWorkflowTemplateStor
     private WorkflowTemplate requireTemplate(UUID workspaceId, UUID templateId) {
         return find(workspaceId, templateId)
                 .orElseThrow(() -> new IllegalArgumentException("Workflow template not found"));
+    }
+
+    @Override
+    public void lockName(UUID workspaceId, String name) {
+        lock("agent-workflow:name:" + workspaceId + ":" + name);
     }
 
     private void lock(String key) {

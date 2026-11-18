@@ -11,7 +11,10 @@ import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.server.chat.DurableChatRunCoordinator;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolDefinition;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolRegistry;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -19,6 +22,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -74,9 +79,8 @@ public class AgentWorkflowRunService {
             ActorContext actor, boolean systemAdmin, AgentToolDefinition.AccessLevel accessLevel,
             UUID templateId, UUID expectedVersionId, UUID sessionId,
             UUID requestId, Map<String, Object> suppliedInputs, String traceId) {
-        AgentWorkflowRunStore.WorkflowRun existing = workflowRuns.findByRequest(
-                actor.workspaceId(), actor.userId(), requestId).orElse(null);
-        if (existing != null) return new LaunchResult(existing.runId(), null, true);
+        var replay = existingLaunch(actor, requestId, null);
+        if (replay.isPresent()) return replay.get();
 
         AgentWorkflowTemplateStore.WorkflowTemplate template = templates.find(actor.workspaceId(), templateId)
                 .orElseThrow(() -> new WorkflowRunException("WORKFLOW_TEMPLATE_NOT_FOUND"));
@@ -101,7 +105,7 @@ public class AgentWorkflowRunService {
         UUID actualSessionId = chatRuns.startRun(
                 actor, runId, sessionId, traceId, question, now);
         workflowRuns.create(new AgentWorkflowRunStore.WorkflowRunDraft(
-                        runId, actor.workspaceId(), actor.userId(), template.id(), version.id(),
+                        runId, actor.workspaceId(), actor.userId(), null, template.id(), version.id(),
                         template.name(), version.version(), question, graph.root().toString(),
                         write(inputs), expressions.contractFingerprint(graph), requestId,
                         null, runId, null, now), nodeDrafts(graph, null, now));
@@ -110,13 +114,21 @@ public class AgentWorkflowRunService {
         return new LaunchResult(runId, actualSessionId, false);
     }
 
-    /** Server-authored research plan; callers must validate project and attachment scope first. */
-    @Transactional
+    // Called inside the launch transaction before loading mutable project or system inputs.
+    Optional<LaunchResult> existingLaunch(ActorContext actor, UUID requestId, UUID systemId) {
+        return workflowRuns.lockAndFindByRequest(actor.workspaceId(), actor.userId(), requestId).map(run -> {
+            if (run.sourceRunId() != null || !Objects.equals(run.businessSystemId(), systemId)) {
+                throw new RequestConflict();
+            }
+            return new LaunchResult(run.runId(), null, true);
+        });
+    }
+
+    /** The caller owns the request lock and has resolved project, system and attachment scope. */
+    @Transactional(propagation = Propagation.MANDATORY)
     public LaunchResult launchPrepared(ActorContext actor, boolean systemAdmin,
             AgentToolDefinition.AccessLevel accessLevel, AgentWorkflowTemplateStore.WorkflowTemplate template,
-            String graphJson, String question, Map<String, Object> suppliedInputs, UUID requestId, String traceId) {
-        var existing = workflowRuns.findByRequest(actor.workspaceId(), actor.userId(), requestId).orElse(null);
-        if (existing != null) return new LaunchResult(existing.runId(), null, true);
+            String graphJson, String question, Map<String, Object> suppliedInputs, UUID systemId, UUID requestId, String traceId) {
         if (!actor.workspaceId().equals(template.workspaceId())) throw new WorkflowRunException("WORKFLOW_TEMPLATE_NOT_FOUND");
         var version = template.versions().stream().filter(item -> item.id().equals(template.activeVersionId())).findFirst().orElseThrow();
         var graph = expressions.validateGraph(graphJson);
@@ -126,7 +138,7 @@ public class AgentWorkflowRunService {
         UUID runId = UUID.randomUUID();
         UUID sessionId = chatRuns.startRun(actor, runId, null, traceId, question, now);
         workflowRuns.create(new AgentWorkflowRunStore.WorkflowRunDraft(runId, actor.workspaceId(), actor.userId(),
-                template.id(), version.id(), template.name(), version.version(), question, graph.root().toString(),
+                systemId, template.id(), version.id(), template.name(), version.version(), question, graph.root().toString(),
                 write(inputs), expressions.contractFingerprint(graph), requestId, null, runId, null, now),
                 nodeDrafts(graph, null, now));
         durableRuns.enqueue(actor, runId, sessionId, traceId, systemAdmin, accessLevel, question, question, null, now);
@@ -137,9 +149,14 @@ public class AgentWorkflowRunService {
     public LaunchResult retry(
             ActorContext actor, boolean systemAdmin, AgentToolDefinition.AccessLevel accessLevel,
             UUID sourceRunId, String fromNodeId, UUID requestId, String traceId) {
-        AgentWorkflowRunStore.WorkflowRun existing = workflowRuns.findByRequest(
-                actor.workspaceId(), actor.userId(), requestId).orElse(null);
-        if (existing != null) return new LaunchResult(existing.runId(), null, true);
+        var replay = workflowRuns.lockAndFindByRequest(actor.workspaceId(), actor.userId(), requestId);
+        if (replay.isPresent()) {
+            var run = replay.get();
+            if (!sourceRunId.equals(run.sourceRunId()) || !Objects.equals(fromNodeId, run.retryFromNodeId())) {
+                throw new RequestConflict();
+            }
+            return new LaunchResult(run.runId(), null, true);
+        }
         AgentRunQuery.RunDetail sourceDetail = runQuery.findRun(actor, sourceRunId)
                 .orElseThrow(() -> new WorkflowRunException("WORKFLOW_RUN_NOT_FOUND"));
         if (!"FAILED".equals(sourceDetail.status())) {
@@ -161,7 +178,7 @@ public class AgentWorkflowRunService {
                 actor, runId, sourceDetail.sessionId(), traceId,
                 source.entryQuestion() + "（从失败节点 " + fromNodeId + " 重试）", now);
         workflowRuns.create(new AgentWorkflowRunStore.WorkflowRunDraft(
-                        runId, actor.workspaceId(), actor.userId(), source.templateId(),
+                        runId, actor.workspaceId(), actor.userId(), source.businessSystemId(), source.templateId(),
                         source.templateVersionId(), source.templateName(), source.templateVersion(),
                         source.entryQuestion(), source.graphSpecJson(), source.inputJson(),
                         source.toolContractFingerprint(), requestId, sourceRunId,
@@ -222,6 +239,11 @@ public class AgentWorkflowRunService {
             Map<String, AgentWorkflowExpressionService.InputDefinition> inputs,
             String graphSpecJson) { }
     public record LaunchResult(UUID runId, UUID sessionId, boolean duplicate) { }
+
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public static final class RequestConflict extends RuntimeException {
+        public RequestConflict() { super("该请求标识已用于其他研究，请重新发起。"); }
+    }
 
     public static final class WorkflowRunException extends IllegalArgumentException {
         public WorkflowRunException(String message) { super(message); }

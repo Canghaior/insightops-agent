@@ -27,9 +27,10 @@ class UpgradeAssessmentServiceTest {
     private final com.jundaodsj.insightops.agent.application.AgentWorkflowProductStore products = mock(com.jundaodsj.insightops.agent.application.AgentWorkflowProductStore.class);
     private final AgentToolRegistry registry = new AgentToolRegistry(AgentToolRegistryConfiguration.definitions(true, true));
     private final ProjectUpdateStore updates = mock(ProjectUpdateStore.class);
-    private final UpgradeAssessmentService service = new UpgradeAssessmentService(templates, runs, projects, uploads,
+    private final UpgradeAssessmentService service = new UpgradeAssessmentService(templates, runs, projects, new ResearchMaterials(uploads),
             mock(GitHubReleaseGateway.class), registry, json, products, mock(AgentWorkflowProductService.class),
-            mock(com.jundaodsj.insightops.knowledge.application.KnowledgeStore.class), updates);
+            mock(com.jundaodsj.insightops.knowledge.application.KnowledgeStore.class), updates,
+            mock(com.jundaodsj.insightops.server.businesssystem.BusinessSystemService.class));
 
     @Test void preparesRealReleaseDocsAndIssueToolsWithValidatedArguments() {
         watched();
@@ -37,10 +38,10 @@ class UpgradeAssessmentServiceTest {
                 UpgradeAssessmentService.NAME, "", "UPGRADE_ASSESSMENT", "ACTIVE", UUID.randomUUID(), actor.userId(), Instant.now(), Instant.now(), List.of());
         when(templates.overview(actor.workspaceId())).thenReturn(List.of(template));
         service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER,
-                command(List.of(), List.of("https://github.com/spring-projects/spring-ai/issues/6620")), "trace");
+                command(List.of(), List.of("https://github.com/spring-projects/spring-ai/issues/6620")), null, null, "trace");
         var graph = ArgumentCaptor.forClass(String.class);
         @SuppressWarnings("unchecked") ArgumentCaptor<Map<String, Object>> inputs = ArgumentCaptor.forClass(Map.class);
-        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), anyString(), inputs.capture(), any(), eq("trace"));
+        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), anyString(), inputs.capture(), isNull(), any(), eq("trace"));
         var expressions = new AgentWorkflowExpressionService(json, registry);
         var parsed = expressions.validateGraph(graph.getValue());
         assertThat(parsed.nodes()).extracting(AgentWorkflowExpressionService.NodeDefinition::toolName)
@@ -51,12 +52,12 @@ class UpgradeAssessmentServiceTest {
         }
     }
     @Test void deniesUnwatchedProjectsAndOtherUsersPrivateFilesBeforeLaunching() {
-        assertThatThrownBy(() -> service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command(List.of(), List.of()), "trace"))
+        assertThatThrownBy(() -> service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command(List.of(), List.of()), null, null, "trace"))
                 .isInstanceOf(IllegalArgumentException.class);
         watched();
-        assertThatThrownBy(() -> service.launch(actor, true, AgentToolDefinition.AccessLevel.SYSTEM_ADMIN, command(List.of(UUID.randomUUID()), List.of()), "trace"))
+        assertThatThrownBy(() -> service.launch(actor, true, AgentToolDefinition.AccessLevel.SYSTEM_ADMIN, command(List.of(UUID.randomUUID()), List.of()), null, null, "trace"))
                 .hasMessageContaining("无权访问");
-        verifyNoInteractions(runs);
+        verify(runs, never()).launchPrepared(any(), anyBoolean(), any(), any(), any(), any(), any(), any(), any(), any());
     }
     @Test void issueLinksMustMatchSelectedRepository() {
         assertThat(UpgradeAssessmentService.issueNumber("https://github.com/spring-projects/spring-ai/issues/6620", "spring-projects", "spring-ai")).isEqualTo(6620);
@@ -70,11 +71,11 @@ class UpgradeAssessmentServiceTest {
         when(templates.overview(actor.workspaceId())).thenReturn(List.of(template));
         var command = new UpgradeAssessmentService.Command(projectId, "3.4.38", "3.5.0", "", "", "运营后台",
                 List.of("构建与 TypeScript"), List.of(), List.of(), UUID.randomUUID(), "web_frontend", Map.of("nodeVersion", "22", "renderMode", "SPA"));
-        service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, "front");
+        service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, null, null, "front");
         var graph = ArgumentCaptor.forClass(String.class);
         var question = ArgumentCaptor.forClass(String.class);
         @SuppressWarnings("unchecked") ArgumentCaptor<Map<String, Object>> input = ArgumentCaptor.forClass(Map.class);
-        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), question.capture(), input.capture(), any(), eq("front"));
+        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), question.capture(), input.capture(), isNull(), any(), eq("front"));
         var expressions = new AgentWorkflowExpressionService(json, registry);
         var parsed = expressions.validateGraph(graph.getValue());
         expressions.validateInputs(parsed, input.getValue());
@@ -92,7 +93,9 @@ class UpgradeAssessmentServiceTest {
     @Test void oldPresetsRemainAvailableAcrossTemplateVersionsWithoutBeingRewritten() {
         UUID oldVersion = UUID.randomUUID(), activeVersion = UUID.randomUUID(), templateId = UUID.randomUUID();
         Instant now = Instant.now();
-        var versions = List.of(new AgentWorkflowTemplateStore.WorkflowVersion(activeVersion, templateId, 2, "ACTIVE", "", "", "{\"profileId\":{},\"sourceEvent\":{}}", actor.userId(), now, now),
+        var versions = List.of(new AgentWorkflowTemplateStore.WorkflowVersion(activeVersion, templateId, 2, "ACTIVE", "", "", """
+                        {"inputs":{"sourceEvent":{"type":"json"},"systemSnapshot":{"type":"json"},"selectedMaterials":{"type":"json_array"}}}
+                        """, actor.userId(), now, now),
                 new AgentWorkflowTemplateStore.WorkflowVersion(oldVersion, templateId, 1, "ARCHIVED", "", "", "{}", actor.userId(), now, now));
         var template = new AgentWorkflowTemplateStore.WorkflowTemplate(templateId, actor.workspaceId(), UpgradeAssessmentService.NAME, "", "UPGRADE_ASSESSMENT", "ACTIVE", activeVersion, actor.userId(), now, now, versions);
         when(templates.overview(actor.workspaceId())).thenReturn(List.of(template));
@@ -130,10 +133,10 @@ class UpgradeAssessmentServiceTest {
         when(templates.overview(actor.workspaceId())).thenReturn(List.of(template));
         var command = new UpgradeAssessmentService.Command(projectId, "1.0.0", "1.1.0", "21", "3.4.5", "订单服务",
                 List.of("兼容性"), List.of(), List.of(), UUID.randomUUID(), "java_backend", Map.of(), eventId);
-        service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, "event-trace");
+        service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, null, null, "event-trace");
         var graph = ArgumentCaptor.forClass(String.class);
         @SuppressWarnings("unchecked") ArgumentCaptor<Map<String, Object>> inputs = ArgumentCaptor.forClass(Map.class);
-        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), anyString(), inputs.capture(), any(), eq("event-trace"));
+        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), anyString(), inputs.capture(), isNull(), any(), eq("event-trace"));
         assertThat(inputs.getValue()).containsEntry("eventId", eventId.toString()).containsEntry("currentVersion", "1.0.0").containsEntry("businessProject", "订单服务");
         var snapshot = (Map<?, ?>) inputs.getValue().get("sourceEvent");
         assertThat(snapshot.get("sourceUrl")).isEqualTo(event.sourceUrl());
@@ -141,9 +144,10 @@ class UpgradeAssessmentServiceTest {
         var expressions = new AgentWorkflowExpressionService(json, registry);
         assertThatCode(() -> expressions.validateInputs(expressions.validateGraph(graph.getValue()), inputs.getValue())).doesNotThrowAnyException();
         when(updates.findResearchEvent(actor, eventId)).thenReturn(Optional.of(event(eventId, UUID.randomUUID(), "GITHUB_RELEASE", event.sourceUrl())));
-        assertThatThrownBy(() -> service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, "other")).hasMessageContaining("不属于该框架");
+        assertThatThrownBy(() -> service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, null, null, "other")).hasMessageContaining("不属于该框架");
         when(updates.findResearchEvent(actor, eventId)).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, "deleted")).hasMessageContaining("无权访问");
+        assertThatThrownBy(() -> service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, null, null, "deleted")).hasMessageContaining("无权访问");
+        verify(runs, times(3)).existingLaunch(eq(actor), eq(command.requestId()), isNull());
         verifyNoMoreInteractions(runs);
     }
 

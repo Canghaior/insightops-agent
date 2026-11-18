@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentRunQuery;
 import com.jundaodsj.insightops.agent.application.AgentWorkflowRunStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
+import com.jundaodsj.insightops.server.businesssystem.BusinessSystemService;
 import com.jundaodsj.insightops.report.application.ReportDeliveryStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -90,12 +91,15 @@ public class ResearchReportService {
         String title = workflow != null ? workflow.templateName() : "研究报告 · " + run.question();
         if (inputs.containsKey("targetVersion")) title += " · " + inputs.getOrDefault("projectName", "")
                 + " " + inputs.getOrDefault("currentVersion", "") + " → " + inputs.get("targetVersion");
+        BusinessSystemService.Detail system = workflow != null && workflow.businessSystemId() != null
+                ? json.convertValue(inputs.get("systemSnapshot"), BusinessSystemService.Detail.class) : null;
+        if (system != null) title = system.background().name() + " · " + title;
         if (title.length() > 200) title = title.substring(0, 200);
         return reports.createResearchReport(actor, UUID.randomUUID(), title, snapshot,
-                markdown(title, snapshot), Instant.now());
+                markdown(title, snapshot, system), Instant.now());
     }
 
-    private String markdown(String title, ReportDeliveryStore.ResearchSnapshot snapshot) {
+    private String markdown(String title, ReportDeliveryStore.ResearchSnapshot snapshot, BusinessSystemService.Detail system) {
         StringBuilder result = new StringBuilder("# ").append(title).append("\n\n")
                 .append("研究完成时间：").append(snapshot.finishedAt()).append("\n\n");
         if (snapshot.evidenceQuality() != null) {
@@ -118,7 +122,30 @@ public class ResearchReportService {
             result.append("\n此事件是发起研究的入口；升级结论仍以本报告实际取得的证据为准。\n");
         }
         result.append("\n\n## 研究输入快照\n\n");
+        if (system != null) {
+            var b = system.background();
+            result.append("### 业务系统背景（用户提供）\n\n");
+            field(result, "系统名称", b.name());
+            field(result, "档案修订", String.valueOf(system.revision()));
+            field(result, "用途", b.purpose());
+            field(result, "关键流程", b.keyProcesses());
+            field(result, "已知技术栈", b.technologyStack());
+            field(result, "当前问题", b.currentProblems());
+            field(result, "约束", b.constraints());
+            field(result, "档案资料", String.join("、", system.attachments().stream().map(file -> file.name()).toList()));
+            result.append("\n### 本次评估参数\n\n");
+        }
         snapshot.inputs().forEach((key, value) -> {
+            if (system != null && List.of("systemSnapshot", "businessProject", "uploadIds").contains(key)) return;
+            if (system != null && "selectedMaterials".equals(key) && value instanceof List<?> files) {
+                field(result, "本次选用资料", String.join("、", files.stream().filter(Map.class::isInstance)
+                        .map(file -> String.valueOf(((Map<?, ?>) file).get("name"))).toList()));
+                return;
+            }
+            if (system != null && value instanceof List<?> entries) {
+                field(result, inputLabel(key), String.join("、", entries.stream().map(String::valueOf).toList()));
+                return;
+            }
             if ("context".equals(key) && value instanceof Map<?, ?> context) {
                 context.forEach((field, fact) -> result.append("- ").append(com.jundaodsj.insightops.server.workflow.ResearchProfiles.label(String.valueOf(field)))
                         .append(": ").append(fact).append('\n'));
@@ -159,6 +186,11 @@ public class ResearchReportService {
             if (value.containsKey("fetchedAt")) result.append("  远程获取时间：").append(value.get("fetchedAt")).append('\n');
         });
         return result.append("研究记录：").append(publicUrl).append("/runs/").append(snapshot.runId()).append('\n').toString();
+    }
+
+    private static void field(StringBuilder out, String label, String value) {
+        out.append("- ").append(label).append("：")
+                .append(value == null || value.isBlank() ? "未提供" : value.replaceAll("\\R", " / ")).append('\n');
     }
 
     private String url(String value) { return value.startsWith("/api/v1/knowledge/uploads/") ? publicUrl + value : value; }

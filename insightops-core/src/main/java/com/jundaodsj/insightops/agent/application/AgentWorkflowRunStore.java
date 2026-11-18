@@ -13,7 +13,8 @@ public interface AgentWorkflowRunStore {
 
     Optional<WorkflowRun> find(UUID runId);
 
-    Optional<WorkflowRun> findByRequest(
+    /** Serializes submissions of this actor's request ID until the caller's transaction ends. */
+    Optional<WorkflowRun> lockAndFindByRequest(
             UUID workspaceId, UUID ownerUserId, UUID requestId);
 
     void create(WorkflowRunDraft draft, List<NodeDraft> nodes);
@@ -35,6 +36,7 @@ public interface AgentWorkflowRunStore {
             UUID runId,
             UUID workspaceId,
             UUID ownerUserId,
+            UUID businessSystemId,
             UUID templateId,
             UUID templateVersionId,
             String templateName,
@@ -83,6 +85,7 @@ public interface AgentWorkflowRunStore {
             UUID runId,
             UUID workspaceId,
             UUID ownerUserId,
+            UUID businessSystemId,
             UUID templateId,
             UUID templateVersionId,
             String templateName,

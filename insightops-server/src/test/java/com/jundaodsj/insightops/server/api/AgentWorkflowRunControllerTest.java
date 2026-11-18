@@ -54,7 +54,7 @@ class AgentWorkflowRunControllerTest {
                 "SUCCEEDED", 1, UUID.randomUUID(), UUID.randomUUID(), null,
                 0, 0, BigDecimal.ZERO, null, now, now, now, now, List.of());
         return new AgentWorkflowRunStore.WorkflowRun(
-                RUN_ID, WORKSPACE_ID, USER_ID, UUID.randomUUID(), UUID.randomUUID(),
+                RUN_ID, WORKSPACE_ID, USER_ID, null, UUID.randomUUID(), UUID.randomUUID(),
                 "Version comparison", 1, "Compare versions",
                 "{\"inputs\":{\"topic\":{\"type\":\"string\"}},\"nodes\":[{\"id\":\"research_1\"}]}",
                 "{\"topic\":\"Spring Boot 4\"}", "fingerprint", UUID.randomUUID(),

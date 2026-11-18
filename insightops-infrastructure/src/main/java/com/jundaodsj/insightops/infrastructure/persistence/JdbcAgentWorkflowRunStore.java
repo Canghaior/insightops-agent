@@ -31,8 +31,11 @@ public class JdbcAgentWorkflowRunStore implements AgentWorkflowRunStore {
     }
 
     @Override
-    public Optional<WorkflowRun> findByRequest(
+    public Optional<WorkflowRun> lockAndFindByRequest(
             UUID workspaceId, UUID ownerUserId, UUID requestId) {
+        jdbc.sql("select 1 from (select pg_advisory_xact_lock(hashtextextended(:key, 0))) locked")
+                .param("key", "workflow-request:" + workspaceId + ":" + ownerUserId + ":" + requestId)
+                .query(Integer.class).single();
         return jdbc.sql("""
                         select run_id from agent_workflow_run
                         where workspace_id = :workspaceId and owner_user_id = :ownerUserId
@@ -47,14 +50,14 @@ public class JdbcAgentWorkflowRunStore implements AgentWorkflowRunStore {
     public void create(WorkflowRunDraft draft, List<NodeDraft> nodes) {
         jdbc.sql("""
                         insert into agent_workflow_run (
-                            run_id, workspace_id, owner_user_id, template_id,
+                            run_id, workspace_id, owner_user_id, business_system_id, template_id,
                             template_version_id, template_name_snapshot,
                             template_version_snapshot, entry_question_snapshot,
                             graph_spec_snapshot, input_snapshot, tool_contract_fingerprint,
                             request_id, source_run_id, retry_root_run_id,
                             retry_from_node_id, created_at
                         ) values (
-                            :runId, :workspaceId, :ownerUserId, :templateId,
+                            :runId, :workspaceId, :ownerUserId, :systemId, :templateId,
                             :templateVersionId, :templateName, :templateVersion,
                             :entryQuestion, cast(:graphSpec as jsonb), cast(:inputs as jsonb),
                             :fingerprint, :requestId, :sourceRunId, :retryRootRunId,
@@ -62,7 +65,8 @@ public class JdbcAgentWorkflowRunStore implements AgentWorkflowRunStore {
                         )
                         """)
                 .param("runId", draft.runId()).param("workspaceId", draft.workspaceId())
-                .param("ownerUserId", draft.ownerUserId()).param("templateId", draft.templateId())
+                .param("ownerUserId", draft.ownerUserId()).param("systemId", draft.businessSystemId())
+                .param("templateId", draft.templateId())
                 .param("templateVersionId", draft.templateVersionId())
                 .param("templateName", draft.templateName()).param("templateVersion", draft.templateVersion())
                 .param("entryQuestion", draft.entryQuestion()).param("graphSpec", draft.graphSpecJson())
@@ -245,7 +249,8 @@ public class JdbcAgentWorkflowRunStore implements AgentWorkflowRunStore {
     private static WorkflowRun workflow(ResultSet rs, List<WorkflowNode> nodes) throws SQLException {
         return new WorkflowRun(
                 rs.getObject("run_id", UUID.class), rs.getObject("workspace_id", UUID.class),
-                rs.getObject("owner_user_id", UUID.class), rs.getObject("template_id", UUID.class),
+                rs.getObject("owner_user_id", UUID.class), rs.getObject("business_system_id", UUID.class),
+                rs.getObject("template_id", UUID.class),
                 rs.getObject("template_version_id", UUID.class), rs.getString("template_name_snapshot"),
                 rs.getInt("template_version_snapshot"), rs.getString("entry_question_snapshot"),
                 rs.getString("graph_spec_snapshot"), rs.getString("input_snapshot"),

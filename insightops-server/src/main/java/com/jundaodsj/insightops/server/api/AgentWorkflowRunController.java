@@ -44,7 +44,7 @@ public class AgentWorkflowRunController {
 
     private WorkflowRunView view(AgentWorkflowRunStore.WorkflowRun run) {
         return new WorkflowRunView(
-                run.runId(), run.templateId(), run.templateVersionId(), run.templateName(),
+                run.runId(), run.businessSystemId(), run.templateId(), run.templateVersionId(), run.templateName(),
                 run.templateVersion(), run.entryQuestion(), value(run.graphSpecJson()),
                 value(run.inputJson()), run.toolContractFingerprint(), run.sourceRunId(),
                 run.retryRootRunId(), run.retryFromNodeId(), run.createdAt(),
@@ -78,7 +78,7 @@ public class AgentWorkflowRunController {
     }
 
     public record WorkflowRunView(
-            UUID runId, UUID templateId, UUID templateVersionId, String templateName,
+            UUID runId, UUID businessSystemId, UUID templateId, UUID templateVersionId, String templateName,
             int templateVersion, String entryQuestion, Object graphSpec, Object inputs,
             String toolContractFingerprint, UUID sourceRunId, UUID retryRootRunId,
             String retryFromNodeId, Instant createdAt, List<WorkflowNodeView> nodes) { }

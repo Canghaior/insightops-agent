@@ -48,7 +48,7 @@ class AgentWorkflowRunServiceTest {
     void launchesActiveVersionAsImmutableRunSnapshotAndEnqueuesIt() {
         UUID sessionId = UUID.randomUUID();
         UUID requestId = UUID.randomUUID();
-        when(workflowRuns.findByRequest(WORKSPACE, USER, requestId)).thenReturn(Optional.empty());
+        when(workflowRuns.lockAndFindByRequest(WORKSPACE, USER, requestId)).thenReturn(Optional.empty());
         when(templates.find(WORKSPACE, TEMPLATE)).thenReturn(Optional.of(template()));
         when(chatRuns.startRun(any(), any(), any(), any(), any(), any())).thenReturn(sessionId);
 
@@ -87,7 +87,7 @@ class AgentWorkflowRunServiceTest {
     void returnsExistingRequestWithoutCreatingAnotherRun() {
         UUID requestId = UUID.randomUUID();
         UUID runId = UUID.randomUUID();
-        when(workflowRuns.findByRequest(WORKSPACE, USER, requestId))
+        when(workflowRuns.lockAndFindByRequest(WORKSPACE, USER, requestId))
                 .thenReturn(Optional.of(existing(runId, requestId)));
 
         AgentWorkflowRunService.LaunchResult result = service.launch(
@@ -121,7 +121,7 @@ class AgentWorkflowRunServiceTest {
 
     private static AgentWorkflowRunStore.WorkflowRun existing(UUID runId, UUID requestId) {
         return new AgentWorkflowRunStore.WorkflowRun(
-                runId, WORKSPACE, USER, TEMPLATE, VERSION, "技术研究", 2,
+                runId, WORKSPACE, USER, null, TEMPLATE, VERSION, "技术研究", 2,
                 "研究 Spring AI", "{}", "{}", "a".repeat(64), requestId,
                 null, runId, null, Instant.now(), List.of());
     }

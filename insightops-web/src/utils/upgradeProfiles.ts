@@ -39,6 +39,19 @@ export function previousAssessmentInput(run: WorkflowRunDetail): Record<string, 
   return { ...inputs, uploadIds: Array.isArray(inputs.uploadIds) ? inputs.uploadIds.filter(id => !files.has(id)) : [] }
 }
 
+/** Use only the names recorded with this assessment, even if a file is no longer visible. */
+export function selectedMaterialNames(materials: unknown): Map<string, string> {
+  const names = new Map<string, string>()
+  if (Array.isArray(materials)) {
+    for (const item of materials) {
+      if (typeof item?.uploadId === 'string' && typeof item.name === 'string' && item.name.trim()) {
+        names.set(item.uploadId, item.name)
+      }
+    }
+  }
+  return names
+}
+
 /** Only apply an event resolved by the authenticated server, never raw URL query metadata. */
 export function applyReleaseEvent(input: UpgradeInput, event: ResearchEventContext): UpgradeInput {
   if (event.eventType !== 'GITHUB_RELEASE' || !event.versionTag) throw new Error('该事件没有可用于升级评估的 Release 版本。')

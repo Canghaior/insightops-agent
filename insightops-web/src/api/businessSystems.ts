@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import type { AssessmentType } from '@/utils/assessmentTypes'
 import type { UpgradeInput } from './upgradeAssessments'
 
 export interface SystemBackground {
@@ -27,7 +28,8 @@ export interface BusinessSystem {
 }
 export interface SystemSummary { id: string; name: string; purpose: string; revision: number; updatedAt: string }
 export interface SystemRun {
-  runId: string; projectName: string; currentVersion: string; targetVersion: string
+  runId: string; projectName: string | null; currentVersion: string | null; targetVersion: string | null
+  assessmentType?: AssessmentType; question?: string | null
   systemRevision: number; status: string; createdAt: string
 }
 export interface SystemDraft { background: SystemBackground; uploadIds: string[] }
@@ -52,6 +54,12 @@ export async function updateSystem(id: string, expectedRevision: number, draft: 
 }
 export async function systemHistory(id: string, page: number): Promise<{ items: SystemRun[]; hasMore: boolean }> {
   return (await apiClient.get(`${resource(id)}/runs`, { params: { page } })).data.data
+}
+export interface DecisionInput {
+  question: string; observations: string; environment: string; projectId: string | null; uploadIds: string[]
+}
+export async function launchSystemDecision(id: string, expectedRevision: number, input: DecisionInput, requestId: string): Promise<{ runId: string }> {
+  return (await apiClient.post(`${resource(id)}/decision-runs`, { ...input, requestId }, { params: { expectedRevision } })).data.data
 }
 export async function launchSystemUpgrade(id: string, expectedRevision: number, input: UpgradeInput, requestId: string): Promise<{ runId: string }> {
   return (await apiClient.post(`${resource(id)}/upgrade-runs`, { ...input, requestId }, { params: { expectedRevision } })).data.data

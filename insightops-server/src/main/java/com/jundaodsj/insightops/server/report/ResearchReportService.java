@@ -3,6 +3,7 @@ package com.jundaodsj.insightops.server.report;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentRunQuery;
+import com.jundaodsj.insightops.businesssystem.application.AssessmentType;
 import com.jundaodsj.insightops.agent.application.AgentWorkflowRunStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.server.businesssystem.BusinessSystemService;
@@ -45,6 +46,8 @@ public class ResearchReportService {
             try { inputs = json.readValue(workflow.inputJson(), new TypeReference<>() { }); }
             catch (Exception exception) { throw new IllegalStateException("Unable to read research inputs", exception); }
         }
+        boolean decision = workflow != null && workflow.businessSystemId() != null
+                && AssessmentType.SYSTEM_DECISION.name().equals(inputs.get("assessmentType"));
         List<String> uncertainties = new ArrayList<>();
         List<Map<String, Object>> evidence = new ArrayList<>();
         for (var tool : run.toolCalls()) {
@@ -65,7 +68,8 @@ public class ResearchReportService {
                     uncertainties.add("向量检索不可用，本次使用关键词检索，可能遗漏相关资料。");
                 if (output.path("sources").isArray()) output.path("sources").forEach(source -> {
                     if ("未标注".equals(source.path("version").asText()))
-                        uncertainties.add("部分文档未标注版本，尚未确认是否适用于目标版本。");
+                        uncertainties.add(decision ? "部分文档未标注版本，在当前系统上的适用性仍待核实。"
+                                : "部分文档未标注版本，尚未确认是否适用于目标版本。");
                 });
                 if (output.path("issue").path("bodyTruncated").asBoolean())
                     uncertainties.add("Issue 正文已截断，完整上下文需返回原文核查。");
@@ -82,24 +86,26 @@ public class ResearchReportService {
         var matcher = java.util.regex.Pattern.compile("(?m)^#{1,6}\\s*.*尚未确认事项[^\\n]*\\n").matcher(run.answer());
         if (matcher.find()) uncertainties.add(run.answer().substring(matcher.end()).strip());
         if (run.citationDetails().isEmpty()) uncertainties.add("没有结构化引用，关键事实尚需核查。");
-        uncertainties.add("研究基于获取到的资料，未运行你的业务项目验证；不构成兼容性保证。");
+        uncertainties.add(decision ? "客户系统的行为、根因和方案效果仍待实际验证。"
+                : "研究基于获取到的资料，未运行你的业务项目验证；不构成兼容性保证。");
         var snapshot = new ReportDeliveryStore.ResearchSnapshot(runId, run.question(), run.answer(), inputs,
                 run.citationDetails(), run.sources(), uncertainties.stream().distinct().toList(), evidence,
                 run.startedAt() == null ? run.createdAt() : run.startedAt(),
                 run.finishedAt() == null ? run.createdAt() : run.finishedAt(),
                 evidenceQuality.assess(run, inputs, workflow == null ? List.of() : workflow.nodes()));
         String title = workflow != null ? workflow.templateName() : "研究报告 · " + run.question();
-        if (inputs.containsKey("targetVersion")) title += " · " + inputs.getOrDefault("projectName", "")
+        if (decision) title += " · " + String.valueOf(inputs.get("decisionQuestion")).replaceAll("\\s+", " ").strip();
+        else if (inputs.containsKey("targetVersion")) title += " · " + inputs.getOrDefault("projectName", "")
                 + " " + inputs.getOrDefault("currentVersion", "") + " → " + inputs.get("targetVersion");
         BusinessSystemService.Detail system = workflow != null && workflow.businessSystemId() != null
                 ? json.convertValue(inputs.get("systemSnapshot"), BusinessSystemService.Detail.class) : null;
         if (system != null) title = system.background().name() + " · " + title;
         if (title.length() > 200) title = title.substring(0, 200);
         return reports.createResearchReport(actor, UUID.randomUUID(), title, snapshot,
-                markdown(title, snapshot, system), Instant.now());
+                markdown(title, snapshot, system, decision), Instant.now());
     }
 
-    private String markdown(String title, ReportDeliveryStore.ResearchSnapshot snapshot, BusinessSystemService.Detail system) {
+    private String markdown(String title, ReportDeliveryStore.ResearchSnapshot snapshot, BusinessSystemService.Detail system, boolean decision) {
         StringBuilder result = new StringBuilder("# ").append(title).append("\n\n")
                 .append("研究完成时间：").append(snapshot.finishedAt()).append("\n\n");
         if (snapshot.evidenceQuality() != null) {
@@ -135,7 +141,11 @@ public class ResearchReportService {
             field(result, "档案资料", String.join("、", system.attachments().stream().map(file -> file.name()).toList()));
             result.append("\n### 本次评估参数\n\n");
         }
+        if (decision || snapshot.inputs().containsKey("targetVersion")) {
+            field(result, "评估类型", decision ? "系统决策评估" : "版本升级评估");
+        }
         snapshot.inputs().forEach((key, value) -> {
+            if ("assessmentType".equals(key)) return;
             if (system != null && List.of("systemSnapshot", "businessProject", "uploadIds").contains(key)) return;
             if (system != null && "selectedMaterials".equals(key) && value instanceof List<?> files) {
                 field(result, "本次选用资料", String.join("、", files.stream().filter(Map.class::isInstance)
@@ -146,7 +156,12 @@ public class ResearchReportService {
                 field(result, inputLabel(key), String.join("、", entries.stream().map(String::valueOf).toList()));
                 return;
             }
-            if ("context".equals(key) && value instanceof Map<?, ?> context) {
+            if (decision && "decisionQuestion".equals(key)) {
+                field(result, "本次决策问题（用户提供）", String.valueOf(value));
+            } else if (decision && "context".equals(key) && value instanceof Map<?, ?> context) {
+                field(result, "观察到的现象（用户自述）", Objects.toString(context.get("observations"), ""));
+                field(result, "补充环境（用户自述）", Objects.toString(context.get("environment"), ""));
+            } else if ("context".equals(key) && value instanceof Map<?, ?> context) {
                 context.forEach((field, fact) -> result.append("- ").append(com.jundaodsj.insightops.server.workflow.ResearchProfiles.label(String.valueOf(field)))
                         .append(": ").append(fact).append('\n'));
             } else if (!List.of("focus", "projectId", "profileId", "researchTerms", "eventId", "sourceEvent").contains(key)
@@ -157,8 +172,9 @@ public class ResearchReportService {
             result.append("\n研究目标：评估 ").append(snapshot.inputs().get("projectName")).append(" 从 ")
                     .append(snapshot.inputs().get("currentVersion")).append(" 升级到 ").append(snapshot.inputs().get("targetVersion"))
                     .append(" 对本项目的影响。\n");
-        } else result.append("\n原始研究问题：\n\n").append(snapshot.question());
+        } else if (!decision) result.append("\n原始研究问题：\n\n").append(snapshot.question());
         result.append("\n\n## 来源依据（引用快照）\n\n");
+        if (decision && snapshot.citations().isEmpty()) result.append("本次没有取得可引用的资料，判断仅依据用户自述，需进一步验证。\n");
         for (var citation : snapshot.citations()) {
             result.append("- [").append(citation.label()).append("] ").append(citation.title())
                     .append(" · ").append(citation.heading() == null ? "" : citation.heading())
@@ -176,6 +192,7 @@ public class ResearchReportService {
         result.append("## 资料获取记录\n\n");
         snapshot.evidence().forEach(value -> {
             String name = switch (String.valueOf(value.get("tool"))) {
+                case "decision_input_review" -> "自述输入核对（未检索外部资料）";
                 case "github_release_list" -> "官方 Release";
                 case "knowledge_hybrid_search" -> "知识库资料检索";
                 case "github_issue_read" -> "已知 Issue";

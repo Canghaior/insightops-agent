@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentRunQuery;
+import com.jundaodsj.insightops.businesssystem.application.AssessmentType;
 import com.jundaodsj.insightops.agent.application.AgentWorkflowRunStore;
 import com.jundaodsj.insightops.report.application.ResearchEvidenceAssessment;
 import com.jundaodsj.insightops.report.application.ResearchEvidenceAssessment.Reason;
@@ -37,6 +38,8 @@ public class ResearchEvidenceQuality {
         if (!"SUCCEEDED".equals(run.status()) || run.answer() == null || run.answer().isBlank()) {
             return result("NOT_ASSESSED", List.of(new Reason("EXECUTION_INCOMPLETE", "尚未形成已完成的研究结果；执行状态不代表证据质量。")));
         }
+        boolean decision = AssessmentType.SYSTEM_DECISION.name()
+                .equals(inputs.get("assessmentType")) && inputs.containsKey("systemSnapshot");
         Map<String, Reason> reasons = new LinkedHashMap<>();
         boolean insufficient = false;
         String target = String.valueOf(inputs.getOrDefault("targetVersion", ""));
@@ -83,6 +86,10 @@ public class ResearchEvidenceQuality {
                 add(reasons, "WORKFLOW_EVIDENCE_MISSING", "研究步骤 " + node.logicalNodeId() + " 未完成，相关证据存在缺口。"); insufficient = true;
             }
         }
+        if (decision && !inputs.containsKey("projectId") && inputs.get("uploadIds") instanceof List<?> files && files.isEmpty()) {
+            add(reasons, "NO_EVIDENCE_SELECTED", "本次未选框架或资料，没有外部资料依据。请优先补充与问题直接相关的记录。");
+            insufficient = true;
+        }
         if (run.citationDetails().isEmpty()) {
             add(reasons, "CITATIONS_MISSING", "没有结构化引用，无法将结论与来源逐项核对。"); insufficient = true;
         }
@@ -96,7 +103,7 @@ public class ResearchEvidenceQuality {
                 add(reasons, "UNKNOWN_CITATION", "回答引用了不存在的来源编号 " + matched.group(1) + "。"); insufficient = true;
             }
         }
-        if (!hasCitation) {
+        if (!hasCitation && !(decision && run.citationDetails().isEmpty())) {
             add(reasons, "ANSWER_CITATIONS_MISSING", "回答正文没有来源编号；尚不能定位关键结论的依据。"); insufficient = true;
         }
         if (!target.isBlank()) {
@@ -127,7 +134,11 @@ public class ResearchEvidenceQuality {
             }
             add(reasons, "PROJECT_VALIDATION_REQUIRED", "升级建议仍需在业务项目中执行构建、测试和关键流程回归；当前未验证兼容性。");
         }
-        return result(insufficient ? "INSUFFICIENT_EVIDENCE" : reasons.isEmpty() ? "REVIEW_READY" : "REQUIRES_VALIDATION", List.copyOf(reasons.values()));
+        var assessment = result(insufficient ? "INSUFFICIENT_EVIDENCE" : reasons.isEmpty() ? "REVIEW_READY" : "REQUIRES_VALIDATION", List.copyOf(reasons.values()));
+        if (!decision) return assessment;
+        return new ResearchEvidenceAssessment(assessment.status(), assessment.label(),
+                "本次只核对输入和可引用资料。系统行为、性能、成本和方案效果仍需在业务环境中验证。",
+                assessment.reasons(), false, "decision-v1");
     }
 
     private static boolean sameBranch(ReleaseVersionRange.Version a, ReleaseVersionRange.Version b) {

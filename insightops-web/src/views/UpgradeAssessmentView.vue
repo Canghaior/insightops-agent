@@ -8,6 +8,7 @@ import { getSystem, launchSystemUpgrade, type BusinessSystem } from '@/api/busin
 import type { WorkflowPreset } from '@/api/workflowProducts'
 import { applyReleaseEvent, previousAssessmentInput, restoreUpgradeInput, selectedMaterialNames, suggestResearchProfile, systemSnapshotOf } from '@/utils/upgradeProfiles'
 import { getWorkflowRun } from '@/api/workflowRuns'
+import { assessmentTypeOf } from '@/utils/assessmentTypes'
 
 const router = useRouter(), route = useRoute()
 const setup = ref<UpgradeSetup | null>(null)
@@ -191,6 +192,7 @@ onMounted(async () => {
     changeProfile()
     if (typeof runId === 'string') {
       const previous = await getWorkflowRun(runId)
+      if (assessmentTypeOf(previous) === 'SYSTEM_DECISION') throw new Error('请从该运行的系统决策评估入口再次研究。')
       if (systemId && previous.businessSystemId !== systemId) throw new Error('历史运行与所选系统不一致。')
       systemId = previous.businessSystemId ?? systemId
       restore(previousAssessmentInput(previous))

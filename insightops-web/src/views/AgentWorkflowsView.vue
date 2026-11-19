@@ -129,7 +129,7 @@ async function launch() {
 onMounted(async () => {
   loading.value = true
   try {
-    templates.value = (await listActiveWorkflows()).filter(item => !['UPGRADE_ASSESSMENT', 'UPGRADE_IMPACT'].includes(item.category))
+    templates.value = (await listActiveWorkflows()).filter(item => !['UPGRADE_ASSESSMENT', 'UPGRADE_IMPACT', 'SYSTEM_DECISION'].includes(item.category))
     if (typeof route.query.runId === 'string') {
       const previous = await getWorkflowRun(route.query.runId)
       const template = templates.value.find(item => item.id === previous.templateId)

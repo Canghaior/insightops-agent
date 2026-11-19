@@ -7,6 +7,7 @@ import com.jundaodsj.insightops.agent.application.AgentConditionalGraphStore;
 import com.jundaodsj.insightops.agent.application.AgentLoopAuditStore;
 import com.jundaodsj.insightops.agent.application.AgentOrchestrationStore;
 import com.jundaodsj.insightops.agent.application.AgentWorkflowRunStore;
+import com.jundaodsj.insightops.businesssystem.application.AssessmentType;
 import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.model.application.AgentPlanningModelGateway.PlannedToolCall;
 import com.jundaodsj.insightops.model.application.ModelUsage;
@@ -31,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -84,15 +86,25 @@ public class AgentWorkflowFixedGraphService {
         this.json = json;
     }
 
-    public boolean isWorkflow(UUID runId) {
-        return workflowRuns.find(runId).isPresent();
+    public Optional<AgentWorkflowRunStore.WorkflowRun> findWorkflow(UUID runId) {
+        return workflowRuns.find(runId);
+    }
+
+    public boolean isSystemDecision(AgentWorkflowRunStore.WorkflowRun workflow) {
+        return workflow != null && workflow.businessSystemId() != null
+                && AssessmentType.SYSTEM_DECISION.name()
+                        .equals(readMap(workflow.inputJson()).get("assessmentType"));
     }
 
     public AgentLoopService.LoopResult execute(
             Request request, AgentToolDispatcher.ProgressListener listener,
             BooleanSupplier active) {
-        AgentWorkflowRunStore.WorkflowRun workflow = workflowRuns.find(request.runId())
-                .orElseThrow(() -> new WorkflowExecutionException("WORKFLOW_RUN_NOT_FOUND"));
+        return execute(findWorkflow(request.runId()).orElseThrow(() -> new WorkflowExecutionException("WORKFLOW_RUN_NOT_FOUND")),
+                request, listener, active);
+    }
+
+    public AgentLoopService.LoopResult execute(AgentWorkflowRunStore.WorkflowRun workflow, Request request,
+                                               AgentToolDispatcher.ProgressListener listener, BooleanSupplier active) {
         AgentWorkflowExpressionService.Graph graph = expressions.validateGraph(workflow.graphSpecJson());
         if (!workflow.toolContractFingerprint().equals(expressions.contractFingerprint(graph))) {
             throw new WorkflowExecutionException("WORKFLOW_TOOL_CONTRACT_CHANGED");

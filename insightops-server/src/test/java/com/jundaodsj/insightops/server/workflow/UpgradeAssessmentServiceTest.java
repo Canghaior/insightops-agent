@@ -94,7 +94,7 @@ class UpgradeAssessmentServiceTest {
         UUID oldVersion = UUID.randomUUID(), activeVersion = UUID.randomUUID(), templateId = UUID.randomUUID();
         Instant now = Instant.now();
         var versions = List.of(new AgentWorkflowTemplateStore.WorkflowVersion(activeVersion, templateId, 2, "ACTIVE", "", "", """
-                        {"inputs":{"sourceEvent":{"type":"json"},"systemSnapshot":{"type":"json"},"selectedMaterials":{"type":"json_array"}}}
+                        {"inputs":{"sourceEvent":{"type":"json"},"systemSnapshot":{"type":"json"},"selectedMaterials":{"type":"json_array"},"assessmentType":{"type":"string"}}}
                         """, actor.userId(), now, now),
                 new AgentWorkflowTemplateStore.WorkflowVersion(oldVersion, templateId, 1, "ARCHIVED", "", "", "{}", actor.userId(), now, now));
         var template = new AgentWorkflowTemplateStore.WorkflowTemplate(templateId, actor.workspaceId(), UpgradeAssessmentService.NAME, "", "UPGRADE_ASSESSMENT", "ACTIVE", activeVersion, actor.userId(), now, now, versions);
@@ -147,7 +147,8 @@ class UpgradeAssessmentServiceTest {
         assertThatThrownBy(() -> service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, null, null, "other")).hasMessageContaining("不属于该框架");
         when(updates.findResearchEvent(actor, eventId)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, null, null, "deleted")).hasMessageContaining("无权访问");
-        verify(runs, times(3)).existingLaunch(eq(actor), eq(command.requestId()), isNull());
+        verify(runs, times(3)).existingAssessmentLaunch(eq(actor), eq(command.requestId()), isNull(),
+                eq(com.jundaodsj.insightops.businesssystem.application.AssessmentType.UPGRADE_ASSESSMENT));
         verifyNoMoreInteractions(runs);
     }
 

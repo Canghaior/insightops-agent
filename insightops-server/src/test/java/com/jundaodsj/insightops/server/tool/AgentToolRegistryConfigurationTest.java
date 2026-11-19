@@ -17,6 +17,7 @@ class AgentToolRegistryConfigurationTest {
         assertThat(registry.definitions())
                 .extracting(definition -> definition.name())
                 .containsExactly(
+                        AgentToolNames.DECISION_INPUT_REVIEW,
                         AgentToolNames.GITHUB_ISSUE_READ,
                         AgentToolNames.GITHUB_RELEASE_LIST,
                         AgentToolNames.KNOWLEDGE_HYBRID_SEARCH,
@@ -42,7 +43,8 @@ class AgentToolRegistryConfigurationTest {
         assertThat(registry.availableTo(AgentToolDefinition.AccessLevel.SYSTEM_ADMIN))
                 .extracting(definition -> definition.name())
                 .doesNotContain(AgentToolNames.KNOWLEDGE_HYBRID_SEARCH)
-                .hasSize(4);
+                .contains(AgentToolNames.DECISION_INPUT_REVIEW)
+                .hasSize(5);
     }
 
     @Test

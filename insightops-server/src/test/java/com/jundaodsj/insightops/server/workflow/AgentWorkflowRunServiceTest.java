@@ -87,6 +87,7 @@ class AgentWorkflowRunServiceTest {
     void returnsExistingRequestWithoutCreatingAnotherRun() {
         UUID requestId = UUID.randomUUID();
         UUID runId = UUID.randomUUID();
+        when(templates.find(WORKSPACE, TEMPLATE)).thenReturn(Optional.of(template()));
         when(workflowRuns.lockAndFindByRequest(WORKSPACE, USER, requestId))
                 .thenReturn(Optional.of(existing(runId, requestId)));
 

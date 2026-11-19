@@ -23,7 +23,7 @@ class AgentToolCatalogControllerTest {
                 controller.list(request);
 
         assertThat(response.traceId()).isEqualTo("trace-tools");
-        assertThat(response.data()).hasSize(5)
+        assertThat(response.data()).hasSize(6)
                 .allMatch(tool -> tool.inputSchema().containsKey("additionalProperties"));
         assertThat(response.data().stream()
                 .filter(tool -> "user_memory_upsert".equals(tool.name())))

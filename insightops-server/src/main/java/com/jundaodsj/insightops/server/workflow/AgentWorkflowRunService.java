@@ -8,6 +8,8 @@ import com.jundaodsj.insightops.agent.application.AgentWorkflowRunStore;
 import com.jundaodsj.insightops.agent.application.AgentWorkflowTemplateStore;
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
+import com.jundaodsj.insightops.businesssystem.application.AssessmentType;
+import java.util.function.Predicate;
 import com.jundaodsj.insightops.server.chat.DurableChatRunCoordinator;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolDefinition;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolRegistry;
@@ -79,19 +81,18 @@ public class AgentWorkflowRunService {
             ActorContext actor, boolean systemAdmin, AgentToolDefinition.AccessLevel accessLevel,
             UUID templateId, UUID expectedVersionId, UUID sessionId,
             UUID requestId, Map<String, Object> suppliedInputs, String traceId) {
-        var replay = existingLaunch(actor, requestId, null);
-        if (replay.isPresent()) return replay.get();
-
         AgentWorkflowTemplateStore.WorkflowTemplate template = templates.find(actor.workspaceId(), templateId)
                 .orElseThrow(() -> new WorkflowRunException("WORKFLOW_TEMPLATE_NOT_FOUND"));
+        if ("UPGRADE_ASSESSMENT".equals(template.category()) || "SYSTEM_DECISION".equals(template.category())) {
+            throw new WorkflowRunException("请从相应的业务评估表单启动研究。");
+        }
+        var replay = existingLaunch(actor, requestId, null, run -> templateId.equals(run.templateId()));
+        if (replay.isPresent()) return replay.get();
         if (!"ACTIVE".equals(template.status()) || template.activeVersionId() == null) {
             throw new WorkflowRunException("WORKFLOW_TEMPLATE_NOT_ACTIVE");
         }
         if (!template.activeVersionId().equals(expectedVersionId)) {
             throw new WorkflowRunException("WORKFLOW_ACTIVE_VERSION_CHANGED");
-        }
-        if ("UPGRADE_ASSESSMENT".equals(template.category())) {
-            throw new WorkflowRunException("请从升级评估表单启动研究。");
         }
         AgentWorkflowTemplateStore.WorkflowVersion version = template.versions().stream()
                 .filter(item -> item.id().equals(expectedVersionId)).findFirst()
@@ -115,9 +116,16 @@ public class AgentWorkflowRunService {
     }
 
     // Called inside the launch transaction before loading mutable project or system inputs.
-    Optional<LaunchResult> existingLaunch(ActorContext actor, UUID requestId, UUID systemId) {
+    Optional<LaunchResult> existingAssessmentLaunch(ActorContext actor, UUID requestId, UUID systemId, AssessmentType type) {
+        return existingLaunch(actor, requestId, systemId, run -> run.templateId() != null
+                && templates.find(actor.workspaceId(), run.templateId()).filter(template -> type.name().equals(template.category())).isPresent());
+    }
+
+    private Optional<LaunchResult> existingLaunch(ActorContext actor, UUID requestId, UUID systemId,
+                                                  Predicate<AgentWorkflowRunStore.WorkflowRun> matches) {
         return workflowRuns.lockAndFindByRequest(actor.workspaceId(), actor.userId(), requestId).map(run -> {
-            if (run.sourceRunId() != null || !Objects.equals(run.businessSystemId(), systemId)) {
+            if (run.sourceRunId() != null || !Objects.equals(run.businessSystemId(), systemId)
+                    || !matches.test(run)) {
                 throw new RequestConflict();
             }
             return new LaunchResult(run.runId(), null, true);

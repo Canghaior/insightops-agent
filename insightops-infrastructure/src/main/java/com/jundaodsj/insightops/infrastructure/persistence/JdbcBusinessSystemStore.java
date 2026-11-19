@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.infrastructure.persistence;
 
 import com.jundaodsj.insightops.businesssystem.application.BusinessSystemStore;
+import com.jundaodsj.insightops.businesssystem.application.AssessmentType;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -96,13 +97,16 @@ public class JdbcBusinessSystemStore implements BusinessSystemStore {
         return scoped("""
                 select w.run_id, w.input_snapshot->>'projectName' as project_name,
                     w.input_snapshot->>'currentVersion' as current_version, w.input_snapshot->>'targetVersion' as target_version,
-                    w.input_snapshot #>> '{systemSnapshot,revision}' as system_revision, r.status, w.created_at
+                    w.input_snapshot #>> '{systemSnapshot,revision}' as system_revision, r.status, w.created_at,
+                    coalesce(w.input_snapshot->>'assessmentType', 'UPGRADE_ASSESSMENT') as assessment_type,
+                    left(w.input_snapshot->>'decisionQuestion', 160) as question
                 from agent_workflow_run w join agent_run r on r.id=w.run_id
                 where w.workspace_id=:workspace and w.owner_user_id=:owner and w.business_system_id=:id
                 order by w.created_at desc, w.run_id limit :limit offset :offset
                 """, actor).param("id", id).param("limit", limit).param("offset", offset)
                 .query((rs, row) -> new Run(rs.getObject("run_id", UUID.class), rs.getString("project_name"),
                         rs.getString("current_version"), rs.getString("target_version"), rs.getInt("system_revision"),
-                        rs.getString("status"), rs.getTimestamp("created_at").toInstant())).list();
+                        rs.getString("status"), rs.getTimestamp("created_at").toInstant(),
+                        AssessmentType.valueOf(rs.getString("assessment_type")), rs.getString("question"))).list();
     }
 }

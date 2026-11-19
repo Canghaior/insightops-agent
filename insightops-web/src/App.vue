@@ -127,7 +127,7 @@ async function changeWorkspace(event: { target: unknown }) {
       <nav v-if="secondaryItems.length" class="section-navigation" :aria-label="`${activeGroup?.label}相关功能`">
         <RouterLink v-for="item in secondaryItems" :key="item.path" :to="item.path">{{ item.label }}<b v-if="item.path === '/digests' && unreadNotifications"> {{ unreadNotifications > 99 ? '99+' : unreadNotifications }}</b></RouterLink>
       </nav>
-      <RouterView :key="route.name === 'upgrade-assessment' ? JSON.stringify([route.query.systemId, route.query.runId]) : undefined" />
+      <RouterView :key="route.name === 'upgrade-assessment' ? JSON.stringify([route.query.systemId, route.query.runId]) : route.name === 'system-decision' ? JSON.stringify([route.params.id, route.query.runId]) : undefined" />
     </main>
   </div>
 </template>

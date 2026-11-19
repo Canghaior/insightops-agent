@@ -14,7 +14,8 @@ import {
   type RunToolCall,
 } from '@/api/runs'
 import SystemBackgroundPanel from '@/components/SystemBackground.vue'
-import { systemSnapshotOf } from '@/utils/upgradeProfiles'
+import { assessmentTypeOf, decisionFormOf } from '@/utils/assessmentTypes'
+import { selectedMaterialNames, systemSnapshotOf } from '@/utils/upgradeProfiles'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import ResearchResultActions from '@/components/ResearchResultActions.vue'
 import RunEvidenceQuality from '@/components/RunEvidenceQuality.vue'
@@ -46,11 +47,22 @@ const status = ref<RunStatus | ''>('')
 const checkpoint = ref<AgentCheckpoint | null>(null)
 const workflowRun = ref<WorkflowRunDetail | null>(null)
 const linkedSystem = computed(() => systemSnapshotOf(workflowRun.value))
+const assessmentType = computed(() => assessmentTypeOf(workflowRun.value))
+const decision = computed(() => workflowRun.value && assessmentType.value === 'SYSTEM_DECISION' ? decisionFormOf(workflowRun.value) : null)
+const decisionFiles = computed(() => [...selectedMaterialNames((workflowRun.value?.inputs as Record<string, unknown>)?.selectedMaterials).values()])
+const warnings = computed(() => researchWarnings(selectedRun.value?.toolCalls ?? [], workflowRun.value?.nodes, assessmentType.value === 'SYSTEM_DECISION'))
+const repeatUrl = computed(() => {
+  const run = selectedRun.value
+  if (!run) return
+  if (assessmentType.value === 'SYSTEM_DECISION') return `/business-systems/${workflowRun.value!.businessSystemId}/decision-assessment?runId=${run.id}`
+  if (assessmentType.value === 'UPGRADE_ASSESSMENT') return `/upgrade-assessment?runId=${run.id}`
+  return workflowRun.value ? `/agent-workflows?runId=${run.id}` : `/chat?question=${encodeURIComponent(run.question)}`
+})
 const assessmentRange = computed(() => {
   const inputs = workflowRun.value?.inputs
   if (!linkedSystem.value || !inputs || typeof inputs !== 'object') return ''
   const values = inputs as Record<string, unknown>
-  return `${values.projectName} · ${values.currentVersion} → ${values.targetVersion}`
+  return values.currentVersion && values.targetVersion ? `${values.projectName} · ${values.currentVersion} → ${values.targetVersion}` : ''
 })
 const runActionLoading = ref(false)
 const runActionError = ref('')
@@ -346,16 +358,23 @@ onUnmounted(() => {
           </p>
 
           <div v-if="linkedSystem && workflowRun?.runId === selectedRun.id" class="detail-block">
-            <p class="assessment-range">本次评估 · {{ assessmentRange }}</p>
+            <template v-if="decision">
+              <h3>系统决策评估</h3><p>{{ decision.question }}</p>
+              <p v-if="decision.observations">观察到的现象（用户自述） · {{ decision.observations }}</p>
+              <p v-if="decision.environment">补充环境（用户自述） · {{ decision.environment }}</p>
+              <p>相关框架 · {{ (workflowRun?.inputs as Record<string, unknown>)?.projectName || '未选择' }}</p>
+              <p>本次选用资料 · {{ decisionFiles.join('、') || '未选择' }}</p>
+            </template>
+            <p v-else class="assessment-range">版本升级评估 · {{ assessmentRange }}</p>
             <SystemBackgroundPanel :system="linkedSystem" />
           </div>
           <ResearchResultActions
             :run-id="selectedRun.id" :can-save="selectedRun.status === 'SUCCEEDED' && !!selectedRun.answer"
-            :repeat-url="workflowRun?.templateName === '升级评估（版本范围）' ? `/upgrade-assessment?runId=${selectedRun.id}` : workflowRun ? `/agent-workflows?runId=${selectedRun.id}` : `/chat?question=${encodeURIComponent(selectedRun.question)}`"
+            :repeat-url="repeatUrl"
           />
           <RunEvidenceQuality :key="`${selectedRun.id}:${selectedRun.status}`" :run-id="selectedRun.id" />
-          <div v-if="researchWarnings(selectedRun.toolCalls, workflowRun?.nodes).length" class="detail-block detail-failure" role="status">
-            <h3>资料缺口与待核实事项</h3><ul><li v-for="warning in researchWarnings(selectedRun.toolCalls, workflowRun?.nodes)" :key="warning">{{ warning }}</li></ul>
+          <div v-if="warnings.length" class="detail-block detail-failure" role="status">
+            <h3>资料缺口与待核实事项</h3><ul><li v-for="warning in warnings" :key="warning">{{ warning }}</li></ul>
           </div>
           <section v-if="selectedRun.answer" class="detail-block">
             <span class="eyebrow">研究结论</span>

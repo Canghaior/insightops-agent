@@ -26,7 +26,7 @@ public class AgentToolRegistryConfiguration {
 
     public static List<AgentToolDefinition> definitions(boolean ragEnabled, boolean githubMcpEnabled) {
         return List.of(releaseDefinition(), ragDefinition(ragEnabled), eventDefinition(),
-                memoryDefinition(), mcpDefinition(), issueDefinition(githubMcpEnabled));
+                memoryDefinition(), mcpDefinition(), issueDefinition(githubMcpEnabled), decisionInputReview());
     }
 
     private static AgentToolDefinition issueDefinition(boolean enabled) {
@@ -107,6 +107,13 @@ public class AgentToolRegistryConfiguration {
                                 "resultCount", "最终选中的证据切片数量。", true, 0, 12),
                         AgentToolDefinition.Parameter.jsonArray(
                                 "sources", "结构化引用与得分。", true)));
+    }
+
+    private static AgentToolDefinition decisionInputReview() {
+        return definition(AgentToolNames.DECISION_INPUT_REVIEW,
+                "核对系统决策问题的自述输入缺口，只读取本次表单。", true, Duration.ofSeconds(5),
+                List.of(AgentToolDefinition.Parameter.json("context", "用户提供的现象和环境。", true)),
+                List.of(AgentToolDefinition.Parameter.stringArray("missing", "尚待补充的输入。", true, 3)));
     }
 
     private static AgentToolDefinition eventDefinition() {

@@ -121,7 +121,8 @@ async function save() {
       <RouterLink v-if="mode === 'business-systems'" class="primary-button" to="/business-systems/new">新建系统</RouterLink>
       <div v-if="detail && !editing" class="actions">
         <RouterLink class="secondary-button" :to="{ name: 'business-system-edit', params: { id } }">编辑档案</RouterLink>
-        <RouterLink class="primary-button" :to="{ path: '/upgrade-assessment', query: { systemId: id } }">发起升级评估</RouterLink>
+        <RouterLink class="primary-button" :to="{ name: 'system-decision', params: { id } }">系统决策评估</RouterLink>
+        <RouterLink class="secondary-button" :to="{ path: '/upgrade-assessment', query: { systemId: id } }">发起升级评估</RouterLink>
       </div>
     </div>
     <p v-if="error" class="error" role="alert">{{ error }} <button v-if="conflict || failed" class="text-button" @click="load">重新载入</button></p>
@@ -129,7 +130,7 @@ async function save() {
     <template v-else-if="!failed">
       <section v-if="mode === 'business-systems'" class="panel">
         <p class="scope">当前工作区 · 仅本人可见</p>
-        <p v-if="!systems.length">还没有业务系统。创建档案后，即可从同一系统发起和回看升级评估。</p>
+        <p v-if="!systems.length">还没有业务系统。创建档案后，即可从同一系统发起和回看评估。</p>
         <RouterLink v-for="system in systems" :key="system.id" class="system-row" :to="{ name: 'business-system', params: { id: system.id } }">
           <span><strong>{{ system.name }}</strong><small>{{ system.purpose || '用途未填写' }}</small></span>
           <span class="row-meta">修订 {{ system.revision }}<small>{{ date(system.updatedAt) }}</small></span>
@@ -160,9 +161,10 @@ async function save() {
         <section class="panel history">
           <h3>评估历史</h3>
           <p v-if="historyError" role="alert">{{ historyError }} <button class="text-button" @click="history(page)">重试</button></p>
-          <p v-else-if="!runs.length" class="subtle">该系统还没有升级评估。</p>
+          <p v-else-if="!runs.length" class="subtle">该系统还没有评估记录。</p>
           <RouterLink v-for="run in runs" :key="run.runId" class="system-row" :to="`/runs/${run.runId}`">
-            <span><strong>{{ run.projectName }} · {{ run.currentVersion }} → {{ run.targetVersion }}</strong>
+            <span><strong v-if="run.assessmentType === 'SYSTEM_DECISION'">系统决策评估 · {{ run.question }}</strong>
+              <strong v-else>版本升级评估 · {{ run.projectName }}<template v-if="run.currentVersion && run.targetVersion"> {{ run.currentVersion }} → {{ run.targetVersion }}</template></strong>
               <small>档案修订 {{ run.systemRevision }} · {{ date(run.createdAt) }}</small></span>
             <span class="row-meta">{{ runStatus[run.status] ?? run.status }} ›</span>
           </RouterLink>

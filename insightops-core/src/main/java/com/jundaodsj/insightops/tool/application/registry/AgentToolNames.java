@@ -4,6 +4,7 @@ public final class AgentToolNames {
 
     public static final String GITHUB_RELEASE_LIST = "github_release_list";
     public static final String GITHUB_ISSUE_READ = "github_issue_read";
+    public static final String DECISION_INPUT_REVIEW = "decision_input_review";
     public static final String KNOWLEDGE_HYBRID_SEARCH = "knowledge_hybrid_search";
     public static final String PROJECT_INTELLIGENCE_EVENT_SEARCH =
             "project_intelligence_event_search";

@@ -17,6 +17,7 @@ const router = createRouter({
     { path: '/business-systems', name: 'business-systems', component: () => import('@/views/BusinessSystemsView.vue') },
     { path: '/business-systems/new', name: 'business-system-new', component: () => import('@/views/BusinessSystemsView.vue') },
     { path: '/business-systems/:id', name: 'business-system', component: () => import('@/views/BusinessSystemsView.vue') },
+    { path: '/business-systems/:id/decision-assessment', name: 'system-decision', component: () => import('@/views/SystemDecisionView.vue') },
     { path: '/business-systems/:id/edit', name: 'business-system-edit', component: () => import('@/views/BusinessSystemsView.vue') },
     { path: '/projects', name: 'projects', component: () => import('@/views/ProjectsView.vue') },
     { path: '/updates', name: 'updates', component: () => import('@/views/UpdatesView.vue') },

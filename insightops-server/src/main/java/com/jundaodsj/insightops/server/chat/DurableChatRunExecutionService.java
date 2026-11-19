@@ -159,8 +159,9 @@ public class DurableChatRunExecutionService {
             AgentToolDefinition.AccessLevel accessLevel =
                     AgentToolDefinition.AccessLevel.valueOf(lease.accessLevel());
             AgentLoopService.LoopResult loopResult;
-            if (workflowGraphs != null && workflowGraphs.isWorkflow(lease.runId())) {
-                loopResult = workflowGraphs.execute(
+            var workflow = workflowGraphs == null ? null : workflowGraphs.findWorkflow(lease.runId()).orElse(null);
+            if (workflow != null) {
+                loopResult = workflowGraphs.execute(workflow,
                         new com.jundaodsj.insightops.server.workflow.AgentWorkflowFixedGraphService.Request(
                                 lease.runId(), lease.workspaceId(), lease.ownerUserId(),
                                 lease.systemAdmin(), accessLevel, lease.leaseToken(),
@@ -178,8 +179,11 @@ public class DurableChatRunExecutionService {
             guardrail.verifyCitationSources(loopResult.citations());
 
             ActorContext actor = new ActorContext(lease.ownerUserId(), lease.workspaceId());
-            String systemPrompt = guardrail.researchSystemPrompt()
-                    + userMemoryStore.prompt(actor, 20) + loopResult.systemPromptAppendix();
+            String context = workflow != null && workflowGraphs.isSystemDecision(workflow)
+                    ? "\n仅以本次冻结的系统档案、问题和补充输入描述用户自述。以本次工具返回的可引用资料支持事实。"
+                        + "请区分事实与假设，只建议验证，未知阈值与成本待确定。\n"
+                    : userMemoryStore.prompt(actor, 20);
+            String systemPrompt = guardrail.researchSystemPrompt() + context + loopResult.systemPromptAppendix();
             Completion completion = streamAnswer(
                     lease, guard, answer, systemPrompt, lease.contextualPrompt(),
                     loopResult.planningUsage());

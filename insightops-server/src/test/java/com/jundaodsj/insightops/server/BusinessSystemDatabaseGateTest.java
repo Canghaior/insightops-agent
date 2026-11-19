@@ -57,6 +57,7 @@ class BusinessSystemDatabaseGateTest {
     private TransactionTemplate tx;
     private BusinessSystemService systems;
     private UpgradeAssessmentService upgrades;
+    private SystemDecisionAssessmentService decisions;
     private AgentWorkflowRunService runs;
     private JdbcAgentWorkflowRunStore workflows;
     private JdbcKnowledgeUploadStore uploads;
@@ -101,6 +102,7 @@ class BusinessSystemDatabaseGateTest {
         watches.setEnabled(ACTOR, PROJECT, true, Instant.now());
         upgrades = new UpgradeAssessmentService(templates, runs, watches, materials, null, registry, json,
                 null, null, mock(KnowledgeStore.class), null, systems);
+        decisions = new SystemDecisionAssessmentService(systems, materials, watches, templates, runs, json, registry);
         var reports = new JdbcReportDeliveryStore(jdbc, json, new DeliverySecretCipher("io01-report-fixture-only"));
         research = new ResearchReportService(runQuery, workflows, reports, json, "http://localhost");
         exports = new ReportService(reports, new ReportPdfRenderer(""));
@@ -241,6 +243,57 @@ class BusinessSystemDatabaseGateTest {
         var legacy = launch(ACTOR, null, null, UUID.randomUUID());
         assertThat(workflows.find(legacy.runId()).orElseThrow().inputJson()).doesNotContain("systemSnapshot");
         assertThat(systems.history(ACTOR, id, 0).items()).hasSize(2);
+    }
+
+    private AgentWorkflowRunService.LaunchResult decide(UUID systemId, int revision, UUID requestId, String observation) {
+        var command = new SystemDecisionAssessmentService.Command(requestId, "回调变慢应先做什么？", observation, "", null, List.of());
+        return tx.execute(status -> decisions.launch(ACTOR, false, AccessLevel.WORKSPACE_MEMBER, systemId, revision, command, requestId.toString()));
+    }
+
+    @Test void decisionsFreezeInputsAndKeepBothKindsOfRunsDistinct() throws Exception {
+        var system = create("Stack-before", List.of());
+        UUID id = system.id(), request = UUID.randomUUID();
+        var first = decide(id, 1, request, "旧自述");
+        var stored = workflows.find(first.runId()).orElseThrow();
+        assertThat(stored.nodes()).extracting("toolName").containsExactly("decision_input_review");
+        assertThat(stored.inputJson()).contains("SYSTEM_DECISION", "Stack-before", "旧自述")
+                .doesNotContain("projectId", "currentVersion", "targetVersion");
+        assertThat(jdbc.sql("select contextual_prompt from agent_run_work where run_id=?").param(first.runId()).query(String.class).single())
+                .contains("回调变慢应先做什么", "旧自述", "Stack-before", "没有外部资料依据", "下一步验证");
+
+        tx.executeWithoutResult(status -> systems.update(ACTOR, id, draft("Stack-after", 1, List.of())));
+        assertThat(decide(id, 1, request, "另一个问题背景").runId()).isEqualTo(first.runId());
+        assertThatThrownBy(() -> decide(id, 1, UUID.randomUUID(), "")).hasMessageContaining("409");
+        assertThatThrownBy(() -> launch(ACTOR, id, 2, request)).isInstanceOf(AgentWorkflowRunService.RequestConflict.class);
+        UUID upgradeRequest = UUID.randomUUID();
+        var upgrade = launch(ACTOR, id, 2, upgradeRequest);
+        assertThatThrownBy(() -> decide(id, 2, upgradeRequest, "")).isInstanceOf(AgentWorkflowRunService.RequestConflict.class);
+        // Simulate a genuine legacy upgrade snapshot missing the type.
+        jdbc.sql("update agent_workflow_run set input_snapshot=input_snapshot-'assessmentType' where run_id=?").param(upgrade.runId()).update();
+        var second = decide(id, 2, UUID.randomUUID(), "新自述");
+        assertThat(workflows.find(second.runId()).orElseThrow().inputJson()).contains("Stack-after", "新自述").doesNotContain("旧自述");
+        var history = systems.history(ACTOR, id, 0).items();
+        assertThat(history).extracting(item -> item.assessmentType().name())
+                .containsExactly("SYSTEM_DECISION", "UPGRADE_ASSESSMENT", "SYSTEM_DECISION");
+        assertThat(history.getFirst().question()).isEqualTo("回调变慢应先做什么？");
+        assertThat(history.get(1).currentVersion()).isEqualTo("1.0.0");
+
+        jdbc.sql("update agent_run set status='SUCCEEDED', answer='合成回答：建议先收集回调记录。', finished_at=now() where id=?")
+                .param(first.runId()).update();
+        var report = research.create(ACTOR, first.runId());
+        assertThat(report.title()).contains("系统决策评估", "回调变慢").doesNotContain("→");
+        assertThat(report.research().evidenceQuality().status()).isEqualTo("INSUFFICIENT_EVIDENCE");
+        assertThat(report.research().citations()).isEmpty();
+        assertThat(exports.markdown(ACTOR, report.id())).contains("系统决策评估", "旧自述", "Stack-before", "没有外部资料依据")
+                .doesNotContain("Stack-after", "→", "<decision_inputs>", "assessmentType", "decisionQuestion");
+        try (var pdf = Loader.loadPDF(exports.pdf(ACTOR, report.id()))) {
+            assertThat(new PDFTextStripper().getText(pdf)).contains("系统决策评估", "Stack-before").doesNotContain("Stack-after");
+        }
+        jdbc.sql("update agent_run set status='FAILED', finished_at=now() where id=?").param(second.runId()).update();
+        jdbc.sql("update agent_workflow_run_node set status='FAILED' where run_id=?").param(second.runId()).update();
+        tx.executeWithoutResult(status -> systems.update(ACTOR, id, draft("Stack-later", 2, List.of())));
+        var retried = tx.execute(status -> runs.retry(ACTOR, false, AccessLevel.WORKSPACE_MEMBER, second.runId(), "review_inputs", UUID.randomUUID(), UUID.randomUUID().toString()));
+        assertThat(workflows.find(retried.runId()).orElseThrow().inputJson()).isEqualTo(workflows.find(second.runId()).orElseThrow().inputJson());
     }
 
     @Test void concurrentDuplicateAndFailedNodeRetryKeepOriginalAssociation() throws Exception {

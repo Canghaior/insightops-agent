@@ -12,4 +12,12 @@ describe('research evidence warnings', () => {
     expect(researchWarnings(tools).join(' ')).toContain('关键词检索')
     expect(researchWarnings(tools).join(' ')).toContain('没有找到足够证据')
   })
+  it('explains decision evidence gaps when there is no target version', () => {
+    const tool = { toolName: 'knowledge_hybrid_search', status: 'SUCCEEDED',
+      resultPayload: { answerable: false, sources: [{ version: '未标注' }] } } as RunToolCall
+    const warnings = researchWarnings([tool], [], true).join(' ')
+    expect(warnings).toContain('当前判断仍需补充依据')
+    expect(warnings).toContain('当前系统上的适用性')
+    expect(warnings).not.toContain('目标版本')
+  })
 })

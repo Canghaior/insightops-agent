@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.agent.application.AgentWorkflowTemplateStore;
 import com.jundaodsj.insightops.agent.application.AgentWorkflowProductStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
+import com.jundaodsj.insightops.businesssystem.application.AssessmentType;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeUploadStore;
 import com.jundaodsj.insightops.project.application.UserProjectWatchStore;
@@ -151,7 +152,7 @@ public class UpgradeAssessmentService {
     public AgentWorkflowRunService.LaunchResult launch(ActorContext actor, boolean systemAdmin,
             AgentToolDefinition.AccessLevel access, Command command, UUID systemId, Integer expectedRevision, String traceId) {
         if (command == null || command.requestId() == null) throw new IllegalArgumentException("缺少请求标识。");
-        var replay = runs.existingLaunch(actor, command.requestId(), systemId);
+        var replay = runs.existingAssessmentLaunch(actor, command.requestId(), systemId, AssessmentType.UPGRADE_ASSESSMENT);
         if (replay.isPresent()) return replay.get();
         var system = systemId == null ? null : systems.forAssessment(actor, systemId, expectedRevision);
         Map<String, Object> inputs = inputs(actor, command, system);
@@ -211,6 +212,7 @@ public class UpgradeAssessmentService {
         var profile = ResearchProfiles.require(profileId);
         Map<String, String> context = ResearchProfiles.normalize(profileId, command.context(), command.javaVersion(), command.springBootVersion());
         Map<String, Object> inputs = new LinkedHashMap<>();
+        inputs.put("assessmentType", AssessmentType.UPGRADE_ASSESSMENT.name());
         inputs.put("projectId", project.id().toString());
         inputs.put("projectName", ResearchProfiles.projectName(project.owner(), project.name())); inputs.put("focus", String.join(" ", concerns));
         inputs.put("currentVersion", current); inputs.put("targetVersion", target);
@@ -256,7 +258,7 @@ public class UpgradeAssessmentService {
                 .filter(version -> version.id().equals(activeId)).findFirst().orElse(null);
         if (candidate != null && !supportsSystemInputs(candidate.graphSpecJson())) {
             found = templates.createVersion(actor.workspaceId(), found.id(), actor.userId(),
-                    new AgentWorkflowTemplateStore.VersionDraft("支持业务系统背景快照，保留历史版本与配置", "升级评估，请通过业务表单填写参数。", write(graph(baseNodes()))), Instant.now());
+                    new AgentWorkflowTemplateStore.VersionDraft("标记版本升级评估类型，保留历史版本与配置", "升级评估，请通过业务表单填写参数。", write(graph(baseNodes()))), Instant.now());
             found = templates.activate(actor.workspaceId(), found.id(), found.versions().getFirst().id(), actor.userId(), "启用业务系统评估输入", Instant.now());
         }
         if (found.activeVersionId() == null) found = templates.activate(actor.workspaceId(), found.id(),
@@ -269,7 +271,8 @@ public class UpgradeAssessmentService {
             var inputs = json.readTree(graphJson).path("inputs");
             return "json".equals(inputs.path("sourceEvent").path("type").asText())
                     && "json".equals(inputs.path("systemSnapshot").path("type").asText())
-                    && "json_array".equals(inputs.path("selectedMaterials").path("type").asText());
+                    && "json_array".equals(inputs.path("selectedMaterials").path("type").asText())
+                    && inputs.has("assessmentType");
         } catch (JsonProcessingException invalid) {
             throw new IllegalStateException("Unable to read upgrade template inputs", invalid);
         }
@@ -305,6 +308,7 @@ public class UpgradeAssessmentService {
     }
     private static Map<String, Object> graph(List<Map<String, Object>> nodes) {
         Map<String, Object> inputs = new LinkedHashMap<>();
+        inputs.put("assessmentType", Map.of("type", "string", "maxLength", 48));
         for (String field : List.of("projectId", "currentVersion", "targetVersion"))
             inputs.put(field, Map.of("type", "string", "required", true, "maxLength", 80));
         for (String field : List.of("javaVersion", "springBootVersion", "businessProject", "profileId", "profileName", "researchTerms"))

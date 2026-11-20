@@ -1,0 +1,64 @@
+{
+  "baseline": "4a021e4ccf7a48c8d1b5a68485418a49e1fed606",
+  "dependency": "org.springframework.boot:spring-boot-starter-parent",
+  "relatedDependencies": [
+    "org.springframework.boot:spring-boot-starter-data-jpa",
+    "org.springframework.boot:spring-boot-starter-web",
+    "org.springframework.boot:spring-boot-starter-thymeleaf",
+    "com.h2database:h2"
+  ],
+  "poms": [
+    "pom.xml"
+  ],
+  "java": [
+    {
+      "path": "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+      "symbols": [
+        "processFindForm",
+        "showOwner",
+        "findByLastNameStartingWith",
+        "findById"
+      ]
+    },
+    {
+      "path": "src/main/java/org/springframework/samples/petclinic/owner/OwnerRepository.java",
+      "symbols": [
+        "findByLastNameStartingWith",
+        "findById"
+      ]
+    },
+    {
+      "path": "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+      "symbols": [
+        "WebMvcTest",
+        "MockitoBean",
+        "testProcessFindFormByLastName",
+        "testShowOwner"
+      ]
+    },
+    {
+      "path": "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java",
+      "symbols": [
+        "DataJpaTest",
+        "shouldFindOwnersByLastName",
+        "shouldFindSingleOwnerWithPet"
+      ]
+    },
+    {
+      "path": "src/test/java/org/springframework/samples/petclinic/MySqlIntegrationTests.java",
+      "symbols": [
+        "Testcontainers",
+        "MySQLContainer"
+      ]
+    },
+    {
+      "path": "src/test/java/org/springframework/samples/petclinic/PostgresIntegrationTests.java",
+      "symbols": [
+        "SpringBootTest",
+        "isDockerAvailable"
+      ]
+    }
+  ],
+  "wrapper": true,
+  "springSettings": true
+}

@@ -15,14 +15,16 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 
 /** Deterministic readers for the optional build artifacts. None of their text is executed or dereferenced. */
 final class BuildEvidenceDocuments {
-    private static final Pattern EXACT_EXCLUDES = Pattern.compile("![A-Za-z_$][\\w$]*(?:,![A-Za-z_$][\\w$]*)*");
+    private static final Pattern EXACT_EXCLUDE = Pattern.compile("![A-Za-z_$][\\w$]*");
+    private static final Set<String> MAVEN_LAUNCHERS = Set.of("mvn", "mvnw", "mvn.cmd", "mvnw.cmd", "mvn.bat", "mvnw.bat");
     private static final Pattern LOG_COUNTS = Pattern.compile(
-            "^\\[(?:INFO|WARN|WARNING|ERROR)]\\s+Tests run:\\s*(\\d{1,8}),\\s*Failures:\\s*(\\d{1,8}),\\s*Errors:\\s*(\\d{1,8}),\\s*Skipped:\\s*(\\d{1,8})\\s*$");
+            "^\\[(?:INFO|WARN|WARNING|ERROR)]\\s+Tests run:\\s*(\\d{1,8}),\\s*Failures:\\s*(\\d{1,8}),\\s*Errors:\\s*(\\d{1,8}),\\s*Skipped:\\s*(\\d{1,8})(?:,\\s*Flakes:\\s*(\\d{1,8}))?\\s*$");
     private static final Pattern ANSI_COLORS = Pattern.compile("\\x1b\\[[;\\d]*m");
     private static final int MAX_MANIFEST_METHODS = 1000;
 
@@ -95,7 +97,7 @@ final class BuildEvidenceDocuments {
         if ("SUCCESS".equals(log.outcome()) && counts.failures() + counts.errors() > 0)
             warnings.add("日志报告构建成功，但 XML 有失败或报错；请核对日志与测试配置。");
         if (cases.isEmpty()) warnings.add("已导入的套件没有记录任何 testcase。");
-        warnings.add("统计仅涵盖已上传的 XML。文件哈希可核对字节；与所填提交的关系及整次构建材料是否齐全尚未核实。");
+        warnings.add("统计仅涵盖已上传的 XML。文件哈希可核对字节。原件是否均来自同一模块、同一次构建和所填提交，以及材料是否齐全，尚未核实。");
         var summary = new Summary(header.id(), header.systemId(), header.reportId(), header.role(),
                 header.label(), header.importedAt(), counts);
         return new Batch(summary, metadata, command, log, methods, originals.stream().map(Original::file).toList(),
@@ -132,6 +134,8 @@ final class BuildEvidenceDocuments {
                 throw new IllegalArgumentException("检测到 Maven Reactor 日志，请按模块、按次导入构建材料。");
             var count = LOG_COUNTS.matcher(line);
             if (count.matches()) {
+                if (count.group(5) != null && Integer.parseInt(count.group(5)) > 0)
+                    throw new IllegalArgumentException("Maven 测试总结报告了 flaky 重跑结果，暂不支持按普通单次测试进行对照。");
                 int n = Integer.parseInt(count.group(1)), f = Integer.parseInt(count.group(2));
                 int e = Integer.parseInt(count.group(3)), s = Integer.parseInt(count.group(4));
                 if (f + e + s > n) throw new IllegalArgumentException("Maven 日志中的测试总结计数互相矛盾。");
@@ -153,14 +157,9 @@ final class BuildEvidenceDocuments {
         if (args == null && !root.has("exit") && !root.has("start") && !root.has("end"))
             throw new IllegalArgumentException("未找到支持的 command、exit、start 或 end 字段。");
         List<String> command = new ArrayList<>();
-        List<String> selectors = new ArrayList<>();
         if (args != null && !args.isNull()) {
             if (!args.isArray() || args.size() > 256) throw new IllegalArgumentException("command 应为最多 256 个参数的数组。");
-            for (JsonNode arg : args) {
-                String value = string(arg, 4096, "command 参数");
-                command.add(value);
-                if (value.startsWith("-Dtest=")) selectors.add(value.substring(7));
-            }
+            for (JsonNode arg : args) command.add(string(arg, 4096, "command 参数"));
         }
         JsonNode status = root.get("exit");
         Integer exit = null;
@@ -168,17 +167,44 @@ final class BuildEvidenceDocuments {
             if (!status.isIntegralNumber() || !status.canConvertToInt()) throw new IllegalArgumentException("exit 应为整数。");
             exit = status.intValue();
         }
+        List<String> selectors = new ArrayList<>();
+        boolean otherTestProperty = false;
+        for (int i = 0; i < command.size(); i++) {
+            String arg = command.get(i);
+            if (arg.startsWith("-Dtest=")) selectors.add(arg.substring(7));
+            else if (arg.equals("-Dtest") || arg.equals("--define=test") || arg.startsWith("--define=test=")) {
+                otherTestProperty = true;
+                selectors.add(arg);
+            } else if ((arg.equals("-D") || arg.equals("--define")) && i + 1 < command.size()) {
+                String next = command.get(i + 1);
+                if (next.equals("test") || next.startsWith("test=")) {
+                    otherTestProperty = true;
+                    selectors.add(arg + " " + next);
+                }
+            }
+        }
         String selector = selectors.isEmpty() ? null : String.join(" | ", selectors);
         List<String> excluded = List.of();
-        if (selectors.size() == 1 && EXACT_EXCLUDES.matcher(selector).matches()) {
-            excluded = List.of(selector.split(",")).stream().map(x -> x.substring(1)).distinct().toList();
-        } else if (!selectors.isEmpty()) {
-            warnings.add("选择器包含通配、方法、组合或重复参数，保留原命令，具体排除范围未知。");
+        List<String> tokens = selectors.size() == 1 ? List.of(selector.split(",", -1)) : List.of();
+        if (!command.isEmpty() && !mavenLauncher(command.getFirst())) {
+            selector = null;
+            warnings.add("未识别到直接启动 Maven 的命令。保留原始参数，具体排除范围未知。");
+        } else if (!otherTestProperty && !tokens.isEmpty() && tokens.stream().allMatch(x -> EXACT_EXCLUDE.matcher(x).matches())) {
+            excluded = tokens.stream().map(x -> x.substring(1)).distinct().toList();
+        } else if (!selectors.isEmpty() || otherTestProperty) {
+            warnings.add("选择器包含通配、方法、组合、重复或不支持的参数写法，保留原命令，具体排除范围未知。");
         }
         String start = time(root, "start"), end = time(root, "end");
         if (start != null && end != null && OffsetDateTime.parse(start).isAfter(OffsetDateTime.parse(end)))
             warnings.add("命令记录的结束时间早于开始时间，请核对原记录。");
         return new BuildRecord(List.copyOf(command), exit, start, end, selector, excluded);
+    }
+
+    private static boolean mavenLauncher(String command) {
+        // Inspect the recorded name only; the path belongs to the external build environment.
+        if (command.contains("://")) return false;
+        String path = command.replace('\\', '/');
+        return MAVEN_LAUNCHERS.contains(path.substring(path.lastIndexOf('/') + 1).toLowerCase(Locale.ROOT));
     }
 
     private static List<ExcludedMethod> manifest(JsonNode root) {

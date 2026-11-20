@@ -91,12 +91,12 @@ class BuildEvidenceServiceTest {
         assertThat(minimal.log()).isEqualTo(new LogFacts(null,null));
         assertThat(minimal.warnings()).anyMatch(w -> w.contains("未取得退出码"));
         var parts = sources();
-        parts.put("commandRecord",List.of(data("commandRecord","cmd.json","{\"command\":[\"-Dtest=!MySqlTests\"]}")));
+        parts.put("commandRecord",List.of(data("commandRecord","cmd.json","{\"command\":[\"mvn\",\"-Dtest=!MySqlTests\",\"test\"]}")));
         var absent = service.importBatch(actor, report, declaration(""), parts);
         assertThat(absent.commandRecord().excludedClasses()).containsExactly("MySqlTests");
         assertThat(absent.excludedMethods()).isEmpty();
         assertThat(absent.warnings()).anyMatch(w -> w.contains("方法数量未知"));
-        parts.put("commandRecord",List.of(data("commandRecord","cmd.json","{\"command\":[\"-Dtest=!My*Tests\"]}")));
+        parts.put("commandRecord",List.of(data("commandRecord","cmd.json","{\"command\":[\"mvn\",\"-Dtest=!My*Tests\",\"test\"]}")));
         parts.put("exclusionManifest",List.of(data("exclusionManifest","methods.json",
                 "{\"excludedMethods\":[{\"className\":\"MySqlTests\",\"methodName\":\"x\",\"source\":\"MySqlTests.java:4\"}]}")));
         var unsupported = service.importBatch(actor, report, declaration(""), parts);
@@ -115,6 +115,36 @@ class BuildEvidenceServiceTest {
         parts.put("xmlFiles",sources().get("xmlFiles"));
         parts.put("mavenLog",List.of(data("mavenLog","build.log","[INFO] Reactor Build Order:")));
         assertThatIllegalArgumentException().isThrownBy(() -> service.importBatch(actor,report,declaration(""),parts)).withMessageContaining("Reactor");
+        verify(store,never()).insert(any(),any(),any(),any(),any());
+    }
+
+    @Test void nonMavenCommandsAndConflictingTestPropertiesCannotEstablishExclusions() {
+        for (String args : List.of("[\"echo\",\"-Dtest=!MySqlTests\"]", "[\"-Dtest=!MySqlTests\"]",
+                "[\"https://example.invalid/tools/mvn\",\"-Dtest=!MySqlTests\"]",
+                "[\"mvn\",\"-Dtest=!MySqlTests\",\"--define\",\"test=!OtherTests\",\"test\"]",
+                "[\"mvn\",\"-Dtest=!MySqlTests\",\"-D\",\"test=!OtherTests\",\"test\"]")) {
+            var parts = sources();
+            parts.put("commandRecord", List.of(data("commandRecord", "cmd.json", "{\"command\":" + args + "}")));
+            parts.put("exclusionManifest", List.of(data("exclusionManifest", "methods.json",
+                    "{\"excludedMethods\":[{\"className\":\"MySqlTests\",\"methodName\":\"one\",\"source\":\"MySqlTests.java:4\"}]}")));
+            var batch = service.importBatch(actor, report, declaration(""), parts);
+            assertThat(batch.commandRecord().command()).contains("-Dtest=!MySqlTests");
+            assertThat(batch.commandRecord().excludedClasses()).isEmpty();
+            assertThat(batch.excludedMethods()).isEmpty();
+            assertThat(batch.warnings()).anyMatch(w -> w.contains("排除范围未知"));
+            if (args.contains("OtherTests")) assertThat(batch.commandRecord().selector()).contains("MySqlTests", "OtherTests");
+            else assertThat(batch.commandRecord().selector()).isNull();
+        }
+    }
+
+    @Test void logReportingFlakyResultsAlongsideOrdinaryXmlDoesNotMasqueradeAsSingleRun() {
+        var parts = sources();
+        parts.put("mavenLog", List.of(data("mavenLog", "flaky.log", """
+                [WARNING] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Flakes: 1
+                [INFO] BUILD SUCCESS
+                """)));
+        assertThatIllegalArgumentException().isThrownBy(() -> service.importBatch(actor, report, declaration(""), parts))
+                .withMessageContaining("flaky.log").withMessageContaining("重跑");
         verify(store,never()).insert(any(),any(),any(),any(),any());
     }
 

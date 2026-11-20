@@ -86,6 +86,8 @@ public final class SurefireEvidenceParser {
                 switch (name) {
                     case "testcase" -> {
                         if (cases.size() >= MAX_CASES) throw invalid("每批最多支持 " + MAX_CASES + " 个 testcase。");
+                        if (attrs.getValue("status") != null || attrs.getValue("result") != null)
+                            throw invalid("testcase #" + (cases.size() + 1) + " 含非标准 status / result 属性，无法按普通 Surefire 确认结果。");
                         className = identity(attrs, "classname");
                         testName = identity(attrs, "name");
                         status = Status.PASSED;

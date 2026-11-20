@@ -58,4 +58,11 @@ class SurefireEvidenceParserTest {
             assertTrue(assertThrows(IllegalArgumentException.class, () -> parse(invalid)).getMessage().contains("TEST-Demo.xml"));
         }
     }
+
+    @Test void extensionAttributeDeclaringATestNotRunCannotBecomeAPass() {
+        String foreign = suite("<testcase classname='Demo' name='unexecuted' status='notrun'/>", 1, 0, 0, 0);
+        var error = assertThrows(IllegalArgumentException.class, () -> parse(foreign));
+        assertTrue(error.getMessage().contains("TEST-Demo.xml"));
+        assertTrue(error.getMessage().contains("status"));
+    }
 }

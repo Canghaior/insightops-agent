@@ -1,4 +1,8 @@
-# InsightOps Agent
+# InsightOps
+
+**面向已有业务系统的升级与改造工作台。** 第一阶段聚焦维护 Java / Spring 系统的工程师、技术负责人和软件维护团队。现有版本可以建立系统档案、发起评估、查看报告采用的资料和仍缺的证据，并在系统决策报告下记录实际验证与人工决定。
+
+下一步用一项真实升级核对影响清单、试改或关键验证、实际结果及交接成本。产品范围、尚待验证的市场假设和新功能准入统一见[现行产品定位与范围](docs/product/current-product-scope.md)。各项交付与验收状态见[项目进度](AGENT项目与进度.md)。
 
 2026-11-09 产品优化：事件可直接进入升级评估，研究执行状态与资料完整性分开；聊天可直接保存/下载报告，刷新后保留准确运行关联。常用导航收敛，新增 `/getting-started` 使用指南与自愿试用记录。实现范围、迁移及真实用户验证安排见 [本轮优化与验收](docs/manual/product-optimization-2026-11-09.md)。以下章节保留各阶段实现背景，实际部署能力以当前配置与验证结果为准。
 
@@ -8,9 +12,7 @@
 
 封闭 Alpha 采用单台 4 核 16 GB Linux 云服务器部署。生产编排、Caddy 自动 HTTPS、内网隔离、Prometheus/Grafana、数据库备份恢复、镜像 CI 和健康失败回滚已经配置；服务器购买、域名 DNS 和首次上线步骤见 [云服务器与 HTTPS 操作指南](docs/operations/cloud-server-and-https.md)，日常处理见 [生产运维手册](docs/operations/production-runbook.md)。真实密钥只写入服务器未提交的 `.env.prod`。
 
-面向需要持续跟踪 AI 开源项目的 Java 开发者、架构师和技术负责人的开源情报 Agent。
-
-当前处于 Alpha/P1：已具备登录和 Workspace 隔离、会话/长期记忆、可配置项目与官方知识源、Release/Issue/PR/Security/RSS/Roadmap 持续采集、用户资料上传、情报分析、报告交付，以及基于可信证据的本地混合检索 RAG 问答。
+Alpha/P1 阶段面向持续跟踪 AI 开源项目的技术团队，已实现登录和 Workspace 隔离、会话与长期记忆、更新采集、资料上传、情报分析、报告和本地混合检索。现有知识库、采集与研究能力可为业务系统评估提供资料。
 
 ## 工程结构
 
@@ -243,4 +245,4 @@ $env:INSIGHTOPS_CHAIN_GATE='true'
 
 GitHub Actions 的 backend job 已自动启动 PostgreSQL 并执行该门禁；模型和 GitHub 均使用固定假数据，不消耗在线额度。
 
-产品范围见 `docs/product/target-user.md`；官方来源登记见 `docs/product/tracked-projects.yaml` 和 `docs/product/official-sources.md`；架构决策见 `docs/architecture/`。
+现行产品范围见[定位与范围说明](docs/product/current-product-scope.md)。可另查[官方来源登记](docs/product/official-sources.md)、[跟踪项目清单](docs/product/tracked-projects.yaml)和[架构决策](docs/architecture/)。

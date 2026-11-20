@@ -13,11 +13,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -61,18 +64,19 @@ public class VerificationHandoffService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "保存的版本缺少一侧构建引用，无法导出完整对照。");
         }
 
-        return TemporaryReportArchive.prepare(zip -> {
+        var archive = TemporaryReportArchive.prepare(zip -> {
             var writer = new HandoffArchiveWriter(zip, json.writerWithDefaultPrettyPrinter());
             var missing = new ArrayList<Missing>();
             writer.markdown("report/original.md", "ORIGINAL_REPORT", reportId, report.markdown());
             writer.json("verification/version.json", "VERIFICATION_VERSION", versionId, version);
             writer.json("decisions.json", "DECISIONS_REFERENCING_VERSION", versionId, decisions);
+            BuildEvidenceComparison comparison = null;
             if (fields.baselineBuildId() == null) {
                 missing.add(new Missing("构建对照", versionId.toString(), "此验证版本保存时未关联构建批次。"));
             } else {
                 var baseline = builds.require(actor, reportId, fields.baselineBuildId());
                 var candidate = builds.require(actor, reportId, fields.candidateBuildId());
-                var comparison = BuildEvidenceComparison.compare(baseline, candidate);
+                comparison = BuildEvidenceComparison.compare(baseline, candidate);
                 writeBuild(writer, actor, reportId, baseline, missing);
                 writeBuild(writer, actor, reportId, candidate, missing);
                 writer.json("comparison/diff.json", "TESTCASE_COMPARISON", versionId, comparison);
@@ -81,10 +85,22 @@ public class VerificationHandoffService {
             }
             for (UUID uploadId : fields.uploadIds()) writeSupplement(writer, actor, uploadId, missing);
             writer.markdown("README.md", "HANDOFF_GUIDE", versionId,
-                    HandoffMarkdown.overview(report.title(), context, version, decisions, missing, writer.entries()));
+                    HandoffMarkdown.overview(report.title(), context, version, comparison, decisions, missing, writer.entries()));
             writer.json("manifest.json", "MANIFEST", versionId, new Manifest(1,Instant.now(),context,versionId,
                     version.version(),fields.baselineBuildId(),fields.candidateBuildId(),List.copyOf(missing),writer.entries()));
         });
+        // A failed transaction completion can prevent the controller from ever receiving this handle.
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCompletion(int status) {
+                    if (status != STATUS_COMMITTED) {
+                        try { archive.close(); }
+                        catch (IOException e) { throw new UncheckedIOException(e); }
+                    }
+                }
+            });
+        }
+        return archive;
     }
 
     private void writeBuild(HandoffArchiveWriter writer, ActorContext actor, UUID reportId, Batch batch, List<Missing> missing)

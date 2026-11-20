@@ -12,7 +12,7 @@ import java.util.UUID;
 final class HandoffMarkdown {
     private HandoffMarkdown() { }
 
-    static String overview(String title, Context context, Verification verification, List<Decision> decisions,
+    static String overview(String title, Context context, Verification verification, BuildEvidenceComparison comparison, List<Decision> decisions,
                            List<VerificationHandoffService.Missing> missing, List<HandoffArchiveWriter.Entry> entries) {
         var f = verification.fields();
         var text = new StringBuilder("# 验证交接包\n\n");
@@ -30,9 +30,19 @@ final class HandoffMarkdown {
         field(text, "实际执行者（记录者填写）", f.executedBy());
         field(text, "验证记录者与保存时间", verification.author().name() + " · " + verification.createdAt());
         text.append("## 工程原件与平台解析\n\n");
-        if (f.baselineBuildId() != null && f.candidateBuildId() != null) {
+        if (comparison != null) {
             text.append("打开 [两版结果与具体差异](comparison/results.md) 查看来源、范围、错误和原件入口。")
                     .append("完整逐项对照见 [对照数据](comparison/diff.json)。InsightOps 导入、解析并对照外部构建留下的文件。原测试时间见各批次的执行记录。\n\n");
+            var issues = comparison.groups().stream()
+                    .filter(group -> group.candidateCounts().failure() > 0 || group.candidateCounts().error() > 0).toList();
+            if (!issues.isEmpty()) {
+                text.append("候选 XML 中有 ").append(issues.size()).append(" 个测试身份包含断言失败或执行报错。\n\n");
+                for (var issue : issues.stream().limit(20).toList()) {
+                    block(text, issue.className() + "#" + issue.name() + " · 断言失败 " + issue.candidateCounts().failure()
+                            + " 次、执行报错 " + issue.candidateCounts().error() + " 次");
+                }
+                if (issues.size() > 20) text.append("此处列出前 20 个身份，详表收录全部。\n\n");
+            }
         }
         field(text, "保存此版本时的客观对照摘要", verification.buildSummary());
         text.append("## 记录者的观察与判断\n\n");
@@ -50,10 +60,12 @@ final class HandoffMarkdown {
         text.append("## 补充证据\n\n");
         var supplements = entries.stream().filter(e -> e.kind().equals("SUPPLEMENT")).toList();
         if (supplements.isEmpty()) text.append("本版本没有可随包提供的补充资料。").append('\n');
+        else text.append("打开下列资料可核对独立的观察与记录。请结合各项实际覆盖的业务路径解读。\n\n");
         for (var file : supplements) {
-            text.append("- [打开资料](<").append(file.path()).append(">)");
+            String localName = file.path().substring(file.path().lastIndexOf('/') + 1);
+            text.append("- [`").append(localName).append("`](<").append(file.path()).append(">)");
             text.append(" · ").append(file.sourceId()).append("（").append(file.size()).append(" 字节）\n");
-            block(text, file.originalName());
+            if (!localName.equals(file.originalName())) field(text, "关联时的文件名", file.originalName());
         }
         text.append("\n## 已有人工决定\n\n");
         if (decisions.isEmpty()) text.append("截至导出时，没有已保存的人工决定引用此验证版本。\n\n");
@@ -135,6 +147,15 @@ final class HandoffMarkdown {
             text.append("- ").append(side).append(" · ").append(switch (row.status()) {
                 case PASSED -> "通过"; case FAILURE -> "断言失败"; case ERROR -> "执行报错"; case SKIPPED -> "跳过";
             }).append(" · [原始 XML](<../").append(paths.get(row.fileId())).append(">) · testcase ").append(row.ordinal()).append('\n');
+            if (row.status() == Status.ERROR || row.status() == Status.FAILURE) {
+                text.append('\n');
+                field(text, "异常类型", row.type());
+                if (row.message() != null && !row.message().isBlank()) {
+                    String message = row.message();
+                    int end = message.offsetByCodePoints(0, Math.min(400, message.codePointCount(0, message.length())));
+                    field(text, "异常消息", end == message.length() ? message : message.substring(0, end) + "…（全文见原始 XML）");
+                }
+            }
         }
         text.append('\n');
     }

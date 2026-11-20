@@ -11,6 +11,8 @@ import com.jundaodsj.insightops.report.application.ReportReviewStore;
 import com.jundaodsj.insightops.report.application.ReportReviewStore.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.ByteArrayInputStream;
@@ -74,8 +76,10 @@ class VerificationHandoffServiceTest {
         assertThat(decisions.get(0).path("fields").path("verificationVersionIds").toString())
                 .contains(version.toString(),previous.toString());
         var guide = new String(entries.get("README.md"),StandardCharsets.UTF_8);
-        assertThat(guide).contains("外部执行者","保存时的摘要","主人查询正常","暂缓","第 2 版").doesNotContain("其他决定");
-        assertThat(new String(entries.get("comparison/results.md"),StandardCharsets.UTF_8)).contains("OwnerTest#find","testcase 1","执行报错","未知");
+        assertThat(guide).contains("外部执行者","保存时的摘要","主人查询正常","暂缓","第 2 版","OwnerTest#find",
+                "[`主人查询.md`](<supplementary/" + supplementId).doesNotContain("其他决定");
+        assertThat(new String(entries.get("comparison/results.md"),StandardCharsets.UTF_8))
+                .contains("OwnerTest#find","testcase 1","执行报错","ExampleError","未知");
 
         var manifest = read(entries,"manifest.json");
         assertThat(manifest.path("missing")).hasSize(4);
@@ -104,6 +108,8 @@ class VerificationHandoffServiceTest {
         var gaps = read(entries,"manifest.json").path("missing");
         assertThat(gaps).hasSize(3);
         assertThat(gaps.toString()).contains(hidden.toString(),lost.toString(),"保存时未关联").doesNotContain("old-private-name");
+        String overview = new String(entries.get("README.md"), StandardCharsets.UTF_8);
+        assertThat(overview).contains("实际执行者（记录者填写）\n\n    未知");
         verify(storage,never()).open(hidden+".bin");
         verifyNoInteractions(builds);
     }
@@ -129,6 +135,19 @@ class VerificationHandoffServiceTest {
                 .hasMessageContaining("409").hasMessageContaining("SHA-256");
     }
 
+    @Test void aRollbackBeforeTheControllerReceivesTheFileDisposesOfIt() throws Exception {
+        saveVersion(null,null,List.of());
+        TransactionSynchronizationManager.initSynchronization();
+        try (var archive = service.prepare(actor,report,version)) {
+            assertThat(archive.size()).isPositive();
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(callback -> callback.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+            assertThatThrownBy(archive::size).isInstanceOf(java.nio.channels.ClosedChannelException.class);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
     @Test void userFileNamesRemainDataAndNeverSupplyArchiveDirectories() throws Exception {
         UUID first = UUID.randomUUID(),second = UUID.randomUUID();
         byte[] content = "note".getBytes(StandardCharsets.UTF_8);
@@ -140,12 +159,15 @@ class VerificationHandoffServiceTest {
         assertThat(entries).containsKeys("supplementary/"+first+"/attachment.md","supplementary/"+second+"/attachment.md");
         var manifest = read(entries,"manifest.json");
         assertThat(manifest.path("entries").toString()).contains("../nested/file.md","CON.md");
+        assertThat(HandoffArchiveWriter.leaf("LPT¹.txt","attachment.txt")).isEqualTo("attachment.txt");
+        assertThat(HandoffArchiveWriter.leaf("CON .md","attachment.md")).isEqualTo("attachment.md");
+        assertThat(HandoffArchiveWriter.leaf("资".repeat(90)+".md","attachment.md")).isEqualTo("attachment.md");
     }
 
     private void saveVersion(Batch left, Batch right, List<UUID> fileIds) {
         var fields = new VerificationInput("观察到什么","建议第 3 项",Origin.MODEL,Execution.EXECUTED,"执行了回归",
                 "隔离环境","主人查询正常",Impact.INCONCLUSIVE,"限本环境","",fileIds,
-                left == null ? null : left.summary().id(),right == null ? null : right.summary().id(),"外部执行者");
+                left == null ? null : left.summary().id(),right == null ? null : right.summary().id(),left == null ? null : "外部执行者");
         var record = new Verification(version,previous,2,fields,author,Instant.EPOCH,left == null ? null : "保存时的摘要");
         when(reviews.verification(report,version)).thenReturn(Optional.of(record));
     }

@@ -10,7 +10,8 @@
 | --- | --- |
 | 建立业务系统档案，填写用途、关键流程、技术栈、问题和约束，关联可见资料 | 档案有修订。评估启动时冻结当时的输入。知识库继续采集或保存资料，关注的外部框架提供技术依据，与客户的业务系统分开管理。[系统档案实现](../../insightops-server/src/main/java/com/jundaodsj/insightops/server/businesssystem/BusinessSystemService.java) |
 | 在已知当前版本和目标版本时发起升级评估，也可在目标未定时围绕具体问题发起系统决策评估 | 研究结果区分采用的输入、资料、判断与缺口。决策评估可以只选资料或不选框架和资料，缺少依据时给出待验证项。研究可按配置选用 DeepSeek 或 OpenAI 模型。[升级评估](../../insightops-server/src/main/java/com/jundaodsj/insightops/server/workflow/UpgradeAssessmentService.java) · [系统决策评估](../../insightops-server/src/main/java/com/jundaodsj/insightops/server/workflow/SystemDecisionAssessmentService.java) |
-| 从历史运行保存报告，下载 Markdown / PDF，在已关联系统的决策报告下记录验证与人工决定 | 报告保留当时的研究快照。记录者可填写未执行、受阻或已执行的验证，更正追加新版本，决定引用当时的具体版本。记录实际观察需要写明执行方法与环境。[研究报告](../../insightops-server/src/main/java/com/jundaodsj/insightops/server/report/ResearchReportService.java) · [验证记录与决定](../../insightops-server/src/main/java/com/jundaodsj/insightops/server/report/ReportReviewService.java) |
+| 从历史运行保存报告，下载 Markdown / PDF，在已关联系统的决策报告和已知版本升级报告下记录验证与人工决定 | 报告保留当时的研究快照。记录者可填写未执行、受阻或已执行的验证，更正追加新版本，决定引用当时的具体版本。记录实际观察需要写明执行方法与环境。[研究报告](../../insightops-server/src/main/java/com/jundaodsj/insightops/server/report/ResearchReportService.java) · [验证记录与决定](../../insightops-server/src/main/java/com/jundaodsj/insightops/server/report/ReportReviewService.java) |
+| 导入两次 Maven 构建已有的测试结果，核对差异，按验证版本交接 | 维护者提供单模块普通 Surefire XML，可附 Maven 日志、命令记录和排除方法清单。产品保存原件、计算哈希、逐项对照，并把指定验证版本、原报告和可访问的证据导出。构建和测试仍由外部执行。[工程证据与交接范围](../manual/io-05-evidence-delivery.md) |
 
 InsightOps 自身的 PDF 字体案例做过真实模型 A/B 和局部实验。工程资料使部分建议更具体，也暴露了模型对旧配置和根因推断过强的问题。合成订单样例用于功能验收。两者均未验证外部维护团队的一项真实升级交付或购买行为。
 

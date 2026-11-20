@@ -19,7 +19,7 @@ const navigation = [
   { path: '/projects', label: '我的项目', icon: FolderOpened, routes: ['/projects', '/knowledge-files'] },
   { path: '/updates', label: '更新与提醒', icon: Bell, routes: ['/updates', '/watch-rules', '/intelligence', '/digests'] },
   { path: '/upgrade-assessment', label: '研究', icon: ChatDotRound, routes: ['/upgrade-assessment', '/business-systems', '/chat', '/runs', '/agent-workflows'] },
-  { path: '/reports', label: '报告', icon: Document, routes: ['/reports'] },
+  { path: '/reports', label: '报告与验证', icon: Document, routes: ['/reports'] },
 ]
 const secondaryNavigation = [
   { path: '/knowledge-files', label: '项目资料', group: '/projects' },
@@ -76,7 +76,7 @@ async function changeWorkspace(event: { target: unknown }) {
   <RouterView v-if="route.meta.public" />
   <div v-else class="app-shell">
     <aside class="sidebar">
-      <div class="brand"><span class="brand-mark">IO</span><div><strong>InsightOps</strong><small>技术研究工作台</small></div></div>
+      <div class="brand"><span class="brand-mark">IO</span><div><strong>InsightOps</strong><small>Java / Spring</small></div></div>
       <nav class="navigation" aria-label="主导航">
         <RouterLink v-for="item in navigation" :key="item.path" :to="item.path" :title="item.label" :aria-label="item.label" :class="{ 'section-active': activeGroup?.path === item.path }">
           <el-icon><component :is="item.icon" /></el-icon><span>{{ item.label }}</span><b v-if="item.path === '/updates' && unreadUpdates + unreadNotifications" class="nav-badge" aria-label="有未读更新或通知">●</b>
@@ -121,7 +121,7 @@ async function changeWorkspace(event: { target: unknown }) {
     </aside>
     <main class="content">
       <header class="topbar">
-        <div><span class="eyebrow">AI 开源情报工作台</span><h1>让技术选型有证据、可追溯</h1></div>
+        <h1>业务系统升级与改造工作台</h1>
         <RouterLink class="alpha-chip" to="/getting-started">使用指南与试用反馈</RouterLink>
       </header>
       <nav v-if="secondaryItems.length" class="section-navigation" :aria-label="`${activeGroup?.label}相关功能`">

@@ -17,7 +17,7 @@ async function deliver(format?: 'md' | 'pdf') {
       anchor.href = url; anchor.download = `insightops-research-${runId}.${format}`
       globalThis.document.body.appendChild(anchor); anchor.click(); anchor.remove()
       globalThis.setTimeout(() => globalThis.URL.revokeObjectURL(url), 30_000)
-      message.value = '下载已开始，报告已保存在「研究报告」中。'
+      message.value = '下载已开始。可在「报告与验证」重新打开这份报告。'
     } else message.value = '已保存为研究报告，引用与输入快照一并保留。'
   } catch {
     failed.value = true
@@ -35,7 +35,7 @@ async function deliver(format?: 'md' | 'pdf') {
       <RouterLink class="secondary-button" :to="`/runs/${runId}`">查看研究详情</RouterLink>
     </div>
     <p v-if="busy" role="status">正在准备报告…</p>
-    <p v-if="message" :role="failed ? 'alert' : 'status'">{{ message }} <RouterLink v-if="reportId" to="/reports">查看报告</RouterLink></p>
+    <p v-if="message" :role="failed ? 'alert' : 'status'">{{ message }} <RouterLink v-if="reportId" :to="{ path: '/reports', query: { reportId } }">打开这份报告</RouterLink></p>
   </div>
 </template>
 <style scoped>

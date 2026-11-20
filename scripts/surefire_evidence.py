@@ -49,7 +49,8 @@ def convert(reports, build_record):
     reports = reports.resolve(strict=True)
     suites = []
     names = set()
-    for path in sorted(reports.glob("TEST-*.xml")):
+    xmls = (p for p in reports.iterdir() if p.name.lower().startswith("test-") and p.name.lower().endswith(".xml"))
+    for path in sorted(xmls, key=lambda p: (p.name.lower(), p.name)):
         if not path.is_file() or path.resolve() != path or path.stat().st_size > 16 * 1024 * 1024:
             raise ValueError(f"unsupported report file: {path.name}")
         suite = read_suite(path)

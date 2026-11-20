@@ -27,6 +27,14 @@ class SurefireEvidenceTest(unittest.TestCase):
         path.write_text(f'<testsuite name="{name}" {counters}>{body}</testsuite>', encoding="utf-8")
         return path
 
+    def test_file_order_matches_windows_for_mixed_case_names(self):
+        for file_name, name in (("TEST-Zeta.xml", "Zeta"), ("TeSt-alpha.XML", "Alpha"), ("TEST-beTa.xml", "Beta")):
+            path = self.suite(f'<testcase classname="{name}" name="ok"/>', name=name)
+            path.rename(self.reports / file_name)
+        result = evidence.convert(self.reports, self.build)
+        headings = [line for line in result.splitlines() if line.startswith("### ")]
+        self.assertEqual(headings, ["### Alpha", "### Beta", "### Zeta"])
+
     def test_statuses_provenance_and_command_scope(self):
         path = self.suite("""
           <properties><property name="private" value="PRIVATE_SENTINEL"/></properties>

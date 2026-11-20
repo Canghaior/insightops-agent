@@ -8,6 +8,9 @@ public interface AgentPlanningModelGateway {
 
     AgentPlanResponse plan(AgentPlanRequest request);
 
+    /** Provider continuation for the next planning round of this run, held only in memory. */
+    interface Continuation { }
+
     record AgentPlanRequest(
             String systemPrompt,
             String userPrompt,
@@ -16,7 +19,15 @@ public interface AgentPlanningModelGateway {
             double temperature,
             int maxOutputTokens,
             String modelOverride,
-            ResearchModel researchModel) {
+            ResearchModel researchModel,
+            Continuation continuation) {
+
+        public AgentPlanRequest(String systemPrompt, String userPrompt, List<ToolExchange> exchanges,
+                List<FunctionDefinition> tools, double temperature, int maxOutputTokens, String modelOverride,
+                ResearchModel researchModel) {
+            this(systemPrompt, userPrompt, exchanges, tools, temperature, maxOutputTokens, modelOverride,
+                    researchModel, null);
+        }
 
         public AgentPlanRequest(String systemPrompt, String userPrompt, List<ToolExchange> exchanges,
                 List<FunctionDefinition> tools, double temperature, int maxOutputTokens, String modelOverride) {
@@ -81,7 +92,13 @@ public interface AgentPlanningModelGateway {
             String provider,
             String model,
             ModelUsage usage,
-            Duration duration) {
+            Duration duration,
+            Continuation continuation) {
+
+        public AgentPlanResponse(String content, List<PlannedToolCall> toolCalls, String provider,
+                String model, ModelUsage usage, Duration duration) {
+            this(content, toolCalls, provider, model, usage, duration, null);
+        }
 
         public AgentPlanResponse {
             content = content == null ? "" : content.strip();

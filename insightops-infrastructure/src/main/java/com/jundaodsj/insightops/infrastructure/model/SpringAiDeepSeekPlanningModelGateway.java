@@ -2,9 +2,6 @@ package com.jundaodsj.insightops.infrastructure.model;
 
 import com.jundaodsj.insightops.model.application.ResearchModel;
 import org.springframework.beans.factory.annotation.Autowired;
-import com.openai.errors.OpenAIIoException;
-import com.openai.errors.OpenAIRetryableException;
-import com.openai.errors.OpenAIServiceException;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
 import com.jundaodsj.insightops.model.application.AgentPlanningModelGateway;
 import com.jundaodsj.insightops.model.application.ModelCallErrorCode;
@@ -76,7 +73,7 @@ public class SpringAiDeepSeekPlanningModelGateway implements AgentPlanningModelG
             throw exception;
         }
         catch (RuntimeException exception) {
-            throw classify(exception);
+            throw OpenAiModelErrors.classify(target.provider(), exception);
         }
     }
 
@@ -128,31 +125,6 @@ public class SpringAiDeepSeekPlanningModelGateway implements AgentPlanningModelG
                         "InsightOps Executor, not Spring AI, owns registered tool execution");
             }
         };
-    }
-
-    private ModelCallException classify(Throwable exception) {
-        Throwable candidate = exception;
-        while (candidate.getCause() != null && candidate != candidate.getCause()) {
-            if (candidate instanceof OpenAIRetryableException
-                    || candidate instanceof OpenAIIoException
-                    || candidate instanceof OpenAIServiceException) {
-                break;
-            }
-            candidate = candidate.getCause();
-        }
-        if (candidate instanceof OpenAIRetryableException || candidate instanceof OpenAIIoException) {
-            return new ModelCallException(
-                    ModelCallErrorCode.TEMPORARILY_UNAVAILABLE, target.provider(), exception);
-        }
-        if (candidate instanceof OpenAIServiceException serviceException) {
-            ModelCallErrorCode code = serviceException.statusCode() == 408
-                    || serviceException.statusCode() == 429
-                    || serviceException.statusCode() >= 500
-                    ? ModelCallErrorCode.TEMPORARILY_UNAVAILABLE
-                    : ModelCallErrorCode.REQUEST_REJECTED;
-            return new ModelCallException(code, target.provider(), exception);
-        }
-        return new ModelCallException(ModelCallErrorCode.PROVIDER_ERROR, target.provider(), exception);
     }
 
     private static ModelUsage toModelUsage(Usage usage) {

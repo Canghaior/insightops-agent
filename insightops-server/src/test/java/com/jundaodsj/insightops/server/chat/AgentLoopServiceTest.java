@@ -46,8 +46,10 @@ class AgentLoopServiceTest {
         when(projects.list(any())).thenReturn(List.of());
         var call = new AgentPlanningModelGateway.PlannedToolCall(
                 "call-1", "test_search", "{\"query\":\"Spring AI\"}");
+        var continuation = new AgentPlanningModelGateway.Continuation() {};
         when(planning.plan(any()))
-                .thenReturn(plan("", List.of(call), new ModelUsage(10, 3, 13, null, null)))
+                .thenReturn(new AgentPlanningModelGateway.AgentPlanResponse("", List.of(call),
+                        "openai", "model", new ModelUsage(10, 3, 13, null, null), Duration.ZERO, continuation))
                 .thenReturn(plan("FINISH", List.of(), new ModelUsage(6, 2, 8, null, null)));
         UUID toolCallId = UUID.randomUUID();
         when(dispatcher.execute(any(), anyString(), any(), any(), any())).thenReturn(
@@ -73,6 +75,8 @@ class AgentLoopServiceTest {
         ArgumentCaptor<AgentPlanningModelGateway.AgentPlanRequest> plans =
                 ArgumentCaptor.forClass(AgentPlanningModelGateway.AgentPlanRequest.class);
         verify(planning, times(2)).plan(plans.capture());
+        assertThat(plans.getAllValues().getFirst().continuation()).isNull();
+        assertThat(plans.getAllValues().get(1).continuation()).isSameAs(continuation);
         assertThat(plans.getAllValues().get(1).exchanges()).hasSize(1);
         assertThat(plans.getAllValues().get(1).exchanges().getFirst().responseJson())
                 .contains("official");
@@ -155,6 +159,31 @@ class AgentLoopServiceTest {
                 ArgumentCaptor.forClass(AgentPlanningModelGateway.AgentPlanRequest.class);
         verify(planning, times(2)).plan(plans.capture());
         assertThat(plans.getAllValues().get(1).exchanges()).hasSize(2);
+    }
+
+    @Test
+    void rejectedMixedGraphReturnsAnObservationForEachSkippedCall() {
+        var planning = mock(AgentPlanningModelGateway.class);
+        var dispatcher = mock(AgentToolDispatcher.class);
+        var projects = mock(AdminProjectStore.class);
+        when(projects.list(any())).thenReturn(List.of());
+        var calls = List.of(
+                new AgentPlanningModelGateway.PlannedToolCall("graph", ConditionalTaskGraph.FUNCTION_NAME, "{}"),
+                new AgentPlanningModelGateway.PlannedToolCall("search", "test_search", "{\"query\":\"synthetic\"}"));
+        when(planning.plan(any())).thenReturn(plan("", calls, ModelUsage.unknown()))
+                .thenReturn(plan("FINISH", List.of(), ModelUsage.unknown()));
+        var service = service(planning, dispatcher, mock(AgentLoopAuditStore.class), projects, 4);
+
+        service.run(request(), mockListener(), () -> true);
+
+        var rounds = ArgumentCaptor.forClass(AgentPlanningModelGateway.AgentPlanRequest.class);
+        verify(planning, times(2)).plan(rounds.capture());
+        var observations = rounds.getAllValues().get(1).exchanges();
+        assertThat(observations).extracting(AgentPlanningModelGateway.ToolExchange::toolCall)
+                .containsExactlyElementsOf(calls);
+        assertThat(observations).allSatisfy(exchange ->
+                assertThat(exchange.responseJson()).contains("GRAPH_SUBMISSION_MUST_BE_EXCLUSIVE"));
+        verify(dispatcher, times(0)).execute(any(), anyString(), any(), any(), any());
     }
 
     @Test

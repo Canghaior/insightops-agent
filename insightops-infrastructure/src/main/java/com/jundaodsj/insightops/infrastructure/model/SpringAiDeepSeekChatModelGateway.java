@@ -2,9 +2,6 @@ package com.jundaodsj.insightops.infrastructure.model;
 
 import com.jundaodsj.insightops.model.application.ResearchModel;
 import org.springframework.beans.factory.annotation.Autowired;
-import com.openai.errors.OpenAIIoException;
-import com.openai.errors.OpenAIRetryableException;
-import com.openai.errors.OpenAIServiceException;
 import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
 import com.jundaodsj.insightops.model.application.ChatModelGateway;
 import com.jundaodsj.insightops.model.application.ChatModelRequest;
@@ -79,19 +76,8 @@ public class SpringAiDeepSeekChatModelGateway implements ChatModelGateway, Strea
         catch (ModelCallException exception) {
             throw exception;
         }
-        catch (OpenAIRetryableException | OpenAIIoException exception) {
-            throw new ModelCallException(ModelCallErrorCode.TEMPORARILY_UNAVAILABLE, target.provider(), exception);
-        }
-        catch (OpenAIServiceException exception) {
-            ModelCallErrorCode code = exception.statusCode() == 408
-                    || exception.statusCode() == 429
-                    || exception.statusCode() >= 500
-                    ? ModelCallErrorCode.TEMPORARILY_UNAVAILABLE
-                    : ModelCallErrorCode.REQUEST_REJECTED;
-            throw new ModelCallException(code, target.provider(), exception);
-        }
         catch (RuntimeException exception) {
-            throw classify(exception);
+            throw OpenAiModelErrors.classify(target.provider(), exception);
         }
     }
 
@@ -117,7 +103,7 @@ public class SpringAiDeepSeekChatModelGateway implements ChatModelGateway, Strea
                             usage),
                     error -> {
                         if (!cancelled.get()) {
-                            listener.onError(classify(error));
+                            listener.onError(OpenAiModelErrors.classify(target.provider(), error));
                         }
                     },
                     () -> {
@@ -135,7 +121,7 @@ public class SpringAiDeepSeekChatModelGateway implements ChatModelGateway, Strea
                     });
         }
         catch (RuntimeException exception) {
-            throw classify(exception);
+            throw OpenAiModelErrors.classify(target.provider(), exception);
         }
 
         subscription.set(disposable);
@@ -193,30 +179,6 @@ public class SpringAiDeepSeekChatModelGateway implements ChatModelGateway, Strea
             firstTokenNanos.compareAndSet(-1L, System.nanoTime() - startedAt);
             listener.onEvent(ChatStreamEvent.delta(content));
         }
-    }
-
-    private ModelCallException classify(Throwable exception) {
-        Throwable candidate = exception;
-        while (candidate.getCause() != null && candidate != candidate.getCause()) {
-            if (candidate instanceof OpenAIRetryableException
-                    || candidate instanceof OpenAIIoException
-                    || candidate instanceof OpenAIServiceException) {
-                break;
-            }
-            candidate = candidate.getCause();
-        }
-        if (candidate instanceof OpenAIRetryableException || candidate instanceof OpenAIIoException) {
-            return new ModelCallException(ModelCallErrorCode.TEMPORARILY_UNAVAILABLE, target.provider(), exception);
-        }
-        if (candidate instanceof OpenAIServiceException serviceException) {
-            ModelCallErrorCode code = serviceException.statusCode() == 408
-                    || serviceException.statusCode() == 429
-                    || serviceException.statusCode() >= 500
-                    ? ModelCallErrorCode.TEMPORARILY_UNAVAILABLE
-                    : ModelCallErrorCode.REQUEST_REJECTED;
-            return new ModelCallException(code, target.provider(), exception);
-        }
-        return new ModelCallException(ModelCallErrorCode.PROVIDER_ERROR, target.provider(), exception);
     }
 
     private static List<Message> messages(ChatModelRequest request) {

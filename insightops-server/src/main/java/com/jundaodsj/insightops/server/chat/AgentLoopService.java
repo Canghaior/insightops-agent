@@ -148,6 +148,7 @@ public class AgentLoopService {
         List<AgentTaskGraphValidator.Node> graph = new ArrayList<>();
         List<UUID> previousLayer = List.of();
         ModelUsage planningUsage = ModelUsage.unknown();
+        AgentPlanningModelGateway.Continuation continuation = null;
         String effectiveUserPrompt = request.userPrompt();
         int stepNo = 0;
         int executedNodes = 0;
@@ -219,7 +220,8 @@ public class AgentLoopService {
                             profile == null
                                     ? Math.max(256, Math.min(1_024, modelProperties.maxOutputTokens()))
                                     : profile.maxOutputTokens(),
-                            profile == null ? null : profile.modelName(), request.researchModel()));
+                            profile == null ? null : profile.modelName(), request.researchModel(), continuation));
+                    continuation = plan.continuation();
                     recordPlan(request.runId(), planStep, round, plan, planStartedAt);
                 }
                 catch (RuntimeException exception) {
@@ -250,10 +252,9 @@ public class AgentLoopService {
                 if (plan.toolCalls().stream().anyMatch(ConditionalTaskGraph::isSubmission)) {
                     if (conditionalGraphExecutionService == null || plan.toolCalls().size() != 1
                             || !ConditionalTaskGraph.isSubmission(plan.toolCalls().getFirst())) {
-                        PlannedToolCall graphCall = plan.toolCalls().stream()
-                                .filter(ConditionalTaskGraph::isSubmission).findFirst().orElse(plan.toolCalls().getFirst());
-                        exchanges.add(new ToolExchange(graphCall,
-                                errorObservation("GRAPH_SUBMISSION_MUST_BE_EXCLUSIVE")));
+                        for (var skipped : plan.toolCalls()) {
+                            exchanges.add(new ToolExchange(skipped, errorObservation("GRAPH_SUBMISSION_MUST_BE_EXCLUSIVE")));
+                        }
                         continue;
                     }
                     ConditionalTaskGraph.Submission submission;
@@ -321,11 +322,9 @@ public class AgentLoopService {
 
                 if (request.evaluationMode() && plan.toolCalls().stream()
                         .anyMatch(call -> "MUTATING".equals(riskLevel(call.name())))) {
-                    PlannedToolCall forbidden = plan.toolCalls().stream()
-                            .filter(call -> "MUTATING".equals(riskLevel(call.name())))
-                            .findFirst().orElseThrow();
-                    exchanges.add(new ToolExchange(forbidden,
-                            errorObservation("EVALUATION_WRITE_TOOL_FORBIDDEN")));
+                    for (var skipped : plan.toolCalls()) {
+                        exchanges.add(new ToolExchange(skipped, errorObservation("EVALUATION_WRITE_TOOL_FORBIDDEN")));
+                    }
                     continue;
                 }
                 int reserved = budget.reserveNodes(plan.toolCalls().size());

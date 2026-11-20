@@ -206,6 +206,8 @@ GET  /api/v1/knowledge/uploads/{uploadId}/content
 
 配置 `OPENAI_API_KEY` 即可启用 OpenAI 研究模型。可选的 `OPENAI_RESEARCH_MODELS` 是逗号分隔的模型 ID，例如 `gpt-6.2-sol,gpt-6.1-terra`。留空会列出应用支持的六个 GPT 型号，实际访问取决于 OpenAI 项目权限。仅使用 OpenAI 时保留 `SPRING_AI_MODEL_CHAT=none`。同时配置 DeepSeek 时，原有默认研究入口继续使用 DeepSeek。
 
+使用受限的 OpenAI 项目密钥时，请为 Responses 和 Chat Completions 两个接口开启请求权限。研究对话通过 Responses 规划工具调用，通过 Chat Completions 流式生成最终回答。
+
 ## DeepSeek API Key
 
 只在未提交的根目录 `.env` 中填写：

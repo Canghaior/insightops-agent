@@ -11,7 +11,9 @@ class ChatQuickReplyPolicyTest {
         assertThat(ChatQuickReplyPolicy.answer(
                 "你是什么模型？", "deepseek-v4-flash"))
                 .hasValueSatisfying(answer -> assertThat(answer)
-                        .contains("DeepSeek", "deepseek-v4-flash", "不需要启动工具检索"));
+                        .contains("deepseek-v4-flash", "不需要启动工具检索"));
+        assertThat(ChatQuickReplyPolicy.answer("你是什么模型？", "GPT-6.2 Sol")).hasValueSatisfying(answer ->
+                assertThat(answer).contains("GPT-6.2 Sol").doesNotContain("DeepSeek"));
         assertThat(ChatQuickReplyPolicy.answer(
                 "你能做什么", "deepseek-v4-flash")).isPresent();
     }

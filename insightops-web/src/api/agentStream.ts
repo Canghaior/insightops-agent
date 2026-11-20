@@ -207,6 +207,7 @@ export async function streamChat(
   sessionId?: string,
   resumeCheckpointId?: string,
   onRunAccepted?: (runId: string) => void,
+  modelChoice?: string,
 ): Promise<void> {
   const baseUrl = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
   let activeRunId = ''
@@ -232,6 +233,7 @@ export async function streamChat(
       message,
       sessionId: sessionId || null,
       resumeCheckpointId: resumeCheckpointId || null,
+      ...(modelChoice && { modelChoice }),
     }),
     credentials: 'include',
     signal,

@@ -41,7 +41,7 @@ class UpgradeAssessmentServiceTest {
                 command(List.of(), List.of("https://github.com/spring-projects/spring-ai/issues/6620")), null, null, "trace");
         var graph = ArgumentCaptor.forClass(String.class);
         @SuppressWarnings("unchecked") ArgumentCaptor<Map<String, Object>> inputs = ArgumentCaptor.forClass(Map.class);
-        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), anyString(), inputs.capture(), isNull(), any(), eq("trace"));
+        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), anyString(), inputs.capture(), isNull(), any(), eq("trace"), isNull());
         var expressions = new AgentWorkflowExpressionService(json, registry);
         var parsed = expressions.validateGraph(graph.getValue());
         assertThat(parsed.nodes()).extracting(AgentWorkflowExpressionService.NodeDefinition::toolName)
@@ -57,7 +57,7 @@ class UpgradeAssessmentServiceTest {
         watched();
         assertThatThrownBy(() -> service.launch(actor, true, AgentToolDefinition.AccessLevel.SYSTEM_ADMIN, command(List.of(UUID.randomUUID()), List.of()), null, null, "trace"))
                 .hasMessageContaining("无权访问");
-        verify(runs, never()).launchPrepared(any(), anyBoolean(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(runs, never()).launchPrepared(any(), anyBoolean(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
     @Test void issueLinksMustMatchSelectedRepository() {
         assertThat(UpgradeAssessmentService.issueNumber("https://github.com/spring-projects/spring-ai/issues/6620", "spring-projects", "spring-ai")).isEqualTo(6620);
@@ -75,7 +75,7 @@ class UpgradeAssessmentServiceTest {
         var graph = ArgumentCaptor.forClass(String.class);
         var question = ArgumentCaptor.forClass(String.class);
         @SuppressWarnings("unchecked") ArgumentCaptor<Map<String, Object>> input = ArgumentCaptor.forClass(Map.class);
-        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), question.capture(), input.capture(), isNull(), any(), eq("front"));
+        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), question.capture(), input.capture(), isNull(), any(), eq("front"), isNull());
         var expressions = new AgentWorkflowExpressionService(json, registry);
         var parsed = expressions.validateGraph(graph.getValue());
         expressions.validateInputs(parsed, input.getValue());
@@ -136,7 +136,7 @@ class UpgradeAssessmentServiceTest {
         service.launch(actor, false, AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER, command, null, null, "event-trace");
         var graph = ArgumentCaptor.forClass(String.class);
         @SuppressWarnings("unchecked") ArgumentCaptor<Map<String, Object>> inputs = ArgumentCaptor.forClass(Map.class);
-        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), anyString(), inputs.capture(), isNull(), any(), eq("event-trace"));
+        verify(runs).launchPrepared(eq(actor), eq(false), any(), eq(template), graph.capture(), anyString(), inputs.capture(), isNull(), any(), eq("event-trace"), isNull());
         assertThat(inputs.getValue()).containsEntry("eventId", eventId.toString()).containsEntry("currentVersion", "1.0.0").containsEntry("businessProject", "订单服务");
         var snapshot = (Map<?, ?>) inputs.getValue().get("sourceEvent");
         assertThat(snapshot.get("sourceUrl")).isEqualTo(event.sourceUrl());

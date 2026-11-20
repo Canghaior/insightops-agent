@@ -29,7 +29,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import com.jundaodsj.insightops.model.application.ResearchModel;
+import com.jundaodsj.insightops.infrastructure.config.ResearchModelCatalog;
+import com.jundaodsj.insightops.infrastructure.config.ResearchModelsEnabled;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -54,11 +57,12 @@ import java.util.concurrent.atomic.AtomicLong;
 
 @RestController
 @RequestMapping("/api/v1/chat/streams")
-@ConditionalOnProperty(prefix = "insightops.model.deepseek", name = "enabled", havingValue = "true")
+@Conditional(ResearchModelsEnabled.class)
 public class ChatStreamController {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ChatStreamController.class);
 
+    private final ResearchModelCatalog models;
     private final StreamingChatModelGateway streamingGateway;
     private final ChatStreamSessionRegistry sessionRegistry;
     private final DeepSeekModelProperties modelProperties;
@@ -84,7 +88,8 @@ public class ChatStreamController {
             ProjectEventEvidenceService projectEventEvidenceService,
             AgentLoopService agentLoopService,
             P0ChatGuardrail guardrail,
-            UserMemoryStore userMemoryStore) {
+            UserMemoryStore userMemoryStore, ResearchModelCatalog models) {
+        this.models = models;
         this.streamingGateway = streamingGateway;
         this.sessionRegistry = sessionRegistry;
         this.modelProperties = modelProperties;
@@ -109,7 +114,7 @@ public class ChatStreamController {
             UserMemoryStore userMemoryStore) {
         this(streamingGateway, sessionRegistry, modelProperties, chatRunStore,
                 releaseToolService, knowledgeRagService, projectEventEvidenceService,
-                null, guardrail, userMemoryStore);
+                null, guardrail, userMemoryStore, new ResearchModelCatalog(modelProperties, "", "", ""));
     }
 
     public ChatStreamController(
@@ -159,15 +164,15 @@ public class ChatStreamController {
         List<ChatRunStore.StoredMessage> history = body.sessionId() == null
                 ? List.of()
                 : chatRunStore.recentMessages(actor, body.sessionId(), 12);
-        UUID sessionId = chatRunStore.startRun(
-                actor,
-                runUuid,
-                body.sessionId(),
-                traceId,
-                userMessage,
-                startedAt);
+        ResearchModel selected;
+        try {
+            selected = models.resolve(body.modelChoice());
+        } catch (IllegalArgumentException exception) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage());
+        }
+        UUID sessionId = chatRunStore.startRun(actor, runUuid, body.sessionId(), traceId, userMessage, startedAt, selected);
         Optional<String> quickReply = ChatQuickReplyPolicy.answer(
-                userMessage, modelProperties.model());
+                userMessage, selected == null ? modelProperties.model() : selected.label());
         if (quickReply.isPresent()) {
             return quickReply(runUuid, sessionId, traceId, quickReply.orElseThrow(), startedAt);
         }
@@ -239,7 +244,7 @@ public class ChatStreamController {
                                 "SYSTEM_ADMIN".equals(account.systemRole()),
                                 toolAccess(account.systemRole(), account.role()),
                                 guardrail.contextualUserPrompt(history, userMessage),
-                                body.resumeCheckpointId()),
+                                body.resumeCheckpointId(), null, false, null, selected),
                         new com.jundaodsj.insightops.server.chat.AgentToolDispatcher.ProgressListener() {
                             @Override
                             public void onStarted(UUID toolCallId, String toolName, int round) {
@@ -515,7 +520,7 @@ public class ChatStreamController {
                             systemPrompt,
                             guardrail.contextualUserPrompt(history, userMessage),
                             modelProperties.temperature(),
-                            modelProperties.maxOutputTokens()),
+                            modelProperties.maxOutputTokens(), selected),
                     new ChatStreamListener() {
                         @Override
                         public void onEvent(ChatStreamEvent event) {
@@ -544,7 +549,7 @@ public class ChatStreamController {
                                         completedEvent.usage(),
                                         citationDetails,
                                         Instant.now());
-                                settleCostSafely(runUuid, totalUsage);
+                                settleCostSafely(runUuid, completedEvent);
                             }
                             catch (RuntimeException exception) {
                                 LOGGER.error("Failed to persist successful run {}", runId, exception);
@@ -671,9 +676,9 @@ public class ChatStreamController {
         }
     }
 
-    private void settleCostSafely(UUID runId, ModelUsage usage) {
+    private void settleCostSafely(UUID runId, ChatStreamEvent event) {
         if (agentLoopService == null) return;
-        try { agentLoopService.settleCost(runId, usage); }
+        try { agentLoopService.settleCost(runId, event.usage(), event.provider(), event.model()); }
         catch (RuntimeException exception) {
             LOGGER.error("Failed to settle Agent cost for run {}", runId, exception);
         }
@@ -724,7 +729,7 @@ public class ChatStreamController {
         Instant finishedAt = Instant.now();
         ModelUsage usage = ModelUsage.unknown();
         chatRunStore.succeedRunWithCitations(
-                runId, answer, "insightops", modelProperties.model(),
+                runId, answer, "insightops", "系统快捷回复",
                 usage, List.of(), finishedAt);
         SseEmitter emitter = new SseEmitter(15_000L);
         send(emitter, ChatSseEvent.started(
@@ -734,7 +739,7 @@ public class ChatStreamController {
         send(emitter, ChatSseEvent.completed(
                 runId.toString(), sessionId, 3, traceId,
                 ChatStreamEvent.completed(
-                        "insightops", modelProperties.model(), usage,
+                        "insightops", "系统快捷回复", usage,
                         Duration.between(startedAt, finishedAt), Duration.ZERO),
                 List.of(), List.of()));
         emitter.complete();
@@ -787,7 +792,11 @@ public class ChatStreamController {
             @Size(max = 4000, message = "message must not exceed 4000 characters")
             String message,
             UUID sessionId,
-            UUID resumeCheckpointId) {
+            UUID resumeCheckpointId, @Size(max = 80) String modelChoice) {
+
+        public ChatStreamRequest(String message, UUID sessionId, UUID resumeCheckpointId) {
+            this(message, sessionId, resumeCheckpointId, null);
+        }
 
         public ChatStreamRequest(String message) {
             this(message, null, null);

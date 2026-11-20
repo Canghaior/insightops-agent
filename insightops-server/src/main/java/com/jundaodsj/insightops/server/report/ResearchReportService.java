@@ -11,6 +11,7 @@ import com.jundaodsj.insightops.report.application.ReportDeliveryStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.jundaodsj.insightops.model.application.ResearchModel;
 import java.time.Instant;
 import java.util.*;
 
@@ -92,7 +93,8 @@ public class ResearchReportService {
                 run.citationDetails(), run.sources(), uncertainties.stream().distinct().toList(), evidence,
                 run.startedAt() == null ? run.createdAt() : run.startedAt(),
                 run.finishedAt() == null ? run.createdAt() : run.finishedAt(),
-                evidenceQuality.assess(run, inputs, workflow == null ? List.of() : workflow.nodes()));
+                evidenceQuality.assess(run, inputs, workflow == null ? List.of() : workflow.nodes()),
+                run.requestedModel(), run.modelName());
         String title = workflow != null ? workflow.templateName() : "研究报告 · " + run.question();
         if (decision) title += " · " + String.valueOf(inputs.get("decisionQuestion")).replaceAll("\\s+", " ").strip();
         else if (inputs.containsKey("targetVersion")) title += " · " + inputs.getOrDefault("projectName", "")
@@ -108,6 +110,12 @@ public class ResearchReportService {
     private String markdown(String title, ReportDeliveryStore.ResearchSnapshot snapshot, BusinessSystemService.Detail system, boolean decision) {
         StringBuilder result = new StringBuilder("# ").append(title).append("\n\n")
                 .append("研究完成时间：").append(snapshot.finishedAt()).append("\n\n");
+        if (snapshot.requestedModel() != null) {
+            result.append("选择的模型：").append(ResearchModel.fromId(snapshot.requestedModel()).label()).append("\n\n");
+        }
+        if (snapshot.responseModel() != null) {
+            result.append("响应模型：").append(snapshot.responseModel()).append("\n\n");
+        }
         if (snapshot.evidenceQuality() != null) {
             var quality = snapshot.evidenceQuality();
             result.append("## 资料完整性检查\n\n执行状态：已完成。证据状态：").append(quality.label()).append("。\n\n")

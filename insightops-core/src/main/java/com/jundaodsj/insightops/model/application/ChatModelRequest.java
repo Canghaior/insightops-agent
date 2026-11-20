@@ -4,7 +4,12 @@ public record ChatModelRequest(
         String systemPrompt,
         String userPrompt,
         double temperature,
-        int maxOutputTokens) {
+        int maxOutputTokens,
+        ResearchModel researchModel) {
+
+    public ChatModelRequest(String systemPrompt, String userPrompt, double temperature, int maxOutputTokens) {
+        this(systemPrompt, userPrompt, temperature, maxOutputTokens, null);
+    }
 
     public ChatModelRequest {
         systemPrompt = systemPrompt == null ? "" : systemPrompt.trim();

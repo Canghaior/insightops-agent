@@ -58,7 +58,7 @@ class AgentWorkflowRunControllerTest {
                 "Version comparison", 1, "Compare versions",
                 "{\"inputs\":{\"topic\":{\"type\":\"string\"}},\"nodes\":[{\"id\":\"research_1\"}]}",
                 "{\"topic\":\"Spring Boot 4\"}", "fingerprint", UUID.randomUUID(),
-                null, null, null, now, List.of(node));
+                null, null, null, now, List.of(node), null);
     }
 
     private static MockHttpServletRequest request() {

@@ -20,7 +20,11 @@ beforeEach(() => {
   apiClient.defaults.adapter = async config => {
     const url = config.url
     let data: unknown
-    if (url === '/projects' || url === '/business-systems/available-uploads') data = []
+    if (url === '/research-models') data = { defaultLabel: '默认', options: [
+      { id: 'gpt-6.2-sol', label: 'GPT-6.2 Sol', provider: 'openai' },
+      { id: 'deepseek-v4-pro-thinking', label: 'DeepSeek Pro · 思考', provider: 'deepseek' },
+    ] }
+    else if (url === '/projects' || url === '/business-systems/available-uploads') data = []
     else if (url === '/business-systems/orders' || url === '/business-systems/other') data = dossier(revision, url.split('/').pop())
     else if (url === '/agent-workflows/runs/R1') data = { businessSystemId: 'orders', inputs: {
       assessmentType: oldType, systemSnapshot: dossier(1), decisionQuestion: '旧问题', context: { environment: '旧环境' },
@@ -67,6 +71,19 @@ describe('业务系统决策评估页面', () => {
     expect(requests[0]).toMatchObject({ revision: 2, body: { question: '如何诊断回调延迟？', projectId: null, uploadIds: [] } })
     expect(requests[0]!.body).not.toHaveProperty('targetVersion')
     expect(router.currentRoute.value.path).toBe('/runs/new')
+  })
+  it('shows provider groups and sends the last selected model on launch', async () => {
+    await open()
+    const picker = root.querySelector<HTMLSelectElement>('select[aria-label="研究模型"]')!
+    expect(Array.from(picker.querySelectorAll('optgroup')).map(group => group.label)).toEqual(['OpenAI', 'DeepSeek'])
+    for (const id of ['gpt-6.2-sol', 'deepseek-v4-pro-thinking']) {
+      picker.value = id
+      picker.dispatchEvent(new Event('change', { bubbles: true }))
+      await nextTick()
+    }
+    await edit(0, '合成问题')
+    await submit()
+    expect(requests[0]!.body.modelChoice).toBe('deepseek-v4-pro-thinking')
   })
   it('keeps missing material notices, refreshes the dossier and sends only reviewed inputs', async () => {
     await open('?runId=R1')

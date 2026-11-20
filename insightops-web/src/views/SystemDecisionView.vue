@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ResearchModelPicker from '@/components/ResearchModelPicker.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
@@ -11,6 +12,7 @@ import SystemBackground from '@/components/SystemBackground.vue'
 
 const route = useRoute(), router = useRouter()
 const id = String(route.params.id)
+const modelChoice = ref('')
 const system = ref<BusinessSystem | null>(null)
 const projects = ref<ProjectWatch[]>([]), files = ref<SystemAttachment[]>([])
 const form = ref({ question: '', observations: '', environment: '', projectId: '', uploadIds: [] as string[] })
@@ -68,6 +70,7 @@ onMounted(async () => {
       if (assessmentTypeOf(run) !== 'SYSTEM_DECISION' || snapshot?.id !== id) throw new Error('历史运行与本次系统决策评估不一致。')
       previous.value = snapshot
       form.value = decisionFormOf(run)
+      modelChoice.value = run.requestedModel ?? ''
       for (const [file, name] of selectedMaterialNames((run.inputs as Record<string, unknown>).selectedMaterials)) oldNames.set(file, name)
       needsReview.value = true
     }
@@ -93,7 +96,7 @@ async function reload() {
 async function launch() {
   if (blocked.value || !system.value) return
   const revision = system.value.revision
-  const input = { ...form.value, question: form.value.question.trim(), projectId: form.value.projectId || null,
+  const input = { ...form.value, ...(modelChoice.value && { modelChoice: modelChoice.value }), question: form.value.question.trim(), projectId: form.value.projectId || null,
     uploadIds: [...form.value.uploadIds] }
   const payload = JSON.stringify([id, revision, input])
   if (lastPayload !== payload) { requestId = globalThis.crypto.randomUUID(); lastPayload = payload }
@@ -150,6 +153,7 @@ async function launch() {
           <p v-else>请对照修订 {{ system.revision }} 核对本次问题和补充背景。</p>
           <label class="check"><input v-model="reviewed" type="checkbox" :disabled="refreshing || conflict || launching" />已核对本次背景</label>
         </div>
+        <ResearchModelPicker v-model="modelChoice" :disabled="launching" />
         <button class="primary-button" type="submit" :disabled="blocked">{{ launching ? '正在发起…' : '发起系统决策评估' }}</button>
       </section>
     </form>

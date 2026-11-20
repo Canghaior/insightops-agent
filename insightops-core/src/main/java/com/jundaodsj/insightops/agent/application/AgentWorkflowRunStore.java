@@ -99,7 +99,7 @@ public interface AgentWorkflowRunStore {
             UUID retryRootRunId,
             String retryFromNodeId,
             Instant createdAt,
-            List<WorkflowNode> nodes) {
+            List<WorkflowNode> nodes, String requestedModel) {
     }
 
     record WorkflowNode(

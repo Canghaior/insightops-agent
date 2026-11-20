@@ -66,8 +66,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $projectRoot '.env'))) {
 }
 
 $environmentText = Get-Content -Raw -LiteralPath (Join-Path $projectRoot '.env')
-if ($environmentText -notmatch '(?m)^DEEPSEEK_API_KEY=.+$') {
-    Write-Warning 'DEEPSEEK_API_KEY is not configured. The application can start, but model chat will not be ready.'
+if ($environmentText -notmatch '(?m)^(?:DEEPSEEK|OPENAI)_API_KEY=[^\s#]+\s*$') {
+    Write-Warning 'Configure OPENAI_API_KEY or enable DeepSeek with DEEPSEEK_API_KEY for model-based research.'
 }
 
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null

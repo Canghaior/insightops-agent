@@ -9,6 +9,7 @@ import com.jundaodsj.insightops.agent.application.AgentWorkflowTemplateStore;
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.businesssystem.application.AssessmentType;
+import com.jundaodsj.insightops.infrastructure.config.ResearchModelCatalog;
 import java.util.function.Predicate;
 import com.jundaodsj.insightops.server.chat.DurableChatRunCoordinator;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolDefinition;
@@ -41,6 +42,7 @@ public class AgentWorkflowRunService {
     private final AgentWorkflowExpressionService expressions;
     private final AgentToolRegistry registry;
     private final ObjectMapper json;
+    private final ResearchModelCatalog models;
 
     public AgentWorkflowRunService(
             AgentWorkflowTemplateStore templates,
@@ -50,7 +52,8 @@ public class AgentWorkflowRunService {
             DurableChatRunCoordinator durableRuns,
             AgentWorkflowExpressionService expressions,
             AgentToolRegistry registry,
-            ObjectMapper json) {
+            ObjectMapper json, ResearchModelCatalog models) {
+        this.models = models;
         this.templates = templates;
         this.workflowRuns = workflowRuns;
         this.chatRuns = chatRuns;
@@ -81,6 +84,14 @@ public class AgentWorkflowRunService {
             ActorContext actor, boolean systemAdmin, AgentToolDefinition.AccessLevel accessLevel,
             UUID templateId, UUID expectedVersionId, UUID sessionId,
             UUID requestId, Map<String, Object> suppliedInputs, String traceId) {
+        return launch(actor, systemAdmin, accessLevel, templateId, expectedVersionId, sessionId, requestId, suppliedInputs, traceId, null);
+    }
+
+    @Transactional
+    public LaunchResult launch(
+            ActorContext actor, boolean systemAdmin, AgentToolDefinition.AccessLevel accessLevel,
+            UUID templateId, UUID expectedVersionId, UUID sessionId,
+            UUID requestId, Map<String, Object> suppliedInputs, String traceId, String modelChoice) {
         AgentWorkflowTemplateStore.WorkflowTemplate template = templates.find(actor.workspaceId(), templateId)
                 .orElseThrow(() -> new WorkflowRunException("WORKFLOW_TEMPLATE_NOT_FOUND"));
         if ("UPGRADE_ASSESSMENT".equals(template.category()) || "SYSTEM_DECISION".equals(template.category())) {
@@ -104,7 +115,7 @@ public class AgentWorkflowRunService {
         Instant now = Instant.now();
         UUID runId = UUID.randomUUID();
         UUID actualSessionId = chatRuns.startRun(
-                actor, runId, sessionId, traceId, question, now);
+                actor, runId, sessionId, traceId, question, now, models.resolve(modelChoice));
         workflowRuns.create(new AgentWorkflowRunStore.WorkflowRunDraft(
                         runId, actor.workspaceId(), actor.userId(), null, template.id(), version.id(),
                         template.name(), version.version(), question, graph.root().toString(),
@@ -136,7 +147,8 @@ public class AgentWorkflowRunService {
     @Transactional(propagation = Propagation.MANDATORY)
     public LaunchResult launchPrepared(ActorContext actor, boolean systemAdmin,
             AgentToolDefinition.AccessLevel accessLevel, AgentWorkflowTemplateStore.WorkflowTemplate template,
-            String graphJson, String question, Map<String, Object> suppliedInputs, UUID systemId, UUID requestId, String traceId) {
+            String graphJson, String question, Map<String, Object> suppliedInputs, UUID systemId, UUID requestId,
+            String traceId, String modelChoice) {
         if (!actor.workspaceId().equals(template.workspaceId())) throw new WorkflowRunException("WORKFLOW_TEMPLATE_NOT_FOUND");
         var version = template.versions().stream().filter(item -> item.id().equals(template.activeVersionId())).findFirst().orElseThrow();
         var graph = expressions.validateGraph(graphJson);
@@ -144,7 +156,7 @@ public class AgentWorkflowRunService {
         var inputs = expressions.validateInputs(graph, suppliedInputs);
         Instant now = Instant.now();
         UUID runId = UUID.randomUUID();
-        UUID sessionId = chatRuns.startRun(actor, runId, null, traceId, question, now);
+        UUID sessionId = chatRuns.startRun(actor, runId, null, traceId, question, now, models.resolve(modelChoice));
         workflowRuns.create(new AgentWorkflowRunStore.WorkflowRunDraft(runId, actor.workspaceId(), actor.userId(),
                 systemId, template.id(), version.id(), template.name(), version.version(), question, graph.root().toString(),
                 write(inputs), expressions.contractFingerprint(graph), requestId, null, runId, null, now),
@@ -184,7 +196,8 @@ public class AgentWorkflowRunService {
         UUID runId = UUID.randomUUID();
         UUID sessionId = chatRuns.startRun(
                 actor, runId, sourceDetail.sessionId(), traceId,
-                source.entryQuestion() + "（从失败节点 " + fromNodeId + " 重试）", now);
+                source.entryQuestion() + "（从失败节点 " + fromNodeId + " 重试）", now,
+                sourceDetail.requestedModel() == null ? null : models.resolve(sourceDetail.requestedModel()));
         workflowRuns.create(new AgentWorkflowRunStore.WorkflowRunDraft(
                         runId, actor.workspaceId(), actor.userId(), source.businessSystemId(), source.templateId(),
                         source.templateVersionId(), source.templateName(), source.templateVersion(),

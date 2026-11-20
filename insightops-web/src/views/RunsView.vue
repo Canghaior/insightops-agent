@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { modelChoiceLabel } from '@/api/researchModels'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -401,7 +402,8 @@ onUnmounted(() => {
           <details class="detail-block">
             <summary>查看研究参数、任务图与工具过程</summary>
             <dl class="detail-metrics">
-              <div><dt>模型</dt><dd>{{ selectedRun.modelName ?? '—' }}</dd></div>
+              <div v-if="selectedRun.requestedModel"><dt>选择的模型</dt><dd>{{ modelChoiceLabel(selectedRun.requestedModel) }}</dd></div>
+              <div><dt>响应模型</dt><dd>{{ selectedRun.modelName ?? '—' }}</dd></div>
               <div><dt>Token</dt><dd>{{ totalTokens(selectedRun) }}</dd></div>
               <div><dt>工具轮次</dt><dd>{{ selectedRun.toolRounds }}</dd></div>
               <div><dt>估算费用</dt><dd>{{ formatCost(selectedRun.estimatedCostCny) }}</dd></div>

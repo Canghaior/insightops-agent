@@ -56,6 +56,7 @@ export async function systemHistory(id: string, page: number): Promise<{ items: 
   return (await apiClient.get(`${resource(id)}/runs`, { params: { page } })).data.data
 }
 export interface DecisionInput {
+  modelChoice?: string
   question: string; observations: string; environment: string; projectId: string | null; uploadIds: string[]
 }
 export async function launchSystemDecision(id: string, expectedRevision: number, input: DecisionInput, requestId: string): Promise<{ runId: string }> {

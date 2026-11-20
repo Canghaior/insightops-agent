@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
 import com.jundaodsj.insightops.conversation.application.ChatCitation;
+import com.jundaodsj.insightops.model.application.ResearchModel;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.infrastructure.model.DeepSeekCostEstimator;
 import com.jundaodsj.insightops.model.application.ModelUsage;
@@ -153,7 +154,7 @@ public class JdbcChatRunStore implements ChatRunStore {
             UUID requestedSessionId,
             String traceId,
             String question,
-            Instant startedAt) {
+            Instant startedAt, ResearchModel model) {
         UUID sessionId = requestedSessionId == null
                 ? createSession(actor, question, startedAt)
                 : lockActiveSession(actor, requestedSessionId);
@@ -175,10 +176,10 @@ public class JdbcChatRunStore implements ChatRunStore {
         jdbcClient.sql("""
                         insert into agent_run
                             (id, workspace_id, owner_user_id, session_id, trace_id, status, question,
-                             started_at, created_at)
+                             started_at, created_at, requested_model)
                         values
                             (:id, :workspaceId, :userId, :sessionId, :traceId, 'RUNNING', :question,
-                             :startedAt, :startedAt)
+                             :startedAt, :startedAt, :requestedModel)
                         """)
                 .param("id", runId)
                 .param("workspaceId", actor.workspaceId())
@@ -186,6 +187,7 @@ public class JdbcChatRunStore implements ChatRunStore {
                 .param("sessionId", sessionId)
                 .param("traceId", traceId)
                 .param("question", question)
+                .param("requestedModel", model == null ? null : model.id(), java.sql.Types.VARCHAR)
                 .param("startedAt", timestamp(startedAt))
                 .update();
 
@@ -242,7 +244,7 @@ public class JdbcChatRunStore implements ChatRunStore {
         parameters.put("model", model);
         parameters.put("promptTokens", usage == null ? null : usage.inputTokens());
         parameters.put("completionTokens", usage == null ? null : usage.outputTokens());
-        DeepSeekCostEstimator.CostEstimate cost = costEstimator.estimate(usage).orElse(null);
+        DeepSeekCostEstimator.CostEstimate cost = costEstimator.estimate(provider, model, usage).orElse(null);
         parameters.put("estimatedCostCny", cost == null ? null : cost.cny());
         parameters.put("pricingEffectiveDate", cost == null ? null : cost.pricingEffectiveDate());
         parameters.put("finishedAt", timestamp(finishedAt));

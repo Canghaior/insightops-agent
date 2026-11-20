@@ -24,6 +24,7 @@ export interface UpgradeSetup {
   profiles: ResearchProfile[]; sources: SourceCoverage[]
 }
 export interface UpgradeInput {
+  modelChoice?: string
   projectId: string; currentVersion: string; targetVersion: string; businessProject: string
   javaVersion: string; springBootVersion: string; concerns: string[]; uploadIds: string[]; issueUrls: string[]
   profileId: string; context: Record<string, string>

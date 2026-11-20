@@ -187,6 +187,9 @@ insightops:
       request-timeout-seconds: ${GITHUB_REQUEST_TIMEOUT_SECONDS:20}
       max-body-chars: ${GITHUB_RELEASE_MAX_BODY_CHARS:1600}
   model:
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      models: ${OPENAI_RESEARCH_MODELS:}
     deepseek:
       enabled: ${DEEPSEEK_ENABLED:false}
       base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}

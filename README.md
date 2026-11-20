@@ -200,6 +200,12 @@ GET  /api/v1/knowledge/uploads/{uploadId}/content
 
 系统预置 10 个真实项目，并通过统一租约管线持续采集 Spring 官方博客 RSS 和 Spring AI GitHub Milestone。用户可在“我的资料”上传 Markdown、文本或 PDF，选择项目以及私有/Workspace 可见性；文件完成解析和 Embedding 后可直接进入 RAG，引用通过登录接口下载并保留 PDF 页码。上传卷和数据库采用一致备份，Prometheus 规则覆盖服务不可用、采集租约、Embedding 积压、上传失败和 5xx。设计边界见 [P1.9 多来源、用户资料与生产稳定性](docs/architecture/p1-9-sources-uploads-stability.md)。
 
+## 交互研究使用的模型
+
+研究对话、版本升级评估、系统决策评估和工作流启动表单都提供模型选择。运行详情显示选择的模型和服务商实际返回的型号，失败节点重试继续使用原选择。服务端从本地忽略提交的 `.env` 读取密钥，网页只接收模型名称。
+
+配置 `OPENAI_API_KEY` 即可启用 OpenAI 研究模型。可选的 `OPENAI_RESEARCH_MODELS` 是逗号分隔的模型 ID，例如 `gpt-6.2-sol,gpt-6.1-terra`。留空会列出应用支持的六个 GPT 型号，实际访问取决于 OpenAI 项目权限。仅使用 OpenAI 时保留 `SPRING_AI_MODEL_CHAT=none`。同时配置 DeepSeek 时，原有默认研究入口继续使用 DeepSeek。
+
 ## DeepSeek API Key
 
 只在未提交的根目录 `.env` 中填写：
@@ -210,7 +216,7 @@ DEEPSEEK_ENABLED=true
 SPRING_AI_MODEL_CHAT=openai
 ```
 
-这里的 `openai` 表示使用 Spring AI 的 OpenAI-compatible 协议适配器，实际 Provider 和模型仍然是 DeepSeek 官方 API 与 `deepseek-v4-flash`。这样才能向 DeepSeek V4 发送 `thinking.type=disabled`。
+这里的 `SPRING_AI_MODEL_CHAT=openai` 为原有 DeepSeek 服务启用 Spring AI 协议适配器。交互研究可选 DeepSeek Flash、Pro 以及各自的思考模式。OpenAI 的请求使用独立的客户端和项目密钥。
 
 不要把真实 Key 写进 `.env.example`、YAML、Java 源码、提交记录或聊天消息。在线 Smoke 入口默认关闭，只在显式设置 `DEEPSEEK_SMOKE_TEST_ENABLED=true` 的本地进程中出现。
 

@@ -18,7 +18,7 @@ public final class ChatQuickReplyPolicy {
                 "^(你(现在)?(是|使用|用的|使用的)(什么|哪个)?模型|"
                         + "(当前|现在)(使用|用的|使用的)?(什么|哪个)?模型|"
                         + "what model( are you| do you use)?)$")) {
-            return Optional.of("当前 InsightOps 生产对话模型配置为 DeepSeek 的 "
+            return Optional.of("本次研究选择的模型是 "
                     + model + "。这个身份问题由系统直接回答，不需要启动工具检索。");
         }
         if (normalized.matches("^(你是谁|你叫什么|what are you|who are you)$")) {

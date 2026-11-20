@@ -15,7 +15,13 @@ public interface AgentPlanningModelGateway {
             List<FunctionDefinition> tools,
             double temperature,
             int maxOutputTokens,
-            String modelOverride) {
+            String modelOverride,
+            ResearchModel researchModel) {
+
+        public AgentPlanRequest(String systemPrompt, String userPrompt, List<ToolExchange> exchanges,
+                List<FunctionDefinition> tools, double temperature, int maxOutputTokens, String modelOverride) {
+            this(systemPrompt, userPrompt, exchanges, tools, temperature, maxOutputTokens, modelOverride, null);
+        }
 
         public AgentPlanRequest(
                 String systemPrompt, String userPrompt, List<ToolExchange> exchanges,

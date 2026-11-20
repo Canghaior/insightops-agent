@@ -44,7 +44,12 @@ public class SystemDecisionAssessmentService {
     }
 
     public record Command(UUID requestId, String question, String observations, String environment,
-                          UUID projectId, List<UUID> uploadIds) { }
+                          UUID projectId, List<UUID> uploadIds, String modelChoice) {
+        public Command(UUID requestId, String question, String observations, String environment,
+                       UUID projectId, List<UUID> uploadIds) {
+            this(requestId, question, observations, environment, projectId, uploadIds, null);
+        }
+    }
 
     @Transactional
     public AgentWorkflowRunService.LaunchResult launch(ActorContext actor, boolean admin, AccessLevel access,
@@ -100,7 +105,7 @@ public class SystemDecisionAssessmentService {
                 <decision_inputs>%s</decision_inputs>
                 """.formatted(question.lines().findFirst().orElse(""), scope, write(inputs));
         return runs.launchPrepared(actor, admin, access, template(actor), write(graph(nodes)), prompt, inputs,
-                systemId, command.requestId(), traceId);
+                systemId, command.requestId(), traceId, command.modelChoice());
     }
 
     private AgentWorkflowTemplateStore.WorkflowTemplate template(ActorContext actor) {

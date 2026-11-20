@@ -47,6 +47,7 @@ public interface AgentRunQuery {
             String status,
             String question,
             String answer,
+            String requestedModel,
             String modelProvider,
             String modelName,
             int toolRounds,

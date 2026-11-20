@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.conversation.application;
 
 import com.jundaodsj.insightops.model.application.ModelUsage;
+import com.jundaodsj.insightops.model.application.ResearchModel;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 
 import java.time.Instant;
@@ -16,13 +17,18 @@ public interface ChatRunStore {
 
     boolean ownsRun(ActorContext actor, UUID runId);
 
+    default UUID startRun(ActorContext actor, UUID runId, UUID requestedSessionId, String traceId,
+                          String question, Instant startedAt) {
+        return startRun(actor, runId, requestedSessionId, traceId, question, startedAt, null);
+    }
+
     UUID startRun(
             ActorContext actor,
             UUID runId,
             UUID requestedSessionId,
             String traceId,
             String question,
-            Instant startedAt);
+            Instant startedAt, ResearchModel model);
 
     void succeedRun(
             UUID runId,

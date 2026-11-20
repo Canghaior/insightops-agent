@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ResearchModelPicker from '@/components/ResearchModelPicker.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -112,12 +113,14 @@ function normalizedInputs() {
   return result
 }
 
+const modelChoice = ref('')
+
 async function launch() {
   if (!selected.value) return
   launching.value = true
   error.value = ''
   try {
-    const result = await launchWorkflow(selected.value.id, selected.value.activeVersionId, normalizedInputs())
+    const result = await launchWorkflow(selected.value.id, selected.value.activeVersionId, normalizedInputs(), modelChoice.value || undefined)
     await router.push(`/runs/${result.runId}`)
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '工作流启动失败，请刷新活动版本后重试。'
@@ -136,6 +139,7 @@ onMounted(async () => {
       if (template) {
         await select(template)
         values.value = { ...(previous.inputs as Record<string, unknown>) }
+        modelChoice.value = previous.requestedModel ?? ''
       } else error.value = '原研究模板已不可用，请选择其他模板。'
     } else if (templates.value[0]) await select(templates.value[0])
   } catch {
@@ -203,6 +207,7 @@ onMounted(async () => {
 
           </label>
           <div v-if="fields.length === 0" class="no-inputs">该模板不需要额外入口参数。</div>
+          <ResearchModelPicker v-model="modelChoice" :disabled="launching" />
           <button class="primary-button" :disabled="launching" type="submit">
             {{ launching ? '正在启动研究…' : '开始研究' }}
           </button>

@@ -48,7 +48,7 @@ public class AgentWorkflowRunController {
                 run.templateVersion(), run.entryQuestion(), value(run.graphSpecJson()),
                 value(run.inputJson()), run.toolContractFingerprint(), run.sourceRunId(),
                 run.retryRootRunId(), run.retryFromNodeId(), run.createdAt(),
-                run.nodes().stream().map(this::node).toList());
+                run.nodes().stream().map(this::node).toList(), run.requestedModel());
     }
 
     private WorkflowNodeView node(AgentWorkflowRunStore.WorkflowNode node) {
@@ -81,7 +81,7 @@ public class AgentWorkflowRunController {
             UUID runId, UUID businessSystemId, UUID templateId, UUID templateVersionId, String templateName,
             int templateVersion, String entryQuestion, Object graphSpec, Object inputs,
             String toolContractFingerprint, UUID sourceRunId, UUID retryRootRunId,
-            String retryFromNodeId, Instant createdAt, List<WorkflowNodeView> nodes) { }
+            String retryFromNodeId, Instant createdAt, List<WorkflowNodeView> nodes, String requestedModel) { }
 
     public record WorkflowNodeView(
             UUID id, String logicalNodeId, String toolName, int toolVersion,

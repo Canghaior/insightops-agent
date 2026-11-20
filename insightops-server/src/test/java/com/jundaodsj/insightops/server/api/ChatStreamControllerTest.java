@@ -352,7 +352,7 @@ class ChatStreamControllerTest {
                 UUID requestedSessionId,
                 String traceId,
                 String question,
-                Instant startedAt) {
+                Instant startedAt, com.jundaodsj.insightops.model.application.ResearchModel model) {
             this.runId = runId;
             this.status = "RUNNING";
             return requestedSessionId == null ? sessionId : requestedSessionId;

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ResearchModelPicker from '@/components/ResearchModelPicker.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
@@ -11,6 +12,7 @@ import { getWorkflowRun } from '@/api/workflowRuns'
 import { assessmentTypeOf } from '@/utils/assessmentTypes'
 
 const router = useRouter(), route = useRoute()
+const modelChoice = ref('')
 const setup = ref<UpgradeSetup | null>(null)
 const system = ref<BusinessSystem | null>(null)
 const systemChanged = ref(false), reloadingSystem = ref(false), initializationFailed = ref(false)
@@ -164,7 +166,7 @@ async function launch() {
   if (launchBlocked.value || initializationFailed.value || eventFailed.value) return
   if (!form.value.concerns.length) { error.value = '请至少选择一个关注项。'; return }
   busy.value = true; error.value = ''
-  const input = values()
+  const input = { ...values(), ...(modelChoice.value && { modelChoice: modelChoice.value }) }
   const payload = JSON.stringify([input, system.value?.id, system.value?.revision])
   if (payload !== lastPayload) { lastPayload = payload; requestId = globalThis.crypto.randomUUID() }
   try {
@@ -196,6 +198,7 @@ onMounted(async () => {
       if (systemId && previous.businessSystemId !== systemId) throw new Error('历史运行与所选系统不一致。')
       systemId = previous.businessSystemId ?? systemId
       restore(previousAssessmentInput(previous))
+      modelChoice.value = previous.requestedModel ?? ''
       if (previous.businessSystemId) {
         previousSystem.value = { revision: systemSnapshotOf(previous)?.revision ?? null,
           hasSupplement: Object.values(form.value.context).some(value => value.trim() !== '') }
@@ -318,6 +321,7 @@ onMounted(async () => {
         </details>
       </section>
       <details v-if="!system" class="optional"><summary>保存配置，下次复用</summary><p class="hint">配置按当前工作区和你的账号保存；用团队与业务项目命名，方便切换。</p><div class="save-config"><input v-model="presetName" maxlength="80" aria-label="配置名称" placeholder="例如：支付团队 · 订单服务" /><button type="button" class="secondary-button" :disabled="saving" @click="savePreset">{{ saving ? '保存中…' : '保存当前配置' }}</button></div></details>
+      <ResearchModelPicker v-model="modelChoice" :disabled="busy" />
       <div class="launch-row"><button class="primary-button" type="submit" :disabled="launchBlocked">{{ busy ? '正在启动研究…' : '开始升级评估' }}</button><p class="hint">{{ reviewRequired && !reviewed ? '请先在项目技术方向下勾选「已核对本次背景」。' : '输出主要变化、可能影响、验证清单、来源依据和尚未确认事项。资料不足会明确提示。' }}</p></div>
     </form>
     <RouterLink class="other-workflows" to="/agent-workflows">查看其他研究模板 →</RouterLink>

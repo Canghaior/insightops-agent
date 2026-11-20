@@ -101,6 +101,7 @@ export interface RunBudget {
 }
 
 export interface RunDetail extends RunSummary {
+  requestedModel?: string | null
   answer: string | null
   estimatedCostCny: number | null
   pricingEffectiveDate: string | null

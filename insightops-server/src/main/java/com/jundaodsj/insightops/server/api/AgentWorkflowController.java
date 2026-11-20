@@ -46,9 +46,9 @@ public class AgentWorkflowController {
             return response(request, service.launch(
                     account.actor(), "SYSTEM_ADMIN".equals(account.systemRole()), access(account),
                     templateId, body.expectedVersionId(), body.sessionId(), body.requestId(),
-                    body.inputs() == null ? Map.of() : body.inputs(), traceId(request)));
+                    body.inputs() == null ? Map.of() : body.inputs(), traceId(request), body.modelChoice()));
         }
-        catch (AgentWorkflowRunService.WorkflowRunException exception) {
+        catch (IllegalArgumentException exception) {
             throw status(exception);
         }
     }
@@ -63,7 +63,7 @@ public class AgentWorkflowController {
                     account.actor(), "SYSTEM_ADMIN".equals(account.systemRole()), access(account),
                     runId, body.fromNodeId(), body.requestId(), traceId(request)));
         }
-        catch (AgentWorkflowRunService.WorkflowRunException exception) {
+        catch (IllegalArgumentException exception) {
             throw status(exception);
         }
     }
@@ -93,7 +93,7 @@ public class AgentWorkflowController {
             @NotNull UUID expectedVersionId,
             UUID sessionId,
             @NotNull UUID requestId,
-            Map<String, Object> inputs) { }
+            Map<String, Object> inputs, String modelChoice) { }
 
     public record RetryRequest(
             @NotBlank String fromNodeId,

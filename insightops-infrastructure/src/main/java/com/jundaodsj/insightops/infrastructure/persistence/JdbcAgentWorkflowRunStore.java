@@ -26,7 +26,10 @@ public class JdbcAgentWorkflowRunStore implements AgentWorkflowRunStore {
     @Override
     public Optional<WorkflowRun> find(UUID runId) {
         List<WorkflowNode> nodes = nodes(runId);
-        return jdbc.sql("select * from agent_workflow_run where run_id = :runId")
+        return jdbc.sql("""
+                        select workflow.*, run.requested_model from agent_workflow_run workflow
+                        join agent_run run on run.id = workflow.run_id where workflow.run_id = :runId
+                        """)
                 .param("runId", runId).query((rs, row) -> workflow(rs, nodes)).optional();
     }
 
@@ -256,7 +259,7 @@ public class JdbcAgentWorkflowRunStore implements AgentWorkflowRunStore {
                 rs.getString("graph_spec_snapshot"), rs.getString("input_snapshot"),
                 rs.getString("tool_contract_fingerprint"), rs.getObject("request_id", UUID.class),
                 rs.getObject("source_run_id", UUID.class), rs.getObject("retry_root_run_id", UUID.class),
-                rs.getString("retry_from_node_id"), instant(rs, "created_at"), List.copyOf(nodes));
+                rs.getString("retry_from_node_id"), instant(rs, "created_at"), List.copyOf(nodes), rs.getString("requested_model"));
     }
 
     private static WorkflowNode node(ResultSet rs, List<NodeAttemptView> attempts) throws SQLException {

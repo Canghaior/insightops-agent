@@ -32,6 +32,9 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.jundaodsj.insightops.infrastructure.config.DeepSeekModelProperties;
+import com.jundaodsj.insightops.infrastructure.config.ResearchModelCatalog;
+import com.jundaodsj.insightops.model.application.ResearchModel;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -86,6 +89,7 @@ class BusinessSystemDatabaseGateTest {
         workflows = new JdbcAgentWorkflowRunStore(jdbc);
         var historical = workflows.find(legacy).orElseThrow();
         assertThat(historical.businessSystemId()).isNull();
+        assertThat(historical.requestedModel()).isNull();
         assertThat(historical.inputJson()).contains("订单系统").doesNotContain("systemSnapshot");
 
         tx = new TransactionTemplate(new DataSourceTransactionManager(source));
@@ -97,7 +101,9 @@ class BusinessSystemDatabaseGateTest {
         var runQuery = new JdbcAgentRunQuery(jdbc, json);
         var queue = new DurableChatRunCoordinator(new JdbcDurableChatRunStore(jdbc), null, new DurableChatRunProperties(), json);
         runs = new AgentWorkflowRunService(templates, workflows, new JdbcChatRunStore(jdbc, null, json),
-                runQuery, queue, new AgentWorkflowExpressionService(json, registry), registry, json);
+                runQuery, queue, new AgentWorkflowExpressionService(json, registry), registry, json,
+                new ResearchModelCatalog(new DeepSeekModelProperties(true, "", "deepseek-v4-flash", false,
+                        .2, 1024, 2, 30, 0, false), "mock-openai", "mock-deepseek", ""));
         var watches = new JdbcUserProjectWatchStore(jdbc);
         watches.setEnabled(ACTOR, PROJECT, true, Instant.now());
         upgrades = new UpgradeAssessmentService(templates, runs, watches, materials, null, registry, json,
@@ -248,6 +254,39 @@ class BusinessSystemDatabaseGateTest {
     private AgentWorkflowRunService.LaunchResult decide(UUID systemId, int revision, UUID requestId, String observation) {
         var command = new SystemDecisionAssessmentService.Command(requestId, "回调变慢应先做什么？", observation, "", null, List.of());
         return tx.execute(status -> decisions.launch(ACTOR, false, AccessLevel.WORKSPACE_MEMBER, systemId, revision, command, requestId.toString()));
+    }
+
+    @Test void modelSelectionSurvivesReplayQueueAndRetry() throws Exception {
+        var id = create("Java 21", List.of()).id();
+        UUID request = UUID.randomUUID();
+        var original = new SystemDecisionAssessmentService.Command(request, "合成问题", "", "", null, List.of(), "gpt-6.2-sol");
+        var run = tx.execute(status -> decisions.launch(ACTOR, false, AccessLevel.WORKSPACE_MEMBER, id, 1, original, UUID.randomUUID().toString()));
+        var changed = new SystemDecisionAssessmentService.Command(request, "other", "", "", null, List.of(), "deepseek-v4-pro-thinking");
+        var replay = tx.execute(status -> decisions.launch(ACTOR, false, AccessLevel.WORKSPACE_MEMBER, id, 1, changed, UUID.randomUUID().toString()));
+        assertThat(replay.runId()).isEqualTo(run.runId());
+        assertThat(workflows.find(run.runId()).orElseThrow().requestedModel()).isEqualTo("gpt-6.2-sol");
+
+        var token = UUID.randomUUID();
+        jdbc.sql("update agent_run_work set status='RUNNING', attempt_count=1, lease_token=?, lease_expires_at=now()+interval '1 minute' where run_id=?")
+                .params(token, run.runId()).update();
+        var queue = new JdbcDurableChatRunStore(jdbc);
+        assertThat(tx.execute(status -> queue.prepareAttempt(run.runId(), token, Instant.now())).researchModel())
+                .isEqualTo(ResearchModel.GPT_62_SOL);
+        jdbc.sql("update agent_run set status='FAILED', finished_at=now() where id=?").param(run.runId()).update();
+        jdbc.sql("update agent_workflow_run_node set status='FAILED' where run_id=?").param(run.runId()).update();
+        var retry = tx.execute(status -> runs.retry(ACTOR, false, AccessLevel.WORKSPACE_MEMBER, run.runId(), "review_inputs", UUID.randomUUID(), UUID.randomUUID().toString()));
+        assertThat(workflows.find(retry.runId()).orElseThrow().requestedModel()).isEqualTo("gpt-6.2-sol");
+        var fresh = new SystemDecisionAssessmentService.Command(UUID.randomUUID(), "合成问题", "", "", null, List.of(), "deepseek-v4-pro-thinking");
+        var next = tx.execute(status -> decisions.launch(ACTOR, false, AccessLevel.WORKSPACE_MEMBER, id, 1, fresh, UUID.randomUUID().toString()));
+        assertThat(workflows.find(next.runId()).orElseThrow().requestedModel()).isEqualTo("deepseek-v4-pro-thinking");
+        jdbc.sql("update agent_run set status='SUCCEEDED',answer='合成回答',finished_at=now(),model_provider='deepseek',model_name='deepseek-v4-pro' where id=?")
+                .param(next.runId()).update();
+        var report = research.create(ACTOR, next.runId());
+        assertThat(report.research().requestedModel()).isEqualTo("deepseek-v4-pro-thinking");
+        assertThat(exports.markdown(ACTOR, report.id())).contains("选择的模型：DeepSeek Pro · 思考", "响应模型：deepseek-v4-pro");
+        try (var pdf = Loader.loadPDF(exports.pdf(ACTOR, report.id()))) {
+            assertThat(new PDFTextStripper().getText(pdf)).contains("DeepSeek Pro", "deepseek-v4-pro");
+        }
     }
 
     @Test void decisionsFreezeInputsAndKeepBothKindsOfRunsDistinct() throws Exception {

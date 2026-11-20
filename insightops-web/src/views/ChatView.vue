@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ResearchModelPicker from '@/components/ResearchModelPicker.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -101,6 +102,7 @@ const historyError = ref('')
 const researchEvent = ref<ResearchEventContext | null>(null)
 const eventLoading = ref(false), eventError = ref('')
 let eventRequestVersion = 0
+const modelChoice = ref('')
 const resumeCheckpointId = ref(
   typeof route.query.checkpoint === 'string' ? route.query.checkpoint : '',
 )
@@ -517,6 +519,7 @@ async function sendQuestion() {
         const assistant = currentAssistant()
         if (assistant) assistant.runId = acceptedRunId
       },
+      modelChoice.value || undefined,
     )
     const assistant = currentAssistant()
     if (assistant && (status.value === 'connecting'
@@ -774,7 +777,7 @@ onBeforeUnmount(() => {
                 <span class="stream-status" :class="`is-${message.status ?? 'completed'}`">
                   <i></i>{{ statusLabel(message) }}
                 </span>
-                <h3>DeepSeek 回答</h3>
+                <h3>研究回答</h3>
               </div>
             </header>
 
@@ -842,7 +845,7 @@ onBeforeUnmount(() => {
             <details v-if="message.usage || message.traceId" class="research-diagnostics">
               <summary>运行用量与诊断信息</summary>
               <dl v-if="message.status === 'completed' && message.usage" class="stream-metrics">
-                <div><dt>模型</dt><dd>{{ message.model || 'deepseek-v4-flash' }}</dd></div>
+                <div><dt>模型</dt><dd>{{ message.model || '未记录' }}</dd></div>
                 <div><dt>首 Token</dt><dd>{{ message.timeToFirstTokenMs ?? '—' }} ms</dd></div>
                 <div><dt>总耗时</dt><dd>{{ message.durationMs ?? '—' }} ms</dd></div>
                 <div><dt>Token</dt><dd>{{ message.usage.totalTokens ?? '—' }}</dd></div>
@@ -888,6 +891,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="composer chat-composer">
+        <ResearchModelPicker v-model="modelChoice" :disabled="streaming" />
         <textarea
           v-model="question"
           rows="4"

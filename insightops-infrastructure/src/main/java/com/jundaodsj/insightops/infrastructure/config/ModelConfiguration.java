@@ -15,8 +15,10 @@ public class ModelConfiguration {
 
     @Bean
     ModelReadiness modelReadiness(
-            DeepSeekModelProperties properties,
+            DeepSeekModelProperties properties, ResearchModelCatalog catalog,
             @Value("${spring.ai.openai.api-key:}") String apiKey) {
+        var defaultModel = catalog.resolve(null);
+        if (defaultModel != null) return new ModelReadiness(true, true, defaultModel.provider(), defaultModel.modelId());
         return new ModelReadiness(
                 properties.enabled(),
                 !apiKey.isBlank(),

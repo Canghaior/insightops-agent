@@ -7,6 +7,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
+import com.jundaodsj.insightops.model.application.ResearchModel;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -207,7 +208,7 @@ public class JdbcDurableChatRunStore implements DurableChatRunStore {
     @Transactional
     public AttemptPreparation prepareAttempt(UUID runId, UUID leaseToken, Instant now) {
         Attempt attempt = jdbc.sql("""
-                        select attempt_count
+                        select attempt_count, (select requested_model from agent_run where id = :runId) as requested_model
                         from agent_run_work
                         where run_id = :runId and status = 'RUNNING'
                           and lease_token = :leaseToken and lease_expires_at > :now
@@ -215,9 +216,10 @@ public class JdbcDurableChatRunStore implements DurableChatRunStore {
                         """)
                 .param("runId", runId).param("leaseToken", leaseToken)
                 .param("now", Timestamp.from(now))
-                .query((rs, row) -> new Attempt(rs.getInt("attempt_count")))
+                .query((rs, row) -> new Attempt(rs.getInt("attempt_count"), rs.getString("requested_model")))
                 .optional().orElseThrow(() -> new IllegalStateException("AGENT_RUN_LEASE_LOST"));
-        if (attempt.count() <= 1) return new AttemptPreparation(null, false);
+        var model = attempt.modelId() == null ? null : ResearchModel.fromId(attempt.modelId());
+        if (attempt.count() <= 1) return new AttemptPreparation(null, false, model);
 
         jdbc.sql("""
                         update agent_plan set status = 'SUPERSEDED', finished_at = :now
@@ -255,7 +257,7 @@ public class JdbcDurableChatRunStore implements DurableChatRunStore {
                         where run_id = :runId and lease_token = :leaseToken
                         """).param("checkpointId", checkpointId).param("now", Timestamp.from(now))
                 .param("runId", runId).param("leaseToken", leaseToken).update();
-        return new AttemptPreparation(checkpointId, true);
+        return new AttemptPreparation(checkpointId, true, model);
     }
 
     @Override
@@ -449,6 +451,6 @@ public class JdbcDurableChatRunStore implements DurableChatRunStore {
             int attemptCount, int maxAttempts, Instant leaseExpiresAt) {
     }
 
-    private record Attempt(int count) {
+    private record Attempt(int count, String modelId) {
     }
 }

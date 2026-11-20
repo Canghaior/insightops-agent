@@ -193,7 +193,7 @@ public class AgentEvaluationService {
         boolean terminal = false;
         try (LeaseGuard guard = new LeaseGuard(lease)) {
             AgentLoopService loop = loopProvider.getIfAvailable();
-            if (loop == null) throw new EvaluationUnavailableException("AGENT_MODEL_UNAVAILABLE");
+            if (loop == null || !modelProperties.enabled()) throw new EvaluationUnavailableException("AGENT_MODEL_UNAVAILABLE");
             guard.renewNow();
             for (UUID orphanedRunId : store.prepareEvaluationAttempt(
                     lease.evaluationRunId(), lease.leaseToken(), Instant.now())) {
@@ -276,7 +276,7 @@ public class AgentEvaluationService {
                     || loopResult.budget().estimatedCostCny() == null
                     ? ZERO_COST : loopResult.budget().estimatedCostCny();
             guard.renewNow();
-            loop.settleCost(runId, usage);
+            loop.settleCost(runId, usage, "deepseek", profile.modelName());
             if (!store.completeAgentRun(
                     lease.evaluationRunId(), lease.leaseToken(), runId,
                     profile.modelName(), inputTokens, outputTokens,

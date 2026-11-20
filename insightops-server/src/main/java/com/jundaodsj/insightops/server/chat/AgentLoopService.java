@@ -24,7 +24,9 @@ import com.jundaodsj.insightops.server.tool.AgentToolResilienceProperties;
 import com.jundaodsj.insightops.tool.application.McpConnectionStore;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolDefinition;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolRegistry;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import com.jundaodsj.insightops.model.application.ResearchModel;
+import com.jundaodsj.insightops.infrastructure.config.ResearchModelsEnabled;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -45,7 +47,7 @@ import java.util.concurrent.Future;
 import java.util.function.BooleanSupplier;
 
 @Service
-@ConditionalOnProperty(prefix = "insightops.model.deepseek", name = "enabled", havingValue = "true")
+@Conditional(ResearchModelsEnabled.class)
 public class AgentLoopService {
 
     private static final int MAX_ARGUMENT_CHARACTERS = 64_000;
@@ -217,7 +219,7 @@ public class AgentLoopService {
                             profile == null
                                     ? Math.max(256, Math.min(1_024, modelProperties.maxOutputTokens()))
                                     : profile.maxOutputTokens(),
-                            profile == null ? null : profile.modelName()));
+                            profile == null ? null : profile.modelName(), request.researchModel()));
                     recordPlan(request.runId(), planStep, round, plan, planStartedAt);
                 }
                 catch (RuntimeException exception) {
@@ -226,7 +228,7 @@ public class AgentLoopService {
                 }
 
                 planningUsage = planningUsage.plus(plan.usage());
-                BigDecimal planCost = costEstimator.estimate(plan.usage())
+                BigDecimal planCost = costEstimator.estimate(plan.provider(), plan.model(), plan.usage())
                         .map(DeepSeekCostEstimator.CostEstimate::cny)
                         .orElse(BigDecimal.ZERO);
                 boolean planningBudgetAvailable = budget.recordModelUsage(
@@ -449,12 +451,12 @@ public class AgentLoopService {
         }
         catch (AgentLoopPausedException exception) {
             closeBudget(request.runId(), budget);
-            settleCost(request.runId(), planningUsage);
+            settlePlanningCost(request, planningUsage);
             throw exception;
         }
         catch (AgentLoopException exception) {
             closeBudget(request.runId(), budget);
-            settleCost(request.runId(), planningUsage);
+            settlePlanningCost(request, planningUsage);
             orchestrationStore.finishPlan(planHandle.planId(),
                     "CANCELLED".equals(exception.errorCode()) ? "CANCELLED" : "FAILED",
                     Instant.now());
@@ -462,7 +464,7 @@ public class AgentLoopService {
         }
         catch (RuntimeException exception) {
             closeBudget(request.runId(), budget);
-            settleCost(request.runId(), planningUsage);
+            settlePlanningCost(request, planningUsage);
             orchestrationStore.finishPlan(planHandle.planId(), "FAILED", Instant.now());
             throw exception;
         }
@@ -893,8 +895,13 @@ public class AgentLoopService {
         }
     }
 
-    public void settleCost(UUID runId, ModelUsage usage) {
-        if (costGovernanceService != null) costGovernanceService.settle(runId, usage);
+    private void settlePlanningCost(LoopRequest request, ModelUsage usage) {
+        var model = request.researchModel();
+        settleCost(request.runId(), usage, model == null ? null : model.provider(), model == null ? null : model.modelId());
+    }
+
+    public void settleCost(UUID runId, ModelUsage usage, String provider, String model) {
+        if (costGovernanceService != null) costGovernanceService.settle(runId, usage, provider, model);
     }
 
     public void releaseCost(UUID runId, String reason) {
@@ -936,14 +943,14 @@ public class AgentLoopService {
             UUID resumeCheckpointId,
             AgentEvaluationStore.RuntimeProfile plannerProfile,
             boolean evaluationMode,
-            UUID recoveryCheckpointId) {
+            UUID recoveryCheckpointId, ResearchModel researchModel) {
 
         public LoopRequest(
                 UUID runId, UUID workspaceId, UUID userId, boolean systemAdmin,
                 AgentToolDefinition.AccessLevel accessLevel, String userPrompt,
                 UUID resumeCheckpointId) {
             this(runId, workspaceId, userId, systemAdmin, accessLevel, userPrompt,
-                    resumeCheckpointId, null, false, null);
+                    resumeCheckpointId, null, false, null, null);
         }
 
         public LoopRequest(
@@ -953,14 +960,14 @@ public class AgentLoopService {
                 AgentEvaluationStore.RuntimeProfile plannerProfile,
                 boolean evaluationMode) {
             this(runId, workspaceId, userId, systemAdmin, accessLevel, userPrompt,
-                    resumeCheckpointId, plannerProfile, evaluationMode, null);
+                    resumeCheckpointId, plannerProfile, evaluationMode, null, null);
         }
 
         public LoopRequest(
                 UUID runId, UUID workspaceId, UUID userId, boolean systemAdmin,
                 AgentToolDefinition.AccessLevel accessLevel, String userPrompt) {
             this(runId, workspaceId, userId, systemAdmin, accessLevel, userPrompt,
-                    null, null, false, null);
+                    null, null, false, null, null);
         }
     }
 

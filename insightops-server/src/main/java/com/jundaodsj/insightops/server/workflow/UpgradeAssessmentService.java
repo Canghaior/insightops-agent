@@ -185,7 +185,7 @@ public class UpgradeAssessmentService {
                 """.formatted(inputs.get("projectName"), inputs.get("currentVersion"), inputs.get("targetVersion"),
                 inputs.get("profileName"), ResearchProfiles.guidance((String) inputs.get("profileId")), write(inputs));
         return runs.launchPrepared(actor, systemAdmin, access, template(actor), write(graph(nodes)), question,
-                inputs, systemId, command.requestId(), traceId);
+                inputs, systemId, command.requestId(), traceId, command.modelChoice());
     }
 
     private Map<String, Object> inputs(ActorContext actor, Command command, BusinessSystemService.Detail system) {
@@ -344,7 +344,14 @@ public class UpgradeAssessmentService {
                                        Instant occurredAt, Instant collectedAt, String researchQuestion) { }
     public record Command(UUID projectId, String currentVersion, String targetVersion, String javaVersion,
                           String springBootVersion, String businessProject, List<String> concerns,
-                          List<UUID> uploadIds, List<String> issueUrls, UUID requestId, String profileId, Map<String, String> context, UUID eventId) {
+                          List<UUID> uploadIds, List<String> issueUrls, UUID requestId, String profileId, Map<String, String> context, UUID eventId,
+                          String modelChoice) {
+        public Command(UUID projectId, String currentVersion, String targetVersion, String javaVersion,
+                       String springBootVersion, String businessProject, List<String> concerns, List<UUID> uploadIds,
+                       List<String> issueUrls, UUID requestId, String profileId, Map<String, String> context, UUID eventId) {
+            this(projectId, currentVersion, targetVersion, javaVersion, springBootVersion, businessProject,
+                    concerns, uploadIds, issueUrls, requestId, profileId, context, eventId, null);
+        }
         public Command(UUID projectId, String currentVersion, String targetVersion, String javaVersion,
                        String springBootVersion, String businessProject, List<String> concerns, List<UUID> uploadIds,
                        List<String> issueUrls, UUID requestId, String profileId, Map<String, String> context) {

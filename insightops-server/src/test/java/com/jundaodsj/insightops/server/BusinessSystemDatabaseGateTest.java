@@ -14,6 +14,8 @@ import com.jundaodsj.insightops.server.chat.DurableChatRunCoordinator;
 import com.jundaodsj.insightops.server.chat.DurableChatRunProperties;
 import com.jundaodsj.insightops.server.report.ReportPdfRenderer;
 import com.jundaodsj.insightops.server.report.ReportService;
+import com.jundaodsj.insightops.server.report.ReportReviewService;
+import com.jundaodsj.insightops.report.application.ReportReviewStore.*;
 import com.jundaodsj.insightops.server.report.ResearchReportService;
 import com.jundaodsj.insightops.server.tool.AgentToolRegistryConfiguration;
 import com.jundaodsj.insightops.server.workflow.*;
@@ -66,6 +68,7 @@ class BusinessSystemDatabaseGateTest {
     private JdbcKnowledgeUploadStore uploads;
     private ResearchReportService research;
     private ReportService exports;
+    private ReportReviewService review;
 
     @BeforeAll void setup() {
         String url = System.getenv().getOrDefault("DB_URL", "jdbc:postgresql://localhost:55432/insightops");
@@ -112,6 +115,7 @@ class BusinessSystemDatabaseGateTest {
         var reports = new JdbcReportDeliveryStore(jdbc, json, new DeliverySecretCipher("io01-report-fixture-only"));
         research = new ResearchReportService(runQuery, workflows, reports, json, "http://localhost");
         exports = new ReportService(reports, new ReportPdfRenderer(""));
+        review = new ReportReviewService(new JdbcReportReviewStore(jdbc), materials);
     }
 
     @AfterAll void cleanup() {
@@ -121,6 +125,94 @@ class BusinessSystemDatabaseGateTest {
     private BusinessSystemService.Draft draft(String stack, Integer revision, List<UUID> files) {
         return new BusinessSystemService.Draft(new Background("订单系统", "订单履约", "支付回调", stack,
                 "偶发重复通知", "上线窗口两小时"), files, revision);
+    }
+
+    private UUID saveFixtureReport(UUID run) {
+        jdbc.sql("update agent_run set status='SUCCEEDED', answer='验收样例：建议核对字体。', finished_at=now() where id=?")
+                .param(run).update();
+        return research.create(ACTOR, run).id();
+    }
+
+    private ReportReviewService.VerificationCommand blocked(UUID request, List<UUID> uploads) {
+        var fields = new VerificationInput("中点是否可见？", "下一步验证第 3 项", Origin.HUMAN_OR_TOOL,
+                Execution.BLOCKED, "", "", "", Impact.INCONCLUSIVE, "仅样本", "原阅读器版本未知", uploads);
+        return new ReportReviewService.VerificationCommand(request, null, fields);
+    }
+
+    @Test void immutableVerificationVersionsAndDecisionBasisSurviveReplayAndProfileChange() throws Exception {
+        var system = create("字体实验", List.of());
+        var run = decide(system.id(), 1, UUID.randomUUID(), "中点留白").runId();
+        var report = saveFixtureReport(run);
+        var frozen = exports.find(ACTOR,report);
+        UUID upload = file("SUCCEEDED");
+        var command = blocked(UUID.randomUUID(), List.of(upload));
+        Verification first;
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var start = new CountDownLatch(1);
+            var calls = java.util.stream.IntStream.range(0,2).mapToObj(i -> pool.submit(() -> {
+                start.await(5, TimeUnit.SECONDS);
+                return tx.execute(t -> review.record(ACTOR,report,command));
+            })).toList();
+            start.countDown();
+            first = calls.get(0).get(10,TimeUnit.SECONDS);
+            assertThat(calls.get(1).get(10,TimeUnit.SECONDS)).isEqualTo(first);
+        }
+        var dc = new ReportReviewService.DecisionCommand(UUID.randomUUID(),
+                new DecisionInput("暂缓","缺少原阅读器","取得版本后复核",List.of(first.id())));
+        var decision = tx.execute(t -> review.decide(ACTOR,report,dc));
+        tx.executeWithoutResult(t -> systems.update(ACTOR,system.id(), draft("新环境",1,List.of())));
+        var executed = new VerificationInput("中点是否可见？","下一步验证第 3 项",Origin.MODEL,Execution.EXECUTED,
+                "同正文导出","Poppler 120 DPI","中点可见",Impact.SUPPORTS,"仅此环境，根因待核对","",List.of(upload));
+        var correction = new ReportReviewService.VerificationCommand(UUID.randomUUID(),first.id(),executed);
+        var second = tx.execute(t -> review.record(ACTOR,report,correction));
+        assertThat(second.version()).isEqualTo(2);
+        assertThat(second.previousVersionId()).isEqualTo(first.id());
+        Verification replayed = tx.execute(t -> review.record(ACTOR,report,correction));
+        assertThat(replayed).isEqualTo(second);
+        assertThatThrownBy(() -> tx.execute(t -> review.record(ACTOR,report,
+                new ReportReviewService.VerificationCommand(UUID.randomUUID(),first.id(),executed)))).hasMessageContaining("409");
+        Decision replayedDecision = tx.execute(t -> review.decide(ACTOR,report,dc));
+        assertThat(replayedDecision).isEqualTo(decision);
+        var changed = new ReportReviewService.DecisionCommand(dc.requestId(),
+                new DecisionInput("改变选择","新理由","待复核",List.of(second.id())));
+        assertThatThrownBy(() -> tx.execute(t -> review.decide(ACTOR,report,changed))).hasMessageContaining("409");
+        var history = review.history(ACTOR, report);
+        assertThat(history.context().systemRevision()).isEqualTo(1);
+        assertThat(history.context().runId()).isEqualTo(run);
+        assertThat(history.context().requestedModel()).isNull();
+        assertThat(history.verifications()).containsExactly(first,second);
+        assertThat(history.decisions()).containsExactly(decision);
+        assertThat(history.decisions().getFirst().fields().verificationVersionIds()).containsExactly(first.id());
+        assertThat(exports.find(ACTOR,report)).isEqualTo(frozen);
+        assertThat(exports.markdown(ACTOR,report)).isEqualTo(frozen.markdown());
+        try (var pdf = Loader.loadPDF(exports.pdf(ACTOR,report))) {
+            assertThat(new PDFTextStripper().getText(pdf)).contains("字体实验").doesNotContain("中点可见","原阅读器版本未知","新环境");
+        }
+    }
+
+    @Test void verificationRejectsWrongOwnerWorkspaceReportUploadAndForgedOrigins() {
+        var system = create("scope",List.of());
+        UUID one = saveFixtureReport(decide(system.id(),1,UUID.randomUUID(),"一").runId());
+        UUID two = saveFixtureReport(decide(system.id(),1,UUID.randomUUID(),"二").runId());
+        var cmd = blocked(UUID.randomUUID(),List.of());
+        var first = tx.execute(t -> review.record(ACTOR, one, cmd));
+        for (var actor : List.of(new ActorContext(UUID.randomUUID(),WORKSPACE), new ActorContext(USER,UUID.randomUUID()))) {
+            assertThatThrownBy(() -> review.history(actor,one)).hasMessageContaining("404");
+            assertThatThrownBy(() -> tx.execute(t -> review.record(actor,one,cmd))).hasMessageContaining("404");
+        }
+        assertThatThrownBy(() -> tx.execute(t -> review.record(ACTOR,two,
+                new ReportReviewService.VerificationCommand(UUID.randomUUID(),first.id(),cmd.fields()))))
+                .isInstanceOf(IllegalArgumentException.class);
+        var wrong = new ReportReviewService.DecisionCommand(UUID.randomUUID(),new DecisionInput("暂缓","待复核","有资料时",List.of(first.id())));
+        assertThatThrownBy(() -> tx.execute(t -> review.decide(ACTOR,two,wrong))).isInstanceOf(IllegalArgumentException.class);
+        assertThat(review.history(ACTOR,two).decisions()).isEmpty();
+        assertThatThrownBy(() -> tx.execute(t -> review.record(ACTOR,two,blocked(UUID.randomUUID(),List.of(UUID.randomUUID())))))
+                .isInstanceOf(IllegalArgumentException.class);
+        var upgrade = saveFixtureReport(launch(ACTOR,system.id(),1,UUID.randomUUID()).runId());
+        assertThatThrownBy(() -> review.history(ACTOR,upgrade)).hasMessageContaining("404");
+        jdbc.sql("update research_report set research_snapshot=jsonb_set(research_snapshot,'{runId}',to_jsonb('wrong'::text)) where id=?")
+                .param(two).update();
+        assertThatThrownBy(() -> tx.execute(t -> review.record(ACTOR,two,cmd))).hasMessageContaining("404");
     }
 
     private BusinessSystemService.Detail create(String stack, List<UUID> files) {

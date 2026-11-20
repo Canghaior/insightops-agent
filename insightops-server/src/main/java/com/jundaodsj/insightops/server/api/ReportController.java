@@ -42,6 +42,15 @@ public class ReportController {
         return response(request, store.listReports(CurrentAccount.actor(request), page, size));
     }
 
+    @GetMapping("/{reportId}")
+    public ApiResponse<ReportDeliveryStore.ReportRecord> detail(@PathVariable UUID reportId, HttpServletRequest request) {
+        try {
+            return response(request, service.find(CurrentAccount.actor(request), reportId));
+        } catch (ReportService.ReportNotFoundException exception) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "报告不存在。");
+        }
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ReportDeliveryStore.ReportRecord> create(

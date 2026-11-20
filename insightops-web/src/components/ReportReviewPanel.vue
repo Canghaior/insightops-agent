@@ -20,11 +20,19 @@ const decision = ref<DecisionInput>({ choice: '', reason: '', reconsiderWhen: ''
 const versions = computed(() => new Map(history.value?.verifications.map(item => [item.id, item])))
 const corrected = computed(() => new Set(history.value?.verifications.map(item => item.previousVersionId)))
 const files = computed(() => new Map(uploads.value.map(item => [item.uploadId, item.name])))
+const knownUploadNames = new Map<string, string>()
+const unavailableIds = computed(() => form.value === 'verification' && uploadsReady.value
+  ? verification.value.uploadIds.filter(id => !files.value.has(id)) : [])
+const unavailableNames = computed(() => unavailableIds.value.flatMap(id => knownUploadNames.get(id) ?? []))
 const orderedVersions = computed(() => [...(history.value?.verifications ?? [])].reverse())
 const orderedDecisions = computed(() => [...(history.value?.decisions ?? [])].reverse())
 const stamp = (date: string) => new Date(date).toLocaleString('zh-CN', { hour12: false })
-let lastAttempt: { payload: string; id: string } | null = null
+const lastAttempt = ref<{ payload: string; id: string; unconfirmed: boolean } | null>(null)
+const submissionKey = computed(() => JSON.stringify(form.value === 'verification'
+  ? ['record', previous.value?.id, verification.value] : ['decision', decision.value]))
+const retryingUnconfirmed = computed(() => lastAttempt.value?.unconfirmed && lastAttempt.value.payload === submissionKey.value)
 let historyRequest = 0
+let uploadRequest = 0
 
 function message(e: unknown) {
   const http = e as { response?: { status?: number; data?: { detail?: string; message?: string } } }
@@ -42,22 +50,38 @@ async function load() {
   } catch (e) { if (request === historyRequest) error.value = message(e) }
 }
 async function loadUploads() {
-  try { uploads.value = await availableSystemUploads(); uploadsReady.value = true; uploadError.value = '' }
-  catch { uploads.value = []; uploadsReady.value = false; uploadError.value = '暂时无法读取可关联资料，仍可填写文字证据。' }
+  const request = ++uploadRequest
+  try {
+    const result = await availableSystemUploads()
+    if (request !== uploadRequest) return
+    for (const file of result) {
+      if (file.name) knownUploadNames.set(file.uploadId, file.name)
+    }
+    uploads.value = result
+    uploadsReady.value = true
+    uploadError.value = ''
+  } catch {
+    if (request !== uploadRequest) return
+    uploads.value = []
+    uploadsReady.value = false
+    uploadError.value = '暂时无法读取可关联资料。草稿保留已选资料，可重读资料或继续填写文字。'
+  }
 }
 function refresh() { void load(); void loadUploads() }
 onMounted(refresh)
 function openVerification(parent: Verification | null = null) {
-  form.value = 'verification'; previous.value = parent; draftWarning.value = ''; notice.value = ''; error.value = ''; lastAttempt = null
+  form.value = 'verification'; previous.value = parent; draftWarning.value = ''; notice.value = ''; error.value = ''; lastAttempt.value = null
   verification.value = parent ? { ...parent.fields, uploadIds: [...parent.fields.uploadIds] } : fresh()
-  if (parent && uploadsReady.value && !uploadError.value) {
-    verification.value.uploadIds = parent.fields.uploadIds.filter(id => files.value.has(id))
-    if (verification.value.uploadIds.length !== parent.fields.uploadIds.length)
-      draftWarning.value = '旧版本中有资料当前不可用，本次更正不会关联这些资料。'
-  }
+}
+function removeUnavailableUploads() {
+  const removed = new Set(unavailableIds.value)
+  if (!removed.size) return
+  verification.value.uploadIds = verification.value.uploadIds.filter(id => !removed.has(id))
+  draftWarning.value = `已从本次草稿移除 ${removed.size} 份失效资料。`
+  error.value = ''
 }
 function openDecision() {
-  form.value = 'decision'; error.value = ''; notice.value = ''; draftWarning.value = ''; lastAttempt = null
+  form.value = 'decision'; error.value = ''; notice.value = ''; draftWarning.value = ''; lastAttempt.value = null
   decision.value = { choice: '', reason: '', reconsiderWhen: '', verificationVersionIds: [] }
 }
 function changeStatus() {
@@ -65,26 +89,37 @@ function changeStatus() {
   if (f.status !== 'EXECUTED') { f.impact = 'INCONCLUSIVE'; f.observation = '' }
   if (f.status !== 'BLOCKED') f.blocker = ''
 }
-function requestId(payload: unknown) {
-  const key = JSON.stringify(payload)
-  if (lastAttempt?.payload !== key) lastAttempt = { payload: key, id: globalThis.crypto.randomUUID() }
-  return lastAttempt.id
+function requestId(key: string) {
+  if (lastAttempt.value?.payload !== key) lastAttempt.value = { payload: key, id: globalThis.crypto.randomUUID(), unconfirmed: false }
+  return lastAttempt.value.id
 }
 async function save() {
   if (busy.value || !form.value) return
   const isVerification = form.value === 'verification'
   const f = verification.value, d = decision.value
+  const key = submissionKey.value
+  if (isVerification && unavailableIds.value.length && !retryingUnconfirmed.value) {
+    error.value = '请先移除失效资料，再保存本次验证记录。'
+    return
+  }
   if (!isVerification && !d.verificationVersionIds.length) { error.value = '请选择至少一条验证记录版本。'; return }
   busy.value = true; error.value = ''
   try {
     if (isVerification) {
-      await saveVerification(props.reportId, requestId(['record', previous.value?.id, f]), previous.value?.id ?? null, f)
+      await saveVerification(props.reportId, requestId(key), previous.value?.id ?? null, f)
     } else {
-      await saveDecision(props.reportId, requestId(['decision', d]), d)
+      await saveDecision(props.reportId, requestId(key), d)
     }
-    form.value = null; lastAttempt = null; notice.value = isVerification ? '验证记录已保存。' : '人工决定已保存。'
+    form.value = null; lastAttempt.value = null; notice.value = isVerification ? '验证记录已保存。' : '人工决定已保存。'
     await load()
-  } catch (e) { error.value = message(e) }
+  } catch (e) {
+    const status = (e as { response?: { status?: number } }).response?.status
+    if (lastAttempt.value?.payload === key) {
+      // A transport or server failure can hide a committed write. Retry its original payload first.
+      lastAttempt.value.unconfirmed = status === undefined || status === 408 || status >= 500
+    }
+    error.value = message(e)
+  }
   finally { busy.value = false }
 }
 function basisName(id: string) {
@@ -108,7 +143,6 @@ function basisName(id: string) {
         <fieldset :disabled="busy">
           <legend>{{ form === 'decision' ? '记录人工决定' : previous ? '补充或更正第 ' + previous.version + ' 版' : '记录验证' }}</legend>
           <template v-if="form === 'verification'">
-            <p v-if="draftWarning" role="status">{{ draftWarning }}</p>
             <details v-if="originalAnswer" class="original-answer">
               <summary>对照原模型回答</summary>
               <MarkdownContent :content="originalAnswer" :sources="sources" />
@@ -128,6 +162,17 @@ function basisName(id: string) {
             <label v-if="verification.status === 'BLOCKED'">受阻原因<textarea v-model="verification.blocker" maxlength="1000" required rows="2" /></label>
             <p v-if="verification.status !== 'EXECUTED'" class="subtle">对判断的影响为「仍无法判断」。</p>
             <label>适用范围、限制及尚未确认事项<textarea v-model="verification.limits" maxlength="2000" :required="verification.status === 'EXECUTED'" rows="2" /></label>
+            <div v-if="unavailableIds.length" class="unavailable-uploads" role="alert">
+              <strong>{{ unavailableIds.length }} 份已选资料当前不可关联。</strong>
+              <span v-if="unavailableNames.length">此前显示的文件名为「{{ unavailableNames.join('」、「') }}」。</span>
+              <span v-if="unavailableIds.length > unavailableNames.length">其中 {{ unavailableIds.length - unavailableNames.length }} 份名称未知。</span>
+              <span v-if="retryingUnconfirmed">上次保存结果尚未确认。请再次点「保存验证记录」核对原提交，避免重复创建记录。</span>
+              <template v-else>
+                <span>可以从本次草稿中移除这些资料，保留已填文字和其他选择。</span>
+                <button class="text-button" type="button" @click="removeUnavailableUploads">移除失效资料</button>
+              </template>
+            </div>
+            <p v-if="draftWarning" role="status">{{ draftWarning }}</p>
             <div v-if="uploads.length" class="review-choices">
               <span>关联资料（可选）</span>
               <small>资料由记录者选用，证据的含义和适用范围由记录者说明。</small>
@@ -202,6 +247,7 @@ function basisName(id: string) {
 .review-columns { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit,minmax(min(12rem,100%),1fr)) }
 .review-choices { display: grid; gap: .35rem }
 .review-choices label { display: flex; align-items: baseline; gap: .5rem }
+.unavailable-uploads { display: grid; justify-items: start; gap: .35rem; border-inline-start: 3px solid var(--warning, #dfad62); padding: .25rem .75rem }
 .review-entry { border-left: 2px solid var(--accent, #49a78c); padding: .45rem .9rem; margin: .8rem 0 }
 .review-entry dl { margin: .5rem 0; display: grid; grid-template-columns: minmax(5em,auto) 1fr; gap: .35rem .75rem; font-size: .94rem }
 .review-entry dd { grid-column: 2; margin: 0; white-space: pre-wrap }

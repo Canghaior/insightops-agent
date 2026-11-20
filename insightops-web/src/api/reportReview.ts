@@ -38,6 +38,10 @@ export interface ReviewHistory {
 }
 
 const path = (id: string) => `/reports/${encodeURIComponent(id)}/review`
+export async function isReviewEligible(reportId: string): Promise<boolean> {
+  const response = await apiClient.get<{ data: { eligible: boolean } }>(path(reportId) + '/eligibility')
+  return response.data.data.eligible === true
+}
 export async function getReview(id: string): Promise<ReviewHistory> {
   return (await apiClient.get(path(id))).data.data
 }

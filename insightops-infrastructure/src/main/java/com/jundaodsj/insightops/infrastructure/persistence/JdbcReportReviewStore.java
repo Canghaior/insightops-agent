@@ -30,8 +30,27 @@ public class JdbcReportReviewStore implements ReportReviewStore {
                 join business_system s on s.id=w.business_system_id and s.workspace_id=r.workspace_id and s.owner_user_id=r.user_id
                 where r.id=:id and r.workspace_id=:workspace and r.user_id=:user and r.report_type='RESEARCH'
                   and r.research_snapshot->>'runId'=w.run_id::text
-                  and r.research_snapshot #>> '{inputs,assessmentType}'='SYSTEM_DECISION'
-                  and w.input_snapshot->>'assessmentType'='SYSTEM_DECISION'
+                  and (
+                    (r.research_snapshot #>> '{inputs,assessmentType}'='SYSTEM_DECISION'
+                        and w.input_snapshot->>'assessmentType'='SYSTEM_DECISION')
+                    or (
+                      w.template_name_snapshot='升级评估（版本范围）'
+                      and (
+                        (r.research_snapshot #>> '{inputs,assessmentType}'='UPGRADE_ASSESSMENT'
+                          and w.input_snapshot->>'assessmentType'='UPGRADE_ASSESSMENT')
+                        or (not jsonb_exists(r.research_snapshot->'inputs','assessmentType')
+                          and not jsonb_exists(w.input_snapshot,'assessmentType'))
+                      )
+                      and w.input_snapshot->>'projectId' ~ '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'
+                      and r.research_snapshot #> '{inputs,projectId}'=w.input_snapshot->'projectId'
+                      and jsonb_typeof(w.input_snapshot->'currentVersion')='string'
+                      and jsonb_typeof(w.input_snapshot->'targetVersion')='string'
+                      and nullif(trim(w.input_snapshot->>'currentVersion'),'') is not null
+                      and nullif(trim(w.input_snapshot->>'targetVersion'),'') is not null
+                      and r.research_snapshot #> '{inputs,currentVersion}'=w.input_snapshot->'currentVersion'
+                      and r.research_snapshot #> '{inputs,targetVersion}'=w.input_snapshot->'targetVersion'
+                    )
+                  )
                   and r.research_snapshot #>> '{inputs,systemSnapshot,id}'=s.id::text
                   and r.research_snapshot #> '{inputs,systemSnapshot}'=w.input_snapshot->'systemSnapshot'
                   and r.research_snapshot #>> '{inputs,systemSnapshot,revision}' ~ '^[1-9][0-9]*$'

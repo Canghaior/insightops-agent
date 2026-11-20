@@ -44,6 +44,11 @@ public class ReportReviewController {
         return response(request, service.history(CurrentAccount.actor(request), reportId));
     }
 
+    @GetMapping("/eligibility")
+    public ApiResponse<ReportReviewService.Eligibility> eligibility(@PathVariable UUID reportId, HttpServletRequest request) {
+        return response(request, service.eligibility(CurrentAccount.actor(request), reportId));
+    }
+
     @PostMapping("/verifications")
     public ApiResponse<Verification> record(@PathVariable UUID reportId, @RequestBody Map<String,Object> body,
                                            HttpServletRequest request) {

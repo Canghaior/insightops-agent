@@ -209,11 +209,33 @@ class BusinessSystemDatabaseGateTest {
         assertThat(review.history(ACTOR,two).decisions()).isEmpty();
         assertThatThrownBy(() -> tx.execute(t -> review.record(ACTOR,two,blocked(UUID.randomUUID(),List.of(UUID.randomUUID())))))
                 .isInstanceOf(IllegalArgumentException.class);
-        var upgrade = saveFixtureReport(launch(ACTOR,system.id(),1,UUID.randomUUID()).runId());
-        assertThatThrownBy(() -> review.history(ACTOR,upgrade)).hasMessageContaining("404");
+        assertThat(review.eligibility(ACTOR, UUID.randomUUID()).eligible()).isFalse();
         jdbc.sql("update research_report set research_snapshot=jsonb_set(research_snapshot,'{runId}',to_jsonb('wrong'::text)) where id=?")
                 .param(two).update();
         assertThatThrownBy(() -> tx.execute(t -> review.record(ACTOR,two,cmd))).hasMessageContaining("404");
+    }
+
+    @Test void linkedUpgradeReviewRequiresArchivedRangeAndTrustedHistoricalTemplate() {
+        var system = create("升级档案", List.of());
+        var run = launch(ACTOR,system.id(),1,UUID.randomUUID()).runId();
+        var report = saveFixtureReport(run);
+        assertThat(review.eligibility(ACTOR,report).eligible()).isTrue();
+        assertThat(review.history(ACTOR,report).context().systemId()).isEqualTo(system.id());
+        var verification = tx.execute(t -> review.record(ACTOR,report,blocked(UUID.randomUUID(),List.of())));
+        assertThat(review.history(ACTOR,report).verifications()).contains(verification);
+
+        jdbc.sql("update agent_workflow_run set input_snapshot=input_snapshot-'assessmentType' where run_id=?").param(run).update();
+        assertThat(review.eligibility(ACTOR,report).eligible()).isFalse();
+        jdbc.sql("update research_report set research_snapshot=research_snapshot #- '{inputs,assessmentType}' where id=?").param(report).update();
+        assertThat(review.eligibility(ACTOR,report).eligible()).isTrue();
+        jdbc.sql("update agent_workflow_run set template_name_snapshot='其他模板' where run_id=?").param(run).update();
+        assertThat(review.eligibility(ACTOR,report).eligible()).isFalse();
+        jdbc.sql("update agent_workflow_run set template_name_snapshot=?, input_snapshot=jsonb_set(input_snapshot,'{targetVersion}',to_jsonb('2.0'::text)) where run_id=?")
+                .param(UpgradeAssessmentService.NAME).param(run).update();
+        assertThatThrownBy(() -> review.history(ACTOR,report)).hasMessageContaining("404");
+        jdbc.sql("update agent_workflow_run set input_snapshot=input_snapshot-'targetVersion' where run_id=?").param(run).update();
+        jdbc.sql("update research_report set research_snapshot=research_snapshot #- '{inputs,targetVersion}' where id=?").param(report).update();
+        assertThat(review.eligibility(ACTOR,report).eligible()).isFalse();
     }
 
     private BusinessSystemService.Detail create(String stack, List<UUID> files) {

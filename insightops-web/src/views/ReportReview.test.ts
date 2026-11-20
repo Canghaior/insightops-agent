@@ -10,6 +10,7 @@ import ReportsView from './ReportsView.vue'
 const original = apiClient.defaults.adapter
 let host: HTMLElement, app: App
 let records: Verification[], decisions: HumanDecision[], reviewReads: string[], requests: string[]
+let eligibilityReads: string[], checkEligibility: (id: string) => Promise<boolean>
 let loseResponse: boolean, loseBeforeWrite: boolean
 const font = { uploadId: 'file-1', name: '字体记录.md' }
 const reader = { uploadId: 'file-2', name: '阅读器记录.md' }
@@ -17,23 +18,27 @@ let available: SystemAttachment[], loadAvailable: () => Promise<SystemAttachment
 const author = { id: 'user', name: '验收记录者' }
 const createdAt = '2026-11-20T08:00:00Z'
 function report(id: string) {
-  return { id, title: id, reportType: 'RESEARCH', createdAt, items: [], itemCount: 1, markdown: '# 原始报告',
-    research: { runId: 'source', sources: [], inputs: { systemSnapshot: { id: 'system', revision: 1 },
-      assessmentType: id === 'upgrade' ? 'UPGRADE_ASSESSMENT' : 'SYSTEM_DECISION' } } }
+  const assessmentType = ({ decision: 'SYSTEM_DECISION', upgrade: 'UPGRADE_ASSESSMENT', unrelated: 'OTHER' } as Record<string, string>)[id]
+  return { id, title: id, reportType: id === 'digest' ? 'PERIODIC' : 'RESEARCH', createdAt, items: [], itemCount: 1, markdown: '# 原始报告',
+    research: { runId: 'source', sources: [], inputs: { systemSnapshot: id === 'unlinked' ? undefined : { id: 'system', revision: 1 }, assessmentType } } }
 }
 beforeEach(() => {
   records = []; decisions = []; reviewReads = []; requests = []; loseResponse = false; loseBeforeWrite = false
+  eligibilityReads = []; checkEligibility = async id => ['decision', 'upgrade', 'archive'].includes(id)
   available = [font, reader]
   loadAvailable = async () => available
   apiClient.defaults.adapter = async config => {
     const url = config.url
     let data: unknown
-    if (url === '/reports') data = { items: [report('upgrade'), report('decision')] }
+    if (url === '/reports') data = { items: ['upgrade', 'decision', 'unlinked', 'unrelated', 'digest'].map(report) }
     else if (url === '/reports/archive') data = report('archive')
     else if (url === '/report-deliveries') data = { items: [] }
     else if (url === '/projects' || url === '/delivery-channels') data = []
     else if (url === '/business-systems/available-uploads') data = await loadAvailable()
-    else if (url?.endsWith('/review/builds')) data = []
+    else if (url?.endsWith('/review/eligibility')) {
+      const id = url.split('/')[2]!
+      eligibilityReads.push(id); data = { eligible: await checkEligibility(id) }
+    } else if (url?.endsWith('/review/builds')) data = []
     else if (url?.endsWith('/review')) {
       reviewReads.push(url)
       data = { context: { systemRevision: 1, requestedModel: null, responseModel: 'actual-model', modelProvider: 'provider' },
@@ -86,16 +91,41 @@ async function draftWithFiles() {
   uploadBox(reader.uploadId)!.click(); await nextTick()
 }
 describe('报告验证与决定', () => {
-  it('scopes the entry to a saved decision and restores even a report outside the first page', async () => {
-    const router = await open('upgrade')
-    expect(host.textContent).not.toContain('记录验证'); expect(reviewReads).toEqual([])
+  it('opens a linked upgrade and an eligible legacy report outside the first page while keeping unrelated reports closed', async () => {
+    const router = await open('unlinked')
+    expect(host.textContent).not.toContain('记录验证'); expect(eligibilityReads).toEqual([])
+    await router.push('/reports?reportId=digest'); await settle()
+    expect(eligibilityReads).toEqual([]); expect(reviewReads).toEqual([])
+    await router.push('/reports?reportId=upgrade'); await settle()
+    expect(reviewReads).toContain('/reports/upgrade/review')
+    expect(host.textContent).toContain('导入基线构建')
     await router.push('/reports?reportId=archive'); await settle()
     expect(reviewReads).toContain('/reports/archive/review')
     expect(host.textContent).toContain('请求模型 未知'); expect(host.textContent).toContain('响应模型 actual-model')
     button('记录验证').click(); await nextTick()
     await fill('待验证的问题', '档案之外的备注')
-    await router.push('/reports?reportId=upgrade'); await settle()
+    await router.push('/reports?reportId=unrelated'); await settle()
     expect(host.querySelector('.review-editor')).toBeNull(); expect(host.textContent).toContain('原始报告')
+    expect(eligibilityReads).toEqual(['upgrade', 'archive', 'unrelated'])
+    expect(reviewReads).not.toContain('/reports/unrelated/review')
+  })
+
+  it('discards eligibility from the previous selection and restores the current entry after an explicit retry', async () => {
+    let finish!: (value: boolean) => void
+    checkEligibility = id => id === 'upgrade' ? new Promise(resolve => { finish = resolve }) : Promise.resolve(false)
+    const router = await open('upgrade')
+    expect(host.textContent).toContain('正在核对本报告的工程验证入口')
+    await router.push('/reports?reportId=unrelated'); await settle()
+    finish(true); await settle()
+    expect(host.querySelector('.review-panel')).toBeNull(); expect(reviewReads).toEqual([])
+    checkEligibility = async () => { throw new Error('simulated transport failure') }
+    await router.push('/reports?reportId=decision'); await settle()
+    expect(host.textContent).toContain('暂时无法核对本报告的验证入口')
+    expect(host.querySelector('.review-panel')).toBeNull()
+    checkEligibility = async () => true
+    button('重试加载验证入口').click(); await settle()
+    expect(reviewReads).toEqual(['/reports/decision/review'])
+    expect(host.textContent).toContain('记录验证')
   })
 
   it('replays a lost reply and keeps a decision attached to the exact older version after correction', async () => {

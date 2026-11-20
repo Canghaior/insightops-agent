@@ -19,6 +19,7 @@ import static com.jundaodsj.insightops.server.workflow.ResearchProfiles.text;
 public class ReportReviewService {
     public record VerificationCommand(UUID requestId, UUID previousVersionId, VerificationInput fields) {}
     public record DecisionCommand(UUID requestId, DecisionInput fields) {}
+    public record Eligibility(boolean eligible) {}
 
     private final ReportReviewStore store;
     private final ResearchMaterials materials;
@@ -27,6 +28,10 @@ public class ReportReviewService {
         this.store = store;
         this.materials = materials;
         this.comparisons = comparisons;
+    }
+
+    public Eligibility eligibility(ActorContext actor, UUID reportId) {
+        return new Eligibility(store.context(actor, reportId, false).isPresent());
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -82,7 +87,7 @@ public class ReportReviewService {
 
     private Context context(ActorContext actor, UUID reportId, boolean lock) {
         return store.context(actor, reportId, lock).orElseThrow(() ->
-                new ResponseStatusException(HttpStatus.NOT_FOUND, "未找到可记录验证的系统决策报告。"));
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "未找到可记录验证的业务系统报告。"));
     }
 
     private static VerificationInput validate(VerificationInput f) {

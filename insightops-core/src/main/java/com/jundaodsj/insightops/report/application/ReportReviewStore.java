@@ -16,11 +16,19 @@ public interface ReportReviewStore {
                    String requestedModel, String responseModel, String modelProvider) {}
     record VerificationInput(String question, String suggestionRef, Origin origin, Execution status,
                              String method, String environment, String observation, Impact impact,
-                             String limits, String blocker, List<UUID> uploadIds) {}
+                             String limits, String blocker, List<UUID> uploadIds,
+                             UUID baselineBuildId, UUID candidateBuildId, String executedBy) {
+        public VerificationInput(String question, String suggestionRef, Origin origin, Execution status,
+                                 String method, String environment, String observation, Impact impact,
+                                 String limits, String blocker, List<UUID> uploadIds) {
+            this(question, suggestionRef, origin, status, method, environment, observation, impact,
+                    limits, blocker, uploadIds, null, null, null);
+        }
+    }
     record DecisionInput(String choice, String reason, String reconsiderWhen, List<UUID> verificationVersionIds) {}
     record Author(UUID id, String name) {}
     record Verification(UUID id, UUID previousVersionId, int version, VerificationInput fields,
-                        Author author, Instant createdAt) {}
+                        Author author, Instant createdAt, String buildSummary) {}
     record Decision(UUID id, DecisionInput fields, Author author, Instant createdAt) {}
     record History(Context context, List<Verification> verifications, List<Decision> decisions) {}
 
@@ -32,6 +40,6 @@ public interface ReportReviewStore {
     Optional<Verification> verification(UUID reportId, UUID versionId);
     boolean hasCorrection(UUID reportId, UUID versionId);
     void addVerification(Context context, ActorContext actor, UUID id, UUID requestId,
-                         UUID previousVersionId, int version, VerificationInput fields);
+                         UUID previousVersionId, int version, VerificationInput fields, String buildSummary);
     void addDecision(Context context, ActorContext actor, UUID id, UUID requestId, DecisionInput fields);
 }

@@ -33,9 +33,11 @@ const fileNames = computed(() => new Map([...props.baseline.files, ...props.cand
 <template>
   <section class="comparison" aria-label="构建对照结果">
     <h4>构建对照结果</h4>
-    <p class="scope" :class="{ warn: comparison.scope === 'DIFFERENT_OBSERVED' }">{{ comparison.scope === 'SAME_OBSERVED'
-      ? '两批 XML 中上报的测试身份与出现次数一致。'
-      : '两批 XML 的测试集合或出现次数不同。请逐项核对单侧测试与重复项。' }}</p>
+    <p class="scope" :class="{ warn: comparison.scope === 'DIFFERENT_OBSERVED' }">
+      {{ comparison.scope === 'SAME_OBSERVED'
+        ? '两批 XML 中上报的测试身份与出现次数一致。'
+        : '两批 XML 的测试集合或出现次数不同。请逐项核对单侧测试与重复项。' }}
+    </p>
     <div class="summary" aria-label="产品解析摘要">
       <strong>产品解析摘要</strong><p>{{ comparison.objectiveSummary }}</p>
     </div>
@@ -81,8 +83,10 @@ const fileNames = computed(() => new Map([...props.baseline.files, ...props.cand
         <div v-for="side in sides" :key="side.key">
           <strong>{{ side.title }} · {{ group[side.key].length }} 次</strong>
           <small v-if="group.change === 'AMBIGUOUS'">{{ group[side.countKey].passed }} 通过，{{ group[side.countKey].failure }} 断言失败，{{ group[side.countKey].error }} 执行报错，{{ group[side.countKey].skipped }} 跳过</small>
-          <BuildCaseResult v-for="result in group[side.key]" :key="result.fileId + '/' + result.ordinal"
-            :report-id="reportId" :batch-id="side.batch.summary.id" :result="result" :file-name="fileNames.get(result.fileId)" />
+          <BuildCaseResult
+            v-for="result in group[side.key]" :key="result.fileId + '/' + result.ordinal"
+            :report-id="reportId" :batch-id="side.batch.summary.id" :result="result" :file-name="fileNames.get(result.fileId)"
+          />
           <span v-if="!group[side.key].length" class="subtle">本侧 XML 未出现，状态未知</span>
         </div>
       </div>

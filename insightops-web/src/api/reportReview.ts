@@ -18,6 +18,9 @@ export interface VerificationInput {
   limits: string
   blocker: string
   uploadIds: string[]
+  baselineBuildId?: string | null
+  candidateBuildId?: string | null
+  executedBy?: string | null
 }
 export interface DecisionInput {
   choice: string
@@ -26,7 +29,7 @@ export interface DecisionInput {
   verificationVersionIds: string[]
 }
 interface Authored { id: string; author: { id: string; name: string }; createdAt: string }
-export interface Verification extends Authored { previousVersionId: string | null; version: number; fields: VerificationInput }
+export interface Verification extends Authored { previousVersionId: string | null; version: number; fields: VerificationInput; buildSummary?: string | null }
 export interface HumanDecision extends Authored { fields: DecisionInput }
 export interface ReviewHistory {
   context: { reportId: string; runId: string; systemId: string; systemRevision: number; requestedModel: string | null; responseModel: string | null; modelProvider: string | null }
@@ -43,4 +46,8 @@ export async function saveVerification(id: string, requestId: string, previousVe
 }
 export async function saveDecision(id: string, requestId: string, fields: DecisionInput): Promise<HumanDecision> {
   return (await apiClient.post(path(id) + '/decisions', { requestId, fields })).data.data
+}
+export async function downloadVerificationHandoff(reportId: string, versionId: string): Promise<Blob> {
+  return (await apiClient.get<Blob>(`${path(reportId)}/verifications/${encodeURIComponent(versionId)}/handoff.zip`,
+    { responseType: 'blob', timeout: 120_000 })).data
 }

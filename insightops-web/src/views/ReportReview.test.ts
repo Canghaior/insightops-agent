@@ -33,6 +33,7 @@ beforeEach(() => {
     else if (url === '/report-deliveries') data = { items: [] }
     else if (url === '/projects' || url === '/delivery-channels') data = []
     else if (url === '/business-systems/available-uploads') data = await loadAvailable()
+    else if (url?.endsWith('/review/builds')) data = []
     else if (url?.endsWith('/review')) {
       reviewReads.push(url)
       data = { context: { systemRevision: 1, requestedModel: null, responseModel: 'actual-model', modelProvider: 'provider' },

@@ -115,7 +115,8 @@ class BusinessSystemDatabaseGateTest {
         var reports = new JdbcReportDeliveryStore(jdbc, json, new DeliverySecretCipher("io01-report-fixture-only"));
         research = new ResearchReportService(runQuery, workflows, reports, json, "http://localhost");
         exports = new ReportService(reports, new ReportPdfRenderer(""));
-        review = new ReportReviewService(new JdbcReportReviewStore(jdbc), materials);
+        review = new ReportReviewService(new JdbcReportReviewStore(jdbc), materials,
+                mock(com.jundaodsj.insightops.server.report.BuildComparisonService.class));
     }
 
     @AfterAll void cleanup() {

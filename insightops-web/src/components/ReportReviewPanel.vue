@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import MarkdownContent from './MarkdownContent.vue'
+import BuildEvidencePanel from './BuildEvidencePanel.vue'
+import VerificationHandoffButton from './VerificationHandoffButton.vue'
+import { batchName, type BuildSummary } from '@/api/buildEvidence'
+import type { BuildComparison } from '@/api/buildComparison'
 import { availableSystemUploads, type SystemAttachment } from '@/api/businessSystems'
 import { getReview, saveDecision, saveVerification, executions, impacts, origins,
   type DecisionInput, type ReviewHistory, type Verification, type VerificationInput } from '@/api/reportReview'
@@ -11,6 +15,11 @@ const uploads = ref<SystemAttachment[]>([])
 const uploadsReady = ref(false)
 const error = ref(''), uploadError = ref(''), notice = ref(''), draftWarning = ref('')
 const form = ref<'verification' | 'decision' | null>(null)
+const editor = ref<globalThis.HTMLFormElement>()
+const buildPanel = ref<InstanceType<typeof BuildEvidencePanel>>()
+const buildNames = ref(new Map<string, string>())
+const comparisonTarget = ref('')
+const draftSummary = ref('')
 const busy = ref(false)
 const previous = ref<Verification | null>(null)
 const fresh = (): VerificationInput => ({ question: '', suggestionRef: '', origin: 'MODEL', status: 'NOT_EXECUTED',
@@ -25,6 +34,7 @@ const unavailableIds = computed(() => form.value === 'verification' && uploadsRe
   ? verification.value.uploadIds.filter(id => !files.value.has(id)) : [])
 const unavailableNames = computed(() => unavailableIds.value.flatMap(id => knownUploadNames.get(id) ?? []))
 const orderedVersions = computed(() => [...(history.value?.verifications ?? [])].reverse())
+const correctableVersions = computed(() => orderedVersions.value.filter(item => !corrected.value.has(item.id)))
 const orderedDecisions = computed(() => [...(history.value?.decisions ?? [])].reverse())
 const stamp = (date: string) => new Date(date).toLocaleString('zh-CN', { hour12: false })
 const lastAttempt = ref<{ payload: string; id: string; unconfirmed: boolean } | null>(null)
@@ -72,6 +82,32 @@ onMounted(refresh)
 function openVerification(parent: Verification | null = null) {
   form.value = 'verification'; previous.value = parent; draftWarning.value = ''; notice.value = ''; error.value = ''; lastAttempt.value = null
   verification.value = parent ? { ...parent.fields, uploadIds: [...parent.fields.uploadIds] } : fresh()
+  draftSummary.value = parent?.buildSummary ?? ''
+}
+function rememberBuilds(batches: BuildSummary[]) {
+  buildNames.value = new Map(batches.map(batch => [batch.id, batchName(batch)]))
+}
+function inspectBuilds(fields: VerificationInput) {
+  if (fields.baselineBuildId && fields.candidateBuildId) void buildPanel.value?.inspect(fields.baselineBuildId, fields.candidateBuildId)
+}
+async function applyComparison(result: BuildComparison) {
+  if (busy.value || retryingUnconfirmed.value || form.value === 'decision') return
+  if (!form.value) {
+    const target = correctableVersions.value.find(item => item.id === comparisonTarget.value)
+    if (comparisonTarget.value && !target) { error.value = '这个版本已有更正。请重新选择要补充的版本。'; return }
+    openVerification(target ?? null)
+    if (!target) {
+      verification.value.origin = 'HUMAN_OR_TOOL'
+      verification.value.question = '两次构建的测试结果对本次改动有何影响？'
+      verification.value.method = '核对两次构建的测试身份、状态变化、异常和对应原件。'
+    }
+  }
+  verification.value.baselineBuildId = result.baselineId
+  verification.value.candidateBuildId = result.candidateId
+  draftSummary.value = result.objectiveSummary
+  draftWarning.value = '构建对照已关联到草稿。请核对执行情况、实际观察和适用范围后保存。'
+  await nextTick()
+  editor.value?.scrollIntoView?.({ block: 'start' })
 }
 function removeUnavailableUploads() {
   const removed = new Set(unavailableIds.value)
@@ -86,7 +122,7 @@ function openDecision() {
 }
 function changeStatus() {
   const f = verification.value
-  if (f.status !== 'EXECUTED') { f.impact = 'INCONCLUSIVE'; f.observation = '' }
+  if (f.status !== 'EXECUTED') { f.impact = 'INCONCLUSIVE'; f.observation = ''; f.executedBy = null }
   if (f.status !== 'BLOCKED') f.blocker = ''
 }
 function requestId(key: string) {
@@ -110,7 +146,7 @@ async function save() {
     } else {
       await saveDecision(props.reportId, requestId(key), d)
     }
-    form.value = null; lastAttempt.value = null; notice.value = isVerification ? '验证记录已保存。' : '人工决定已保存。'
+    form.value = null; lastAttempt.value = null; comparisonTarget.value = ''; notice.value = isVerification ? '验证记录已保存。' : '人工决定已保存。'
     await load()
   } catch (e) {
     const status = (e as { response?: { status?: number } }).response?.status
@@ -135,14 +171,38 @@ function basisName(id: string) {
     <p v-if="notice" class="success-notice" role="status">{{ notice }}</p>
     <template v-if="history">
       <p class="subtle">报告采用档案修订 {{ history.context.systemRevision }} · 提供方 {{ history.context.modelProvider || '未知' }} · 请求模型 {{ history.context.requestedModel || '未知' }} · 响应模型 {{ history.context.responseModel || '未知' }}</p>
+      <BuildEvidencePanel ref="buildPanel" :report-id="reportId" @listed="rememberBuilds">
+        <template #draft="{ comparison }">
+          <div class="build-draft">
+            <p v-if="form === 'decision'">保存或取消当前人工决定后，可以使用这份构建对照。</p>
+            <p v-else-if="retryingUnconfirmed">先核对上次保存结果，再更换构建依据。</p>
+            <template v-else>
+              <label v-if="!form && correctableVersions.length">将构建对照用于
+                <select v-model="comparisonTarget"><option value="">新建验证记录</option>
+                  <option v-for="item in correctableVersions" :key="item.id" :value="item.id">补充第 {{ item.version }} 版 · {{ item.fields.question }}</option>
+                </select>
+              </label>
+              <p v-if="form === 'verification' && verification.baselineBuildId && (verification.baselineBuildId !== comparison.baselineId || verification.candidateBuildId !== comparison.candidateId)">更换批次会保留草稿中的文字、判断和补充资料，请核对原说明是否仍适用。</p>
+              <button type="button" class="send-button" :disabled="busy" @click="applyComparison(comparison)">{{ form === 'verification' ? '将此对照用于当前草稿' : comparisonTarget ? '用此对照补充已有验证' : '用此对照生成验证草稿' }}</button>
+            </template>
+          </div>
+        </template>
+      </BuildEvidencePanel>
       <div v-if="!form" class="review-actions">
         <button class="send-button" @click="openVerification()">记录验证</button>
         <button class="secondary-button" :disabled="!orderedVersions.length" @click="openDecision">记录人工决定</button>
       </div>
-      <form v-if="form" class="review-editor" @submit.prevent="save">
+      <form v-if="form" ref="editor" class="review-editor" @submit.prevent="save">
         <fieldset :disabled="busy">
           <legend>{{ form === 'decision' ? '记录人工决定' : previous ? '补充或更正第 ' + previous.version + ' 版' : '记录验证' }}</legend>
           <template v-if="form === 'verification'">
+            <div v-if="verification.baselineBuildId && verification.candidateBuildId" class="bound-builds">
+              <strong>草稿引用的构建对照</strong>
+              <p>基线 {{ buildNames.get(verification.baselineBuildId) || '标签待核对' }} → 候选 {{ buildNames.get(verification.candidateBuildId) || '标签待核对' }}</p>
+              <p class="pre-line">产品解析摘要 · {{ draftSummary || '可打开对应批次核对。' }}</p>
+              <button type="button" class="text-button" @click="inspectBuilds(verification)">查看草稿引用的对照</button>
+              <small>填写原验证的执行情况和记录者解释。导入已有材料不会重新执行测试。</small>
+            </div>
             <details v-if="originalAnswer" class="original-answer">
               <summary>对照原模型回答</summary>
               <MarkdownContent :content="originalAnswer" :sources="sources" />
@@ -156,6 +216,7 @@ function basisName(id: string) {
             <label>{{ verification.status === 'EXECUTED' ? '实际执行的方法' : '计划方法' }}<textarea v-model="verification.method" maxlength="2000" :required="verification.status !== 'BLOCKED'" rows="2" /></label>
             <label>{{ verification.status === 'EXECUTED' ? '实际执行环境' : '计划环境（可选）' }}<input v-model="verification.environment" maxlength="1000" :required="verification.status === 'EXECUTED'" /></label>
             <template v-if="verification.status === 'EXECUTED'">
+              <label>实际执行者（可选）<input v-model="verification.executedBy" maxlength="200" placeholder="例如 执行原测试的工程师或构建流水线" /></label>
               <label>实际观察与证据说明<textarea v-model="verification.observation" maxlength="4000" required rows="3" /></label>
               <label>对判断的影响<select v-model="verification.impact"><option v-for="(label, key) in impacts" :key="key" :value="key">{{ label }}</option></select></label>
             </template>
@@ -200,10 +261,18 @@ function basisName(id: string) {
         <header><strong>{{ item.fields.question }}</strong><small>第 {{ item.version }} 版 · {{ executions[item.fields.status] }}</small></header>
         <p>{{ impacts[item.fields.impact] }} · {{ origins[item.fields.origin] }}</p>
         <dl>
+          <template v-if="item.fields.baselineBuildId && item.fields.candidateBuildId">
+            <dt>产品解析摘要</dt><dd>{{ item.buildSummary || '可打开本版构建对照核对原件。' }}</dd>
+            <dt>本版构建依据</dt><dd>
+              基线 {{ buildNames.get(item.fields.baselineBuildId) || '标签待核对' }} → 候选 {{ buildNames.get(item.fields.candidateBuildId) || '标签待核对' }}
+              <button type="button" class="text-button" @click="inspectBuilds(item.fields)">查看本版构建对照</button>
+            </dd>
+          </template>
           <dt>报告位置或摘录</dt><dd>{{ item.fields.suggestionRef }}</dd>
+          <template v-if="item.fields.status === 'EXECUTED'"><dt>实际执行者</dt><dd>{{ item.fields.executedBy || '未记录' }}</dd></template>
           <template v-if="item.fields.method"><dt>{{ item.fields.status === 'EXECUTED' ? '实际方法' : '计划方法' }}</dt><dd>{{ item.fields.method }}</dd></template>
           <template v-if="item.fields.environment"><dt>环境</dt><dd>{{ item.fields.environment }}</dd></template>
-          <template v-if="item.fields.observation"><dt>观察与证据</dt><dd>{{ item.fields.observation }}</dd></template>
+          <template v-if="item.fields.observation"><dt>记录者的观察与证据</dt><dd>{{ item.fields.observation }}</dd></template>
           <template v-if="item.fields.blocker"><dt>受阻原因</dt><dd>{{ item.fields.blocker }}</dd></template>
           <template v-if="item.fields.limits"><dt>范围与限制</dt><dd>{{ item.fields.limits }}</dd></template>
           <template v-if="item.fields.uploadIds.length">
@@ -217,6 +286,7 @@ function basisName(id: string) {
         <div class="review-actions">
           <a v-if="item.previousVersionId" :href="'#verification-' + item.previousVersionId">查看被更正的第 {{ item.version - 1 }} 版</a>
           <button v-if="!corrected.has(item.id) && !form" class="text-button" :disabled="item.fields.uploadIds.length > 0 && !uploadsReady && !uploadError" @click="openVerification(item)">补充或更正</button>
+          <VerificationHandoffButton :report-id="reportId" :version-id="item.id" :version="item.version" />
         </div>
       </article>
       <h4 v-if="orderedDecisions.length">人工决定历史</h4>
@@ -239,6 +309,11 @@ function basisName(id: string) {
 .review-panel p { margin: .55rem 0 }
 .review-panel small, .review-panel dt { opacity: .8 }
 .review-panel a { color: var(--accent, #6bd4ba); text-decoration: underline; text-underline-offset: .15em }
+.build-draft, .bound-builds { display: grid; justify-items: start; gap: .45rem; padding: .65rem; margin-top: .75rem; border-inline-start: 2px solid var(--accent); background: var(--panel-soft) }
+.build-draft label { display: grid; gap: .25rem; max-width: 100% }
+.build-draft select { min-width: 0; max-width: 100%; padding: .4rem }
+.bound-builds p, .build-draft p { margin: .15rem 0 }
+.pre-line { white-space: pre-wrap }
 .review-editor fieldset { min-width: 0; display: grid; gap: .8rem; border: 0; margin: .8rem 0; padding: 0 }
 .review-editor legend { font-weight: 700; margin-bottom: .65rem }
 .original-answer .markdown-content { max-height: 20rem; overflow: auto; padding: .4rem .7rem }

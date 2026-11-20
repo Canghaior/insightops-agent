@@ -22,9 +22,11 @@ public class ReportReviewService {
 
     private final ReportReviewStore store;
     private final ResearchMaterials materials;
-    public ReportReviewService(ReportReviewStore store, ResearchMaterials materials) {
+    private final BuildComparisonService comparisons;
+    public ReportReviewService(ReportReviewStore store, ResearchMaterials materials, BuildComparisonService comparisons) {
         this.store = store;
         this.materials = materials;
+        this.comparisons = comparisons;
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -53,8 +55,10 @@ public class ReportReviewService {
             version = previous.version() + 1;
         }
         materials.require(actor, fields.uploadIds());
+        String buildSummary = fields.baselineBuildId() == null ? null : comparisons.compare(
+                actor, reportId, fields.baselineBuildId(), fields.candidateBuildId()).objectiveSummary();
         var id = UUID.randomUUID();
-        store.addVerification(context, actor, id, cmd.requestId(), cmd.previousVersionId(), version, fields);
+        store.addVerification(context, actor, id, cmd.requestId(), cmd.previousVersionId(), version, fields, buildSummary);
         return store.verification(reportId, id).orElseThrow();
     }
 
@@ -93,9 +97,14 @@ public class ReportReviewService {
             throw new IllegalArgumentException("未执行或受阻时请保留无法判断，实际观察应在执行后填写。");
         if (f.status() != Execution.BLOCKED && !blocker.isEmpty())
             throw new IllegalArgumentException("仅在受阻时填写阻塞原因。");
+        if ((f.baselineBuildId() == null) != (f.candidateBuildId() == null))
+            throw new IllegalArgumentException("请同时选择基线和候选构建。");
+        String executor = text(f.executedBy(), 200, false);
+        if (!executed && !executor.isEmpty())
+            throw new IllegalArgumentException("实际测试执行者仅在记录已执行的验证时填写。");
         return new VerificationInput(text(f.question(), 1000, true), text(f.suggestionRef(), 2000, true),
                 f.origin(), f.status(), method, env, observation, f.impact(), text(f.limits(), 2000, executed),
-                blocker, ids(f.uploadIds(), 10));
+                blocker, ids(f.uploadIds(), 10), f.baselineBuildId(), f.candidateBuildId(), executor.isEmpty() ? null : executor);
     }
 
     private static List<UUID> ids(List<UUID> ids, int max) {

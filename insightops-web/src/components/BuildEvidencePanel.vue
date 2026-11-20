@@ -149,16 +149,20 @@ defineExpose({ inspect })
         </div>
       </div>
     </div>
-    <BuildImportForm v-if="importing" :key="importing" :report-id="reportId" :role="importing" @imported="saved"
-      @cancel="importing = null" @busy="saving = $event" />
+    <BuildImportForm
+      v-if="importing" :key="importing" :report-id="reportId" :role="importing" @imported="saved"
+      @cancel="importing = null" @busy="saving = $event"
+    />
     <p v-if="!loading && !listError && !summaries.length && !importing" class="subtle">本系统还没有构建证据。先导入基线，再导入要核对的候选构建。</p>
     <button type="button" class="secondary-button compare-button" :disabled="!selected.BASELINE || !selected.CANDIDATE || comparing || saving" @click="compare">{{ comparing ? '正在对照…' : '对照两次构建' }}</button>
     <p v-if="actionError" role="alert" class="stream-error">{{ actionError }}</p>
     <p v-if="previewRole && !preview" role="status" class="subtle">正在读取构建材料…</p>
     <BuildBatchDetails v-if="preview" :key="preview.summary.id" :report-id="reportId" :batch="preview" />
     <template v-if="compared">
-      <BuildComparisonResults :key="compared.baseline.summary.id + '/' + compared.candidate.summary.id" :report-id="reportId"
-        :comparison="compared.result" :baseline="compared.baseline" :candidate="compared.candidate" />
+      <BuildComparisonResults
+        :key="compared.baseline.summary.id + '/' + compared.candidate.summary.id" :report-id="reportId"
+        :comparison="compared.result" :baseline="compared.baseline" :candidate="compared.candidate"
+      />
       <slot name="draft" :comparison="compared.result" :baseline="compared.baseline" :candidate="compared.candidate" />
     </template>
   </section>

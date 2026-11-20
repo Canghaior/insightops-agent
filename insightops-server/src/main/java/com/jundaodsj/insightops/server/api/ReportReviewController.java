@@ -1,11 +1,13 @@
 package com.jundaodsj.insightops.server.api;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.report.application.ReportReviewStore.*;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import com.jundaodsj.insightops.server.report.ReportReviewService;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.boot.jackson.JacksonMixin;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.*;
@@ -15,6 +17,19 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/reports/{reportId}/review")
 public class ReportReviewController {
+    // Older versions have no test executor or build association. Keep their original JSON shape.
+    @JacksonMixin(VerificationInput.class)
+    static abstract class BuildFieldsJson {
+        @JsonInclude(JsonInclude.Include.NON_NULL) abstract UUID baselineBuildId();
+        @JsonInclude(JsonInclude.Include.NON_NULL) abstract UUID candidateBuildId();
+        @JsonInclude(JsonInclude.Include.NON_NULL) abstract String executedBy();
+    }
+
+    @JacksonMixin(Verification.class)
+    static abstract class BuildSummaryJson {
+        @JsonInclude(JsonInclude.Include.NON_NULL) abstract String buildSummary();
+    }
+
     private final ReportReviewService service;
     private final ObjectMapper commands;
 

@@ -83,20 +83,24 @@ public class JdbcReportReviewStore implements ReportReviewStore {
     }
 
     @Override public void addVerification(Context c, ActorContext actor, UUID id, UUID requestId,
-                                           UUID previousVersionId, int version, VerificationInput f) {
+                                           UUID previousVersionId, int version, VerificationInput f, String buildSummary) {
         jdbc.sql("""
                 insert into report_verification(id, report_id, source_run_id, system_id, system_revision, workspace_id,
                     author_id, request_id, previous_version_id, version, question, suggestion_ref, origin, status,
-                    method, environment, observation, impact, limits, blocker, upload_ids)
+                    method, environment, observation, impact, limits, blocker, upload_ids,
+                    baseline_build_id, candidate_build_id, executed_by, build_summary)
                 values (:id,:report,:run,:system,:revision,:workspace,:user,:request,:previous,:version,:question,
-                    :reference,:origin,:status,:method,:environment,:observation,:impact,:limits,:blocker,:uploads)
+                    :reference,:origin,:status,:method,:environment,:observation,:impact,:limits,:blocker,:uploads,
+                    :baseline,:candidate,:executor,:summary)
                 """).param("id", id).param("report", c.reportId()).param("run", c.runId()).param("system", c.systemId())
                 .param("revision", c.systemRevision()).param("workspace", actor.workspaceId()).param("user", actor.userId())
                 .param("request", requestId).param("previous", previousVersionId).param("version", version)
                 .param("question", f.question()).param("reference", f.suggestionRef()).param("origin", f.origin().name())
                 .param("status", f.status().name()).param("method", f.method()).param("environment", f.environment())
                 .param("observation", f.observation()).param("impact", f.impact().name()).param("limits", f.limits())
-                .param("blocker", f.blocker()).param("uploads", f.uploadIds().toArray(UUID[]::new)).update();
+                .param("blocker", f.blocker()).param("uploads", f.uploadIds().toArray(UUID[]::new))
+                .param("baseline", f.baselineBuildId()).param("candidate", f.candidateBuildId())
+                .param("executor", f.executedBy()).param("summary", buildSummary).update();
     }
 
     @Override public void addDecision(Context c, ActorContext actor, UUID id, UUID requestId, DecisionInput f) {
@@ -117,9 +121,10 @@ public class JdbcReportReviewStore implements ReportReviewStore {
         var fields = new VerificationInput(rs.getString("question"), rs.getString("suggestion_ref"),
                 Origin.valueOf(rs.getString("origin")), Execution.valueOf(rs.getString("status")),
                 rs.getString("method"), rs.getString("environment"), rs.getString("observation"),
-                Impact.valueOf(rs.getString("impact")), rs.getString("limits"), rs.getString("blocker"), ids(rs, "upload_ids"));
+                Impact.valueOf(rs.getString("impact")), rs.getString("limits"), rs.getString("blocker"), ids(rs, "upload_ids"),
+                id(rs, "baseline_build_id"), id(rs, "candidate_build_id"), rs.getString("executed_by"));
         return new Verification(id(rs,"id"), id(rs,"previous_version_id"), rs.getInt("version"), fields,
-                author(rs), rs.getTimestamp("created_at").toInstant());
+                author(rs), rs.getTimestamp("created_at").toInstant(), rs.getString("build_summary"));
     }
 
     private static Decision decision(ResultSet rs) throws SQLException {

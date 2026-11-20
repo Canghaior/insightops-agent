@@ -204,15 +204,22 @@ def extract(root, scope):
             fact(path, par.at("version").line, "parent-version", ":".join(gav[:2]), gav[2], gav[2]
                  if gav[2] and "$" not in gav[2] else None)
 
-    def lookup(path, key, seen):
+    def lookup(path, key, seen, consumer):
         if (path, key) in seen or PRIVATE.search(key) or path not in poms:
             return None, []
         seen = seen | {(path, key)}
         pom = poms[path]
         node = pom.at(key[8:]) if key in ("project.version", "project.groupId", "project.artifactId") else pom.at("properties/" + key)
         if node is None:
-            return lookup(parents.get(path), key, seen)
-        val, via = resolve(path, node.text.strip(), seen)
+            return lookup(parents.get(path), key, seen, consumer)
+        raw = node.text.strip()
+        if path != consumer and "$" in raw:
+            # The child can override names used inside an inherited expression.
+            gap = f"{consumer} 引用 {path}:{node.line} 的继承属性 {key}，其嵌套表达式在子模块中的值未知。"
+            if gap not in gaps:
+                gaps.append(gap)
+            return None, [cite(path, node.line)]
+        val, via = resolve(path, raw, seen)
         return val, [cite(path, node.line), *via]
 
     def resolve(path, raw, seen=frozenset()):
@@ -221,7 +228,7 @@ def extract(root, scope):
         refs = []
         result = raw
         for match in PROPERTY.finditer(raw):
-            value, chain = lookup(path, match[1], seen)
+            value, chain = lookup(path, match[1], seen, path)
             refs.extend(chain)
             if value is None:
                 return None, refs
@@ -306,7 +313,8 @@ def markdown(result):
         src = f["source"]
         raw = f["raw"] if f["raw"] is not None else "未声明或不支持"
         known = f"；本地 {f['local']}" if f["local"] is not None else ""
-        if f["kind"] in ("BOM-import", "direct-dependency", "managed-declaration", "parent", "build-rule") and not known:
+        unresolved_property = f["via"] and "$" in raw
+        if not known and (unresolved_property or f["kind"] in ("BOM-import", "direct-dependency", "managed-declaration", "parent", "build-rule")):
             known = "；本地未解析"
         via = "，属性来自 " + ", ".join(f"{v['file']}:L{v['line']}" for v in f["via"]) if f["via"] else ""
         lines.append(f"- {src['file']}:L{src['line']} {f['kind']} {f['name']} = {raw}{known}{via}")

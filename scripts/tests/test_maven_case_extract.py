@@ -49,6 +49,37 @@ class MavenCaseTest(unittest.TestCase):
         self.assertTrue(any("Profile" in g for g in result["gaps"]))
         self.assertEqual(result["mavenResolution"], "未执行")
 
+    def test_inherited_nested_expression_is_unknown_in_consuming_module(self):
+        self.pom("pom.xml", """<groupId>org.example</groupId><artifactId>root</artifactId><version>1</version>
+<properties><engine.version>3.0.5</engine.version>
+<alias.version>${engine.version}</alias.version>
+<owner.version>${project.version}</owner.version></properties>""")
+        self.pom("middle/pom.xml", """<parent><groupId>org.example</groupId><artifactId>root</artifactId><version>1</version></parent>
+<groupId>org.example</groupId><artifactId>middle</artifactId><version>2</version>""")
+        self.pom("middle/child/pom.xml", """<parent><groupId>org.example</groupId><artifactId>middle</artifactId><version>2</version></parent>
+<version>9</version>
+<properties><engine.version>3.0.8</engine.version><local.version>${engine.version}</local.version></properties>
+<dependencies><dependency><groupId>org.example</groupId><artifactId>parser</artifactId>
+<version>${alias.version}-${owner.version}</version></dependency></dependencies>
+<build><plugins><plugin><artifactId>maven-compiler-plugin</artifactId>
+<configuration><release>${owner.version}</release></configuration></plugin></plugins></build>""")
+        scope = dict(self.scope, poms=["pom.xml", "middle/pom.xml", "middle/child/pom.xml"])
+        result = extractor.extract(self.root, scope)
+        child = [f for f in result["facts"] if f["source"]["path"] == "middle/child/pom.xml"]
+        for kind, expr, line in (("direct-dependency", "${alias.version}-${owner.version}", 4),
+                                 ("compiler-setting", "${owner.version}", 5)):
+            with self.subTest(kind=kind):
+                fact = next(f for f in child if f["kind"] == kind)
+                self.assertEqual(fact["raw"], expr)
+                self.assertIsNone(fact["local"])
+                self.assertIn({"file": "F01", "path": "pom.xml", "line": line}, fact["via"])
+                self.assertIn(expr + "；本地未解析", extractor.markdown(result))
+        self.assertEqual(next(f["local"] for f in child if f["name"] == "local.version"), "3.0.8")
+        parent_alias = next(f for f in result["facts"] if f["source"]["path"] == "pom.xml" and f["name"] == "alias.version")
+        self.assertEqual(parent_alias["local"], "3.0.5")
+        self.assertIn("middle/child/pom.xml", "\n".join(result["gaps"]))
+        self.assertEqual(result["mavenResolution"], "未执行")
+
     def test_missing_version_unknown_parent_and_cycles(self):
         self.pom("pom.xml", "<properties><a.version>$" + "{b.version}</a.version><b.version>$" + "{a.version}</b.version></properties>")
         self.pom("child/pom.xml", """<parent><groupId>x</groupId><artifactId>missing</artifactId><version>1</version><relativePath/></parent>

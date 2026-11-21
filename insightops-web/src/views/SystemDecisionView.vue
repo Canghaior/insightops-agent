@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import EngineeringBaselinePicker from '@/components/EngineeringBaselinePicker.vue'
+import { frozenBaseline, type EngineeringBaseline } from '@/api/engineeringBaselines'
 import ResearchModelPicker from '@/components/ResearchModelPicker.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -12,6 +14,7 @@ import SystemBackground from '@/components/SystemBackground.vue'
 
 const route = useRoute(), router = useRouter()
 const id = String(route.params.id)
+const selectedBaseline = ref(''), baselineReady = ref(true), previousBaseline = ref<EngineeringBaseline | null>(null)
 const modelChoice = ref('')
 const system = ref<BusinessSystem | null>(null)
 const projects = ref<ProjectWatch[]>([]), files = ref<SystemAttachment[]>([])
@@ -25,8 +28,9 @@ const dossierFiles = computed(() => new Set(system.value?.attachments.map(f => f
 const additional = computed(() => files.value.filter(f => !dossierFiles.value.has(f.uploadId)))
 const unavailableDossier = computed(() => system.value?.attachments.some(f => !f.name || !files.value.some(available => available.uploadId === f.uploadId)))
 const selected = computed(() => new Set([...dossierFiles.value, ...form.value.uploadIds]))
-const blocked = computed(() => !ready.value || loading.value || refreshing.value || launching.value || conflict.value
+const blocked = computed(() => !ready.value || !baselineReady.value || loading.value || refreshing.value || launching.value || conflict.value
   || unavailableDossier.value || !form.value.question.trim() || (needsReview.value && !reviewed.value))
+watch(selectedBaseline, () => { reviewed.value = false }, { flush: 'sync' })
 watch(form, () => { reviewed.value = false }, { deep: true, flush: 'sync' })
 watch(selected, included => { for (const file of included) removed.value.delete(file) })
 let lastPayload = '', requestId = ''
@@ -68,6 +72,9 @@ onMounted(async () => {
       const run = await getWorkflowRun(runId)
       const snapshot = systemSnapshotOf(run)
       if (assessmentTypeOf(run) !== 'SYSTEM_DECISION' || snapshot?.id !== id) throw new Error('历史运行与本次系统决策评估不一致。')
+      previousBaseline.value = frozenBaseline(run.inputs)
+      selectedBaseline.value = previousBaseline.value?.baseline.id ?? ''
+      baselineReady.value = !selectedBaseline.value
       previous.value = snapshot
       form.value = decisionFormOf(run)
       modelChoice.value = run.requestedModel ?? ''
@@ -96,7 +103,7 @@ async function reload() {
 async function launch() {
   if (blocked.value || !system.value) return
   const revision = system.value.revision
-  const input = { ...form.value, ...(modelChoice.value && { modelChoice: modelChoice.value }), question: form.value.question.trim(), projectId: form.value.projectId || null,
+  const input = { ...form.value, ...(selectedBaseline.value && { engineeringBaselineId: selectedBaseline.value }), ...(modelChoice.value && { modelChoice: modelChoice.value }), question: form.value.question.trim(), projectId: form.value.projectId || null,
     uploadIds: [...form.value.uploadIds] }
   const payload = JSON.stringify([id, revision, input])
   if (lastPayload !== payload) { requestId = globalThis.crypto.randomUUID(); lastPayload = payload }
@@ -129,6 +136,7 @@ async function launch() {
         <p v-if="notice" role="status">{{ notice }}</p>
       </section>
       <section class="panel editor">
+        <EngineeringBaselinePicker v-model="selectedBaseline" :system-id="id" :previous="previousBaseline" :repeating="!!previous" :disabled="launching" @ready="baselineReady = $event" />
         <label>本次要解决的问题或希望达到的结果 <span>必填</span>
           <textarea v-model="form.question" required rows="3" maxlength="1000" placeholder="例如：高峰期订单确认变慢，应该先定位瓶颈，还是验证框架升级？" />
         </label>
@@ -146,7 +154,7 @@ async function launch() {
           </label>
           <p v-if="unavailableDossier" class="warning" role="alert">档案中有不可用的资料，请先编辑系统档案再载入。</p>
           <p v-if="removed.size" class="warning" role="alert">{{ removed.size }} 份原选资料未纳入本次研究。{{ [...removed.values()].filter(Boolean).join('、') }}。可在可见文件中重新选择。</p>
-          <p v-if="!selected.size && !form.projectId">本次没有外部资料依据，将根据用户自述列出待验证的假设和补充材料。</p>
+          <p v-if="!selected.size && !form.projectId && !selectedBaseline">本次没有外部资料依据，将根据用户自述列出待验证的假设和补充材料。</p>
         </fieldset>
         <div v-if="needsReview" class="review">
           <p v-if="previous">上次使用档案修订 {{ previous.revision }}，本次使用修订 {{ system.revision }}。补充背景来自上次评估，请核对后发起。</p>

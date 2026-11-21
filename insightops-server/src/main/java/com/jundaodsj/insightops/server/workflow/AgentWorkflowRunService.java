@@ -111,6 +111,7 @@ public class AgentWorkflowRunService {
         AgentWorkflowExpressionService.Graph graph = expressions.validateGraph(version.graphSpecJson());
         validateAccess(graph, accessLevel);
         Map<String, Object> inputs = expressions.validateInputs(graph, suppliedInputs);
+        if (inputs.containsKey("engineeringBaseline")) throw new WorkflowRunException("工程基线必须通过业务系统评估入口选择。");
         String question = expressions.resolveText(version.entryQuestion(), inputs);
         Instant now = Instant.now();
         UUID runId = UUID.randomUUID();

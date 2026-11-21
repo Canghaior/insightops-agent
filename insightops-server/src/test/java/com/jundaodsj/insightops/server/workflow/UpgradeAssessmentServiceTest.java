@@ -30,7 +30,7 @@ class UpgradeAssessmentServiceTest {
     private final UpgradeAssessmentService service = new UpgradeAssessmentService(templates, runs, projects, new ResearchMaterials(uploads),
             mock(GitHubReleaseGateway.class), registry, json, products, mock(AgentWorkflowProductService.class),
             mock(com.jundaodsj.insightops.knowledge.application.KnowledgeStore.class), updates,
-            mock(com.jundaodsj.insightops.server.businesssystem.BusinessSystemService.class));
+            mock(com.jundaodsj.insightops.server.businesssystem.BusinessSystemService.class), mock(com.jundaodsj.insightops.server.businesssystem.EngineeringBaselineService.class));
 
     @Test void preparesRealReleaseDocsAndIssueToolsWithValidatedArguments() {
         watched();
@@ -94,7 +94,7 @@ class UpgradeAssessmentServiceTest {
         UUID oldVersion = UUID.randomUUID(), activeVersion = UUID.randomUUID(), templateId = UUID.randomUUID();
         Instant now = Instant.now();
         var versions = List.of(new AgentWorkflowTemplateStore.WorkflowVersion(activeVersion, templateId, 2, "ACTIVE", "", "", """
-                        {"inputs":{"sourceEvent":{"type":"json"},"systemSnapshot":{"type":"json"},"selectedMaterials":{"type":"json_array"},"assessmentType":{"type":"string"}}}
+                        {"inputs":{"engineeringBaseline":{"type":"json"},"sourceEvent":{"type":"json"},"systemSnapshot":{"type":"json"},"selectedMaterials":{"type":"json_array"},"assessmentType":{"type":"string"}}}
                         """, actor.userId(), now, now),
                 new AgentWorkflowTemplateStore.WorkflowVersion(oldVersion, templateId, 1, "ARCHIVED", "", "", "{}", actor.userId(), now, now));
         var template = new AgentWorkflowTemplateStore.WorkflowTemplate(templateId, actor.workspaceId(), UpgradeAssessmentService.NAME, "", "UPGRADE_ASSESSMENT", "ACTIVE", activeVersion, actor.userId(), now, now, versions);

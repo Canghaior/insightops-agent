@@ -10,6 +10,7 @@ import com.jundaodsj.insightops.infrastructure.persistence.*;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeStore;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeUploadStore;
 import com.jundaodsj.insightops.server.businesssystem.BusinessSystemService;
+import com.jundaodsj.insightops.server.businesssystem.EngineeringBaselineService;
 import com.jundaodsj.insightops.server.chat.DurableChatRunCoordinator;
 import com.jundaodsj.insightops.server.chat.DurableChatRunProperties;
 import com.jundaodsj.insightops.server.report.ReportPdfRenderer;
@@ -61,6 +62,7 @@ class BusinessSystemDatabaseGateTest {
     private JdbcClient jdbc;
     private TransactionTemplate tx;
     private BusinessSystemService systems;
+    private EngineeringBaselineService baselines;
     private UpgradeAssessmentService upgrades;
     private SystemDecisionAssessmentService decisions;
     private AgentWorkflowRunService runs;
@@ -107,11 +109,12 @@ class BusinessSystemDatabaseGateTest {
                 runQuery, queue, new AgentWorkflowExpressionService(json, registry), registry, json,
                 new ResearchModelCatalog(new DeepSeekModelProperties(true, "", "deepseek-v4-flash", false,
                         .2, 1024, 2, 30, 0, false), "mock-openai", "mock-deepseek", ""));
+        baselines = new EngineeringBaselineService(new JdbcEngineeringBaselineStore(jdbc,json),json);
         var watches = new JdbcUserProjectWatchStore(jdbc);
         watches.setEnabled(ACTOR, PROJECT, true, Instant.now());
         upgrades = new UpgradeAssessmentService(templates, runs, watches, materials, null, registry, json,
-                null, null, mock(KnowledgeStore.class), null, systems);
-        decisions = new SystemDecisionAssessmentService(systems, materials, watches, templates, runs, json, registry);
+                null, null, mock(KnowledgeStore.class), null, systems, baselines);
+        decisions = new SystemDecisionAssessmentService(systems, materials, watches, templates, runs, json, registry, baselines);
         var reports = new JdbcReportDeliveryStore(jdbc, json, new DeliverySecretCipher("io01-report-fixture-only"));
         research = new ResearchReportService(runQuery, workflows, reports, json, "http://localhost");
         exports = new ReportService(reports, new ReportPdfRenderer(""));

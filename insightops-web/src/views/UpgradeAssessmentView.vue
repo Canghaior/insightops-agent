@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import EngineeringBaselinePicker from '@/components/EngineeringBaselinePicker.vue'
+import { frozenBaseline, type EngineeringBaseline } from '@/api/engineeringBaselines'
 import ResearchModelPicker from '@/components/ResearchModelPicker.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -12,6 +14,7 @@ import { getWorkflowRun } from '@/api/workflowRuns'
 import { assessmentTypeOf } from '@/utils/assessmentTypes'
 
 const router = useRouter(), route = useRoute()
+const selectedBaseline = ref(''), baselineReady = ref(true), previousBaseline = ref<EngineeringBaseline | null>(null)
 const modelChoice = ref('')
 const setup = ref<UpgradeSetup | null>(null)
 const system = ref<BusinessSystem | null>(null)
@@ -36,8 +39,9 @@ const reviewRequired = computed(() => !!previousSystem.value && !!system.value &
 const reviewed = ref(false)
 function clearReview() { reviewed.value = false }
 watch([() => system.value?.revision, () => form.value.profileId], clearReview, { flush: 'sync' })
+watch(selectedBaseline, clearReview, { flush: 'sync' })
 watch(() => form.value.context, clearReview, { deep: true, flush: 'sync' })
-const launchBlocked = computed(() => loading.value || busy.value || systemChanged.value || reloadingSystem.value
+const launchBlocked = computed(() => loading.value || busy.value || (!!system.value && !baselineReady.value) || systemChanged.value || reloadingSystem.value
   || refreshingSources.value || (reviewRequired.value && !reviewed.value))
 const availablePresets = computed(() => sourceEvent.value ? presets.value.filter(item => item.values.projectId === sourceEvent.value?.projectId) : presets.value)
 const selectedProject = computed(() => setup.value?.projects.find(item => item.id === form.value.projectId))
@@ -166,7 +170,7 @@ async function launch() {
   if (launchBlocked.value || initializationFailed.value || eventFailed.value) return
   if (!form.value.concerns.length) { error.value = '请至少选择一个关注项。'; return }
   busy.value = true; error.value = ''
-  const input = { ...values(), ...(modelChoice.value && { modelChoice: modelChoice.value }) }
+  const input = { ...values(), ...(system.value && selectedBaseline.value && { engineeringBaselineId: selectedBaseline.value }), ...(modelChoice.value && { modelChoice: modelChoice.value }) }
   const payload = JSON.stringify([input, system.value?.id, system.value?.revision])
   if (payload !== lastPayload) { lastPayload = payload; requestId = globalThis.crypto.randomUUID() }
   try {
@@ -197,6 +201,9 @@ onMounted(async () => {
       if (assessmentTypeOf(previous) === 'SYSTEM_DECISION') throw new Error('请从该运行的系统决策评估入口再次研究。')
       if (systemId && previous.businessSystemId !== systemId) throw new Error('历史运行与所选系统不一致。')
       systemId = previous.businessSystemId ?? systemId
+      previousBaseline.value = frozenBaseline(previous.inputs)
+      selectedBaseline.value = previousBaseline.value?.baseline.id ?? ''
+      baselineReady.value = !selectedBaseline.value
       restore(previousAssessmentInput(previous))
       modelChoice.value = previous.requestedModel ?? ''
       if (previous.businessSystemId) {
@@ -321,6 +328,7 @@ onMounted(async () => {
         </details>
       </section>
       <details v-if="!system" class="optional"><summary>保存配置，下次复用</summary><p class="hint">配置按当前工作区和你的账号保存；用团队与业务项目命名，方便切换。</p><div class="save-config"><input v-model="presetName" maxlength="80" aria-label="配置名称" placeholder="例如：支付团队 · 订单服务" /><button type="button" class="secondary-button" :disabled="saving" @click="savePreset">{{ saving ? '保存中…' : '保存当前配置' }}</button></div></details>
+      <EngineeringBaselinePicker v-if="system" v-model="selectedBaseline" :system-id="system.id" :previous="previousBaseline" :repeating="!!previousSystem" :disabled="busy" @ready="baselineReady = $event" />
       <ResearchModelPicker v-model="modelChoice" :disabled="busy" />
       <div class="launch-row"><button class="primary-button" type="submit" :disabled="launchBlocked">{{ busy ? '正在启动研究…' : '开始升级评估' }}</button><p class="hint">{{ reviewRequired && !reviewed ? '请先在项目技术方向下勾选「已核对本次背景」。' : '输出主要变化、可能影响、验证清单、来源依据和尚未确认事项。资料不足会明确提示。' }}</p></div>
     </form>

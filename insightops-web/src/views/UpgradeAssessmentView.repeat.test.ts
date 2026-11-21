@@ -6,6 +6,7 @@ import { ElIcon } from 'element-plus'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { AxiosError } from 'axios'
 
+import { baselineFixture } from '@/utils/engineeringBaseline.fixture'
 import App from '@/App.vue'
 import UpgradeAssessmentView from './UpgradeAssessmentView.vue'
 import { apiClient } from '@/api/client'
@@ -57,7 +58,9 @@ beforeEach(() => {
     if (url === '/upgrade-assessments/setup') {
       data = { projects: [project], profiles, sources: [], uploads: uploads.map(uploadId =>
         ({ uploadId, status: 'SUCCEEDED', originalName: uploadId, visibility: 'PRIVATE' })) }
-    } else if (url === '/upgrade-assessments/presets') data = []
+    } else if (url.endsWith('/engineering-baselines')) data = [baselineFixture(2).baseline, baselineFixture(1).baseline]
+    else if (url.includes('/engineering-baselines/b')) data = baselineFixture(Number(url.slice(-1)))
+    else if (url === '/upgrade-assessments/presets') data = []
     else if (url === '/upgrade-assessments/versions') data = { releases: [], fetchedAt: '2026-11-19T00:00:00Z' }
     else if (url === base || url === '/business-systems/other') data = dossier(revision, url.split('/').pop())
     else if (url.startsWith('/agent-workflows/runs/')) {
@@ -121,6 +124,13 @@ async function submit() {
   root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
   await settle()
 }
+it('retains the original engineering baseline when a newer version exists', async () => {
+  inputs.R1 = storedInputs(1, { engineeringBaseline: baselineFixture(1) })
+  await open()
+  await vi.waitFor(() => expect(root.querySelector<HTMLSelectElement>('.picker select')?.value).toBe('b1'))
+  await confirm(); await submit()
+  expect(launches[0]?.body.engineeringBaselineId).toBe('b1')
+})
 function warning() { return root.querySelector('.recovery-warnings')?.textContent ?? '' }
 const start = () => button('开始升级评估')
 

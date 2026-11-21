@@ -5,17 +5,20 @@ import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { createPinia } from 'pinia'
 import { ElIcon } from 'element-plus'
 import { AxiosError } from 'axios'
+import { baselineFixture } from '@/utils/engineeringBaseline.fixture'
 import App from '@/App.vue'
 import { apiClient } from '@/api/client'
 import SystemDecisionView from './SystemDecisionView.vue'
 
 const original = apiClient.defaults.adapter
+let baselineHistory: boolean
 let revision: number, conflict: boolean, oldType: string, root: HTMLElement, app: VueApp, router: Router
 let requests: Array<{ revision: number; body: Record<string, unknown> }>
 function dossier(rev: number, id = 'orders') {
   return { id, revision: rev, background: { name: '订单系统', technologyStack: '修订-' + rev }, attachments: [] }
 }
 beforeEach(() => {
+  baselineHistory = false
   revision = 2; conflict = false; oldType = 'SYSTEM_DECISION'; requests = []
   apiClient.defaults.adapter = async config => {
     const url = config.url
@@ -24,10 +27,12 @@ beforeEach(() => {
       { id: 'gpt-6.2-sol', label: 'GPT-6.2 Sol', provider: 'openai' },
       { id: 'deepseek-v4-pro-thinking', label: 'DeepSeek Pro · 思考', provider: 'deepseek' },
     ] }
+    else if (url?.endsWith('/engineering-baselines')) data = [baselineFixture(2).baseline, baselineFixture(1).baseline]
+    else if (url?.includes('/engineering-baselines/b')) data = baselineFixture(Number(url.slice(-1)))
     else if (url === '/projects' || url === '/business-systems/available-uploads') data = []
     else if (url === '/business-systems/orders' || url === '/business-systems/other') data = dossier(revision, url.split('/').pop())
     else if (url === '/agent-workflows/runs/R1') data = { businessSystemId: 'orders', inputs: {
-      assessmentType: oldType, systemSnapshot: dossier(1), decisionQuestion: '旧问题', context: { environment: '旧环境' },
+      ...(baselineHistory && { engineeringBaseline: baselineFixture(1) }), assessmentType: oldType, systemSnapshot: dossier(1), decisionQuestion: '旧问题', context: { environment: '旧环境' },
       projectId: 'unwatched', uploadIds: ['E'], selectedMaterials: [{ uploadId: 'E', name: '回调记录.md' }] } }
     else if (url?.endsWith('/decision-runs')) {
       requests.push({ revision: config.params.expectedRevision, body: JSON.parse(config.data) })
@@ -62,6 +67,20 @@ const box = () => root.querySelector<HTMLInputElement>('.review input')!
 const reload = () => root.querySelector<HTMLButtonElement>('.panel .text-button')!.click()
 
 describe('业务系统决策评估页面', () => {
+  it('restores the frozen baseline and submits a newer one only after an explicit selection and review', async () => {
+    baselineHistory = true
+    await open('?runId=R1')
+    const picker = root.querySelector<HTMLSelectElement>('.picker select')!
+    await vi.waitFor(() => expect(picker.value).toBe('b1'))
+    expect(root.textContent).toContain('上次评估使用 v1')
+    box().click(); await nextTick()
+    picker.value = 'b2'; picker.dispatchEvent(new Event('change', { bubbles: true }))
+    await vi.waitFor(() => expect(root.textContent).toContain('事实与来源 · v2'))
+    expect(box().checked).toBe(false)
+    await submit(); expect(requests).toHaveLength(0)
+    box().click(); await nextTick(); await submit()
+    expect(requests[0]?.body.engineeringBaselineId).toBe('b2')
+  })
   it('requires a question, launches without versions, a framework or files', async () => {
     await open()
     expect(root.textContent).toContain('没有外部资料依据')

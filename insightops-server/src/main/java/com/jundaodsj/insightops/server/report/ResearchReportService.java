@@ -152,8 +152,9 @@ public class ResearchReportService {
         if (decision || snapshot.inputs().containsKey("targetVersion")) {
             field(result, "评估类型", decision ? "系统决策评估" : "版本升级评估");
         }
+        if (system != null) result.append("\n### 本次工程基线\n\n").append(com.jundaodsj.insightops.server.businesssystem.EngineeringBaselineText.render(snapshot.inputs(), json)).append("\n");
         snapshot.inputs().forEach((key, value) -> {
-            if ("assessmentType".equals(key)) return;
+            if ("assessmentType".equals(key) || "engineeringBaseline".equals(key)) return;
             if (system != null && List.of("systemSnapshot", "businessProject", "uploadIds").contains(key)) return;
             if (system != null && "selectedMaterials".equals(key) && value instanceof List<?> files) {
                 field(result, "本次选用资料", String.join("、", files.stream().filter(Map.class::isInstance)

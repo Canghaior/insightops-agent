@@ -200,6 +200,7 @@ onMounted(load)
         <p v-if="reviewAccess === 'checking'" class="subtle" role="status">正在核对本报告的工程验证入口…</p>
         <p v-else-if="reviewAccess === 'error'" class="stream-error" role="alert">暂时无法核对本报告的验证入口。<button type="button" class="text-button" @click="checkReviewAccess">重试加载验证入口</button></p>
         <ReportReviewPanel v-else-if="reviewAccess === 'open'" :key="selectedReport.id" :report-id="selectedReport.id" :original-answer="selectedReport.research?.answer" :sources="reportSources" />
+        <p v-if="selectedReport.research?.inputs?.systemSnapshot && !selectedReport.research.inputs.engineeringBaseline">本次评估未关联工程基线。</p>
         <details open><summary>报告预览</summary><MarkdownContent :content="selectedReport.markdown" :sources="reportSources" /></details>
       </article><div v-else class="conversation-empty"><strong>从历史报告中选择一份报告</strong></div>
     </div>

@@ -24,6 +24,7 @@ import java.io.UncheckedIOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -68,6 +69,11 @@ public class VerificationHandoffService {
             var writer = new HandoffArchiveWriter(zip, json.writerWithDefaultPrettyPrinter());
             var missing = new ArrayList<Missing>();
             writer.markdown("report/original.md", "ORIGINAL_REPORT", reportId, report.markdown());
+            if (report.research() != null && report.research().inputs().get("engineeringBaseline") instanceof Map<?,?> baseline) {
+                writer.json("report/engineering-baseline.json", "FROZEN_REPORT_BASELINE", reportId, baseline);
+                writer.markdown("report/baseline-scope.md", "BASELINE_SCOPE", versionId,
+                        "此工程基线来自原报告的启动输入。所选验证版本的实际执行环境和构建引用请见 verification/version.json。");
+            }
             writer.json("verification/version.json", "VERIFICATION_VERSION", versionId, version);
             writer.json("decisions.json", "DECISIONS_REFERENCING_VERSION", versionId, decisions);
             BuildEvidenceComparison comparison = null;

@@ -374,6 +374,53 @@ class BusinessSystemDatabaseGateTest {
         return tx.execute(status -> decisions.launch(ACTOR, false, AccessLevel.WORKSPACE_MEMBER, systemId, revision, command, requestId.toString()));
     }
 
+    @Test void engineeringBaselineIsScopedImmutableAndUsedInBothPrompts() throws Exception {
+        var system=create("Java 21",List.of()).id();
+        var other=create("Other system",List.of()).id();
+        var bytes="<project><artifactId>once</artifactId><properties><java.version>17</java.version></properties></project>"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var first=new EngineeringBaselineService.Draft("pom.xml",bytes,"第一次","自述","20");
+        var preview=baselines.preview(ACTOR,system,first);
+        assertThat(preview.content().conflicts()).hasSize(2);
+        assertThat(systems.detail(ACTOR,system).background().technologyStack()).isEqualTo("Java 21");
+        UUID request=UUID.randomUUID();
+        var chosen=tx.execute(s -> baselines.save(ACTOR,system,request,preview.token(),first));
+        UUID id=chosen.baseline().id();
+        assertThat(tx.execute(s -> baselines.save(ACTOR,system,request,preview.token(),first)).baseline()).isEqualTo(chosen.baseline());
+        assertThat(baselines.download(ACTOR,system,id,"sources/pom.xml").bytes()).isEqualTo(bytes);
+        for(var actor:List.of(new ActorContext(UUID.randomUUID(),WORKSPACE),new ActorContext(USER,UUID.randomUUID()))) {
+            assertThatThrownBy(()->baselines.detail(actor,system,id)).hasMessageContaining("404");
+            assertThatThrownBy(()->baselines.list(actor,system)).hasMessageContaining("404");
+            assertThatThrownBy(()->baselines.download(actor,system,id,null)).hasMessageContaining("404");
+            assertThatThrownBy(()->baselines.save(actor,system,request,preview.token(),first)).hasMessageContaining("404");
+        }
+        var upgrade=new UpgradeAssessmentService.Command(PROJECT,"1.0.0","1.1.0","","","",List.of("兼容性"),List.of(),List.of(),UUID.randomUUID(),"java_backend",Map.of(),null,null,id);
+        assertThatThrownBy(()->tx.execute(s -> upgrades.launch(ACTOR,false,AccessLevel.WORKSPACE_MEMBER,upgrade,other,1,"trace"))).hasMessageContaining("404");
+        assertThatThrownBy(()->tx.execute(s -> upgrades.launch(ACTOR,false,AccessLevel.WORKSPACE_MEMBER,upgrade,null,null,"trace"))).hasMessageContaining("业务系统");
+        var upgradeRun=tx.execute(s->upgrades.launch(ACTOR,false,AccessLevel.WORKSPACE_MEMBER,upgrade,system,1,UUID.randomUUID().toString()));
+        var decision=new SystemDecisionAssessmentService.Command(UUID.randomUUID(),"该验证什么？","","",null,List.of(),null,id);
+        var run=tx.execute(s->decisions.launch(ACTOR,false,AccessLevel.WORKSPACE_MEMBER,system,1,decision,UUID.randomUUID().toString()));
+        for(var rid:List.of(run.runId(),upgradeRun.runId())) {
+            var saved=workflows.find(rid).orElseThrow();
+            assertThat(saved.inputJson()).contains(id.toString(),"DECLARATION","sources/pom.xml");
+            assertThat(saved.entryQuestion()).contains(id.toString(),"POM 声明","sources/pom.xml:1","业务进程 JDK 未知").doesNotContain("original_bytes");
+        }
+        var different=new EngineeringBaselineService.Draft("pom.xml","<project><artifactId>different</artifactId></project>".getBytes(),"第二次","","");
+        var p2=baselines.preview(ACTOR,system,different);
+        assertThatThrownBy(()->tx.execute(s->baselines.save(ACTOR,system,request,p2.token(),different))).hasMessageContaining("409");
+        var next=tx.execute(s->baselines.save(ACTOR,system,UUID.randomUUID(),p2.token(),different));
+        assertThat(next.baseline().version()).isEqualTo(2);
+        assertThat(next.content().originalSha256()).isNotEqualTo(chosen.content().originalSha256());
+        tx.executeWithoutResult(s->systems.update(ACTOR,system,draft("Java 24",1,List.of())));
+        assertThatThrownBy(()->tx.execute(s->baselines.save(ACTOR,system,UUID.randomUUID(),p2.token(),different))).hasMessageContaining("409");
+        assertThat(baselines.list(ACTOR,system)).hasSize(2);
+        var report=saveFixtureReport(run.runId());
+        assertThat(exports.markdown(ACTOR,report)).contains("第一次","POM 声明","Java 21").doesNotContain("第二次","Java 24");
+        var repeat=new SystemDecisionAssessmentService.Command(decision.requestId(),"changed","","",null,List.of(),null,next.baseline().id());
+        assertThat(tx.execute(s->decisions.launch(ACTOR,false,AccessLevel.WORKSPACE_MEMBER,system,2,repeat,"trace")).runId()).isEqualTo(run.runId());
+        assertThat(workflows.find(run.runId()).orElseThrow().inputJson()).doesNotContain(next.baseline().id().toString());
+    }
+
     @Test void modelSelectionSurvivesReplayQueueAndRetry() throws Exception {
         var id = create("Java 21", List.of()).id();
         UUID request = UUID.randomUUID();

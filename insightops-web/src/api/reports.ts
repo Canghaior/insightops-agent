@@ -16,7 +16,7 @@ export interface ResearchReport {
   id: string; title: string; reportType: string; periodStart: string; periodEnd: string
   projectIds: string[]; eventTypes: ReportEventType[]; itemCount: number; highRiskCount: number
   items: ReportItem[]; markdown: string; createdAt: string
-  research?: { runId?: string; answer?: string; sources: string[]; evidenceQuality?: EvidenceQuality | null; inputs?: { assessmentType?: string; sourceEvent?: { sourceUrl?: string }; systemSnapshot?: { id?: string; revision: number } } } | null
+  research?: { runId?: string; answer?: string; sources: string[]; evidenceQuality?: EvidenceQuality | null; inputs?: { engineeringBaseline?: import('./engineeringBaselines').EngineeringBaseline; assessmentType?: string; sourceEvent?: { sourceUrl?: string }; systemSnapshot?: { id?: string; revision: number } } } | null
 }
 export interface ReportPage { items: ResearchReport[]; page: number; size: number; total: number }
 export interface CreateReportCommand {

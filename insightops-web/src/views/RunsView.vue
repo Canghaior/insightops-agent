@@ -14,6 +14,8 @@ import {
   type RunSummary,
   type RunToolCall,
 } from '@/api/runs'
+import { frozenBaseline } from '@/api/engineeringBaselines'
+import EngineeringBaselineFacts from '@/components/EngineeringBaselineFacts.vue'
 import SystemBackgroundPanel from '@/components/SystemBackground.vue'
 import { assessmentTypeOf, decisionFormOf } from '@/utils/assessmentTypes'
 import { selectedMaterialNames, systemSnapshotOf } from '@/utils/upgradeProfiles'
@@ -47,6 +49,7 @@ const totalPages = ref(0)
 const status = ref<RunStatus | ''>('')
 const checkpoint = ref<AgentCheckpoint | null>(null)
 const workflowRun = ref<WorkflowRunDetail | null>(null)
+const engineering = computed(() => frozenBaseline(workflowRun.value?.inputs))
 const linkedSystem = computed(() => systemSnapshotOf(workflowRun.value))
 const assessmentType = computed(() => assessmentTypeOf(workflowRun.value))
 const decision = computed(() => workflowRun.value && assessmentType.value === 'SYSTEM_DECISION' ? decisionFormOf(workflowRun.value) : null)
@@ -368,6 +371,8 @@ onUnmounted(() => {
             </template>
             <p v-else class="assessment-range">版本升级评估 · {{ assessmentRange }}</p>
             <SystemBackgroundPanel :system="linkedSystem" />
+            <details v-if="engineering"><summary>本次工程基线 v{{ engineering.baseline.version }} · {{ engineering.baseline.label }}</summary><EngineeringBaselineFacts :content="engineering.content" :saved="engineering.baseline" /></details>
+            <p v-else>本次评估未关联工程基线。</p>
           </div>
           <ResearchResultActions
             :run-id="selectedRun.id" :can-save="selectedRun.status === 'SUCCEEDED' && !!selectedRun.answer"

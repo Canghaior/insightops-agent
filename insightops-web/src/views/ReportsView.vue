@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import EvidenceQualityPanel from '@/components/EvidenceQualityPanel.vue'
 import ReportReviewPanel from '@/components/ReportReviewPanel.vue'
+import { frozenBaseline } from '@/api/engineeringBaselines'
 import { isReviewEligible } from '@/api/reportReview'
 import { listProjects, type ProjectWatch } from '@/api/projects'
 import {
@@ -185,7 +186,7 @@ onMounted(load)
 
 <template>
   <section class="reports-page">
-    <div class="section-heading"><div><h2>报告与验证</h2><p>打开一份已关联业务系统的评估报告，可导入构建原件、对照测试结果，并从验证记录下载交接包。</p></div><button class="secondary-button" :disabled="loading" @click="load">刷新</button></div>
+    <div class="section-heading"><div><h2>报告与验证</h2><p>打开已关联业务系统的评估报告，可将一项建议交给执行者，导入构建证据，并交接实际结果。</p></div><button class="secondary-button" :disabled="loading" @click="load">刷新</button></div>
     <p v-if="error" class="stream-error">{{ error }}</p><p v-if="notice" class="success-notice">{{ notice }}</p>
     <details class="report-tools">
       <summary>新建周期报告或管理 Webhook 渠道</summary>
@@ -199,7 +200,10 @@ onMounted(load)
         <header><div><span class="eyebrow">{{ selectedReport.reportType === 'RESEARCH' ? '研究快照' : '情报汇总' }}</span><h3>{{ selectedReport.title }}</h3><p>{{ time(selectedReport.periodStart) }} — {{ time(selectedReport.periodEnd) }}</p></div><i class="status-pill">{{ selectedReport.itemCount }} 条</i></header><div class="quality-actions"><button class="secondary-button" :disabled="saving" @click="download(selectedReport,'md')">下载 Markdown</button><button class="secondary-button" :disabled="saving" @click="download(selectedReport,'pdf')">下载 PDF</button><select v-model="selectedChannelId"><option value="">选择 Webhook</option><option v-for="channel in enabledChannels" :key="channel.id" :value="channel.id">{{ channel.name }}</option></select><button class="send-button" :disabled="saving || !selectedChannelId" @click="deliver(selectedReport)">加入投递队列</button></div><EvidenceQualityPanel v-if="selectedReport.research?.evidenceQuality" :quality="selectedReport.research.evidenceQuality" /><p v-else-if="selectedReport.reportType === 'RESEARCH'" class="subtle" role="status">这份历史报告没有保存资料完整性检查结果，不能据此认定结论已核验。原快照保持不变，可发起新的研究。</p>
         <p v-if="reviewAccess === 'checking'" class="subtle" role="status">正在核对本报告的工程验证入口…</p>
         <p v-else-if="reviewAccess === 'error'" class="stream-error" role="alert">暂时无法核对本报告的验证入口。<button type="button" class="text-button" @click="checkReviewAccess">重试加载验证入口</button></p>
-        <ReportReviewPanel v-else-if="reviewAccess === 'open'" :key="selectedReport.id" :report-id="selectedReport.id" :original-answer="selectedReport.research?.answer" :sources="reportSources" />
+        <ReportReviewPanel
+          v-else-if="reviewAccess === 'open'" :key="selectedReport.id" :report-id="selectedReport.id" :original-answer="selectedReport.research?.answer"
+          :report-title="selectedReport.title" :markdown="selectedReport.markdown" :baseline="frozenBaseline(selectedReport.research?.inputs)" :sources="reportSources"
+        />
         <p v-if="selectedReport.reportType === 'RESEARCH' && !selectedReport.research?.inputs?.engineeringBaseline">本次评估未关联工程基线。</p>
         <details open><summary>报告预览</summary><MarkdownContent :content="selectedReport.markdown" :sources="reportSources" /></details>
       </article><div v-else class="conversation-empty"><strong>从历史报告中选择一份报告</strong></div>

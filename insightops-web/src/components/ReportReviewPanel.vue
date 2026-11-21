@@ -2,6 +2,9 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import MarkdownContent from './MarkdownContent.vue'
 import BuildEvidencePanel from './BuildEvidencePanel.vue'
+import ReportTasksPanel from './ReportTasksPanel.vue'
+import type { EngineeringBaseline } from '@/api/engineeringBaselines'
+import type { TaskResult } from '@/api/reportTasks'
 import VerificationHandoffButton from './VerificationHandoffButton.vue'
 import { batchName, type BuildSummary } from '@/api/buildEvidence'
 import type { BuildComparison } from '@/api/buildComparison'
@@ -9,7 +12,8 @@ import { availableSystemUploads, type SystemAttachment } from '@/api/businessSys
 import { getReview, saveDecision, saveVerification, executions, impacts, origins,
   type DecisionInput, type ReviewHistory, type Verification, type VerificationInput } from '@/api/reportReview'
 
-const props = defineProps<{ reportId: string; originalAnswer?: string; sources?: string[] }>()
+const props = defineProps<{ reportId: string; originalAnswer?: string; reportTitle?: string; markdown?: string;
+  baseline?: EngineeringBaseline | null; sources?: string[] }>()
 const history = ref<ReviewHistory>()
 const uploads = ref<SystemAttachment[]>([])
 const uploadsReady = ref(false)
@@ -17,6 +21,10 @@ const error = ref(''), uploadError = ref(''), notice = ref(''), draftWarning = r
 const form = ref<'verification' | 'decision' | null>(null)
 const editor = ref<globalThis.HTMLFormElement>()
 const buildPanel = ref<InstanceType<typeof BuildEvidencePanel>>()
+const taskPanel = ref<InstanceType<typeof ReportTasksPanel>>()
+const builds = ref<BuildSummary[]>([])
+const taskResults = ref<TaskResult[]>()
+const taskVerificationIds = computed(() => new Set(taskResults.value?.map(r => r.verificationVersionId)))
 const buildNames = ref(new Map<string, string>())
 const comparisonTarget = ref('')
 const draftSummary = ref('')
@@ -34,7 +42,7 @@ const unavailableIds = computed(() => form.value === 'verification' && uploadsRe
   ? verification.value.uploadIds.filter(id => !files.value.has(id)) : [])
 const unavailableNames = computed(() => unavailableIds.value.flatMap(id => knownUploadNames.get(id) ?? []))
 const orderedVersions = computed(() => [...(history.value?.verifications ?? [])].reverse())
-const correctableVersions = computed(() => orderedVersions.value.filter(item => !corrected.value.has(item.id)))
+const correctableVersions = computed(() => taskResults.value ? orderedVersions.value.filter(item => !corrected.value.has(item.id) && !taskVerificationIds.value.has(item.id)) : [])
 const orderedDecisions = computed(() => [...(history.value?.decisions ?? [])].reverse())
 const stamp = (date: string) => new Date(date).toLocaleString('zh-CN', { hour12: false })
 const lastAttempt = ref<{ payload: string; id: string; unconfirmed: boolean } | null>(null)
@@ -77,7 +85,7 @@ async function loadUploads() {
     uploadError.value = '暂时无法读取可关联资料。草稿保留已选资料，可重读资料或继续填写文字。'
   }
 }
-function refresh() { void load(); void loadUploads() }
+function refresh() { void load(); void loadUploads(); void taskPanel.value?.refresh() }
 onMounted(refresh)
 function openVerification(parent: Verification | null = null) {
   form.value = 'verification'; previous.value = parent; draftWarning.value = ''; notice.value = ''; error.value = ''; lastAttempt.value = null
@@ -85,6 +93,7 @@ function openVerification(parent: Verification | null = null) {
   draftSummary.value = parent?.buildSummary ?? ''
 }
 function rememberBuilds(batches: BuildSummary[]) {
+  builds.value = batches
   buildNames.value = new Map(batches.map(batch => [batch.id, batchName(batch)]))
 }
 function inspectBuilds(fields: VerificationInput) {
@@ -171,7 +180,12 @@ function basisName(id: string) {
     <p v-if="notice" class="success-notice" role="status">{{ notice }}</p>
     <template v-if="history">
       <p class="subtle">报告采用档案修订 {{ history.context.systemRevision }} · 提供方 {{ history.context.modelProvider || '未知' }} · 请求模型 {{ history.context.requestedModel || '未知' }} · 响应模型 {{ history.context.responseModel || '未知' }}</p>
-      <BuildEvidencePanel ref="buildPanel" :report-id="reportId" @listed="rememberBuilds">
+      <ReportTasksPanel
+        ref="taskPanel" :report-id="reportId" :title="reportTitle || '已保存的研究报告'" :answer="originalAnswer || ''"
+        :markdown="markdown || ''" :baseline="baseline" :history="history" :builds="builds" :uploads="uploads" :uploads-ready="uploadsReady" :upload-error="uploadError"
+        @listed="taskResults = $event" @refresh-review="load" @refresh-uploads="loadUploads" @inspect="(a,b) => buildPanel?.inspect(a,b)"
+      />
+      <BuildEvidencePanel id="task-build-evidence" ref="buildPanel" :report-id="reportId" @listed="rememberBuilds">
         <template #draft="{ comparison }">
           <div class="build-draft">
             <p v-if="form === 'decision'">保存或取消当前人工决定后，可以使用这份构建对照。</p>
@@ -285,7 +299,9 @@ function basisName(id: string) {
         <small>{{ item.author.name }} · {{ stamp(item.createdAt) }}</small>
         <div class="review-actions">
           <a v-if="item.previousVersionId" :href="'#verification-' + item.previousVersionId">查看被更正的第 {{ item.version - 1 }} 版</a>
-          <button v-if="!corrected.has(item.id) && !form" class="text-button" :disabled="item.fields.uploadIds.length > 0 && !uploadsReady && !uploadError" @click="openVerification(item)">补充或更正</button>
+          <button v-if="taskResults" type="button" class="text-button" @click="taskPanel?.fromVerification(item)">据此验证版本建立任务</button>
+          <button v-if="!corrected.has(item.id) && !form && taskVerificationIds.has(item.id)" class="text-button" @click="taskPanel?.openResult(item.id)">在所属任务中补充结果</button>
+          <button v-else-if="!corrected.has(item.id) && !form && taskResults" class="text-button" :disabled="item.fields.uploadIds.length > 0 && !uploadsReady && !uploadError" @click="openVerification(item)">补充或更正</button>
           <VerificationHandoffButton :report-id="reportId" :version-id="item.id" :version="item.version" />
         </div>
       </article>

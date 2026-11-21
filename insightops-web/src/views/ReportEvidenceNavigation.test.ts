@@ -31,6 +31,7 @@ beforeEach(() => {
       case '/runs/source/report': data = report; break
       case '/reports': data = { items: [report] }; break
       case '/reports/saved-upgrade/review/eligibility': data = { eligible: true }; break
+      case '/reports/saved-upgrade/tasks': data = { versions: [], results: [] }; break
       case '/reports/saved-upgrade/review': data = { context: { systemRevision: 2 }, verifications: [], decisions: [] }; break
       case '/report-deliveries': data = { items: [] }; break
       case '/knowledge/uploads': data = await readUploads(); break

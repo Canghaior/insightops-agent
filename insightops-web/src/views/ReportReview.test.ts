@@ -35,6 +35,7 @@ beforeEach(() => {
     else if (url === '/report-deliveries') data = { items: [] }
     else if (url === '/projects' || url === '/delivery-channels') data = []
     else if (url === '/business-systems/available-uploads') data = await loadAvailable()
+    else if (url?.endsWith('/tasks')) data = { versions: [], results: [] }
     else if (url?.endsWith('/review/eligibility')) {
       const id = url.split('/')[2]!
       eligibilityReads.push(id); data = { eligible: await checkEligibility(id) }
@@ -99,6 +100,7 @@ describe('报告验证与决定', () => {
     await router.push('/reports?reportId=upgrade'); await settle()
     expect(reviewReads).toContain('/reports/upgrade/review')
     expect(host.textContent).toContain('导入基线构建')
+    expect(host.textContent).toContain('建立单项任务')
     await router.push('/reports?reportId=archive'); await settle()
     expect(reviewReads).toContain('/reports/archive/review')
     expect(host.textContent).toContain('请求模型 未知'); expect(host.textContent).toContain('响应模型 actual-model')
@@ -108,6 +110,7 @@ describe('报告验证与决定', () => {
     expect(host.querySelector('.review-editor')).toBeNull(); expect(host.textContent).toContain('原始报告')
     expect(eligibilityReads).toEqual(['upgrade', 'archive', 'unrelated'])
     expect(reviewReads).not.toContain('/reports/unrelated/review')
+    expect(host.querySelector('[aria-label="单项任务"]')).toBeNull()
   })
 
   it('discards eligibility from the previous selection and restores the current entry after an explicit retry', async () => {

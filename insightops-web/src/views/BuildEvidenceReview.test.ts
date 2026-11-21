@@ -62,6 +62,7 @@ beforeEach(() => {
     requests.push(config.method + ' ' + url)
     let data: unknown
     if (url === prefix) data = { context: { systemRevision: 1 }, verifications: structuredClone(saved), decisions: [] }
+    else if (url === '/reports/decision/tasks') data = { versions: [], results: [] }
     else if (url === '/business-systems/available-uploads') data = [{ uploadId: 'sql', name: '正向 SQL.md' }]
     else if (url === prefix + '/builds' && config.method === 'get') data = batches.map(item => item.summary)
     else if (url === prefix + '/builds') {

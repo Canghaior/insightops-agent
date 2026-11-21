@@ -135,21 +135,23 @@ public class VerificationHandoffService {
         }
         writer.json("task/version.json", "TASK_VERSION", task.id(), task);
         writer.markdown("task/suggestion.md", "REPORT_EXCERPT", task.id(), task.fields().excerpt());
+        var taskGaps = new ArrayList<Missing>();
         for (UUID id : task.fields().verificationVersionIds()) {
             var verified = reviews.verification(context.reportId(), id).orElseThrow(VerificationHandoffService::unavailable);
             if (!id.equals(verified.id())) throw inconsistent();
             String prefix = "basis/" + id + "/";
             writer.json(prefix + "version.json", "VERIFICATION_BASIS", id, verified);
-            writeEvidence(writer, actor, context.reportId(), verified, prefix, missing);
+            writeEvidence(writer, actor, context.reportId(), verified, prefix, taskGaps);
             // Include the selected version's own returned artifacts, without traversing its upstream task graph.
             var returned = tasks.resultForVerification(actor, context.reportId(), id);
             if (returned.isPresent()) writeResultFiles(writer, actor, context, id, returned.get(), prefix);
             writer.markdown(prefix + "materials.md", "VERIFICATION_ORIGINALS_INDEX", id,
                     TaskHandoffMarkdown.materials(prefix, writer.entries()));
         }
-        for (UUID id : task.fields().uploadIds()) writeSupplement(writer, actor, id, "task/materials/", missing);
+        for (UUID id : task.fields().uploadIds()) writeSupplement(writer, actor, id, "task/materials/", taskGaps);
         writer.markdown("task.md", "TASK_INSTRUCTIONS", task.id(),
-                TaskHandoffMarkdown.task(task, context, engineering, missing, writer.entries()));
+                TaskHandoffMarkdown.task(task, context, engineering, taskGaps, writer.entries()));
+        missing.addAll(taskGaps);
     }
 
     private void writeResult(HandoffArchiveWriter writer, ActorContext actor, Context context, TaskVersion task,

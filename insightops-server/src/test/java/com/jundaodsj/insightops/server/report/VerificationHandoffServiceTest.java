@@ -295,6 +295,8 @@ class VerificationHandoffServiceTest {
         assertThat(new String(zip.get("result.md"), StandardCharsets.UTF_8)).contains(initialId.toString(), version.toString(),
                 "实际执行者", "外部执行者", "记录者", "基线标签", "候选标签", "仍无法判断", "未验证其他方法", "candidate.patch", sha(bytes));
         assertThat(new String(zip.get("task.md"), StandardCharsets.UTF_8)).contains("没有关联工程基线", previous.toString());
+        var handedOut = unzip(service.prepareExecution(actor,report,initialId));
+        assertThat(zip.get("task.md")).isEqualTo(handedOut.get("task.md"));
         assertThat(read(zip,"task/version.json").path("id").asText()).isEqualTo(initialId.toString());
         assertThat(read(zip,"execution/result.json").path("verificationVersionId").asText()).isEqualTo(version.toString());
         assertThat(read(zip,"manifest.json").path("taskVersionId").asText()).isEqualTo(initialId.toString());

@@ -443,7 +443,19 @@ class BusinessSystemDatabaseGateTest {
                 .extracting("code").contains("ENGINEERING_BASELINE_ONLY").doesNotContain("NO_EVIDENCE_SELECTED");
         var repeat=new SystemDecisionAssessmentService.Command(decision.requestId(),"changed","","",null,List.of(),null,next.baseline().id());
         assertThat(tx.execute(s->decisions.launch(ACTOR,false,AccessLevel.WORKSPACE_MEMBER,system,2,repeat,"trace")).runId()).isEqualTo(run.runId());
-        assertThat(workflows.find(run.runId()).orElseThrow().inputJson()).doesNotContain(next.baseline().id().toString());
+        var originalInputs = workflows.find(run.runId()).orElseThrow().inputJson();
+        assertThat(originalInputs).contains(id.toString()).doesNotContain(next.baseline().id().toString());
+        var useSecond = new SystemDecisionAssessmentService.Command(UUID.randomUUID(), "核对新版本", "", "", null,
+                List.of(), null, next.baseline().id());
+        assertThatThrownBy(() -> tx.execute(s -> decisions.launch(ACTOR, false, AccessLevel.WORKSPACE_MEMBER,
+                other, 1, useSecond, UUID.randomUUID().toString()))).hasMessageContaining("404");
+        var newRun = tx.execute(s -> decisions.launch(ACTOR, false, AccessLevel.WORKSPACE_MEMBER,
+                system, 2, useSecond, UUID.randomUUID().toString()));
+        var secondInputs = workflows.find(newRun.runId()).orElseThrow();
+        assertThat(secondInputs.entryQuestion()).contains("第二次", "different").doesNotContain(id.toString());
+        assertThat(json.readTree(secondInputs.inputJson()).at("/engineeringBaseline/baseline/id").asText())
+                .isEqualTo(next.baseline().id().toString());
+        assertThat(workflows.find(run.runId()).orElseThrow().inputJson()).isEqualTo(originalInputs);
     }
 
     @Test void modelSelectionSurvivesReplayQueueAndRetry() throws Exception {

@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -181,11 +182,9 @@ public class DurableChatRunExecutionService {
             guardrail.verifyCitationSources(loopResult.citations());
 
             ActorContext actor = new ActorContext(lease.ownerUserId(), lease.workspaceId());
-            String context = workflow != null && workflowGraphs.isSystemDecision(workflow)
-                    ? "\n系统档案、问题和补充说明属于用户自述。若冻结输入含工程基线，按事实种类、原件路径和行号说明项目事实。外部技术判断须有本次检索资料支持。"
-                        + "请区分事实与假设，只建议验证，未知阈值与成本待确定。\n"
-                    : userMemoryStore.prompt(actor, 20);
-            String systemPrompt = guardrail.researchSystemPrompt() + context + loopResult.systemPromptAppendix();
+            var linkedInputs = workflow == null ? Map.<String, Object>of() : workflowGraphs.linkedSystemInputs(workflow);
+            String systemPrompt = guardrail.researchSystemPrompt(linkedInputs,
+                    () -> userMemoryStore.prompt(actor, 20), loopResult.systemPromptAppendix());
             Completion completion = streamAnswer(
                     lease, guard, answer, systemPrompt, lease.contextualPrompt(),
                     loopResult.planningUsage(), preparation.researchModel());

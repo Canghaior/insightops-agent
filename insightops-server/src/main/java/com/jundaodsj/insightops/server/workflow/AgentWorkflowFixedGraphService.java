@@ -7,7 +7,6 @@ import com.jundaodsj.insightops.agent.application.AgentConditionalGraphStore;
 import com.jundaodsj.insightops.agent.application.AgentLoopAuditStore;
 import com.jundaodsj.insightops.agent.application.AgentOrchestrationStore;
 import com.jundaodsj.insightops.agent.application.AgentWorkflowRunStore;
-import com.jundaodsj.insightops.businesssystem.application.AssessmentType;
 import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import com.jundaodsj.insightops.model.application.AgentPlanningModelGateway.PlannedToolCall;
 import com.jundaodsj.insightops.model.application.ModelUsage;
@@ -90,10 +89,8 @@ public class AgentWorkflowFixedGraphService {
         return workflowRuns.find(runId);
     }
 
-    public boolean isSystemDecision(AgentWorkflowRunStore.WorkflowRun workflow) {
-        return workflow != null && workflow.businessSystemId() != null
-                && AssessmentType.SYSTEM_DECISION.name()
-                        .equals(readMap(workflow.inputJson()).get("assessmentType"));
+    public Map<String, Object> linkedSystemInputs(AgentWorkflowRunStore.WorkflowRun workflow) {
+        return workflow.businessSystemId() == null ? Map.of() : readMap(workflow.inputJson());
     }
 
     public AgentLoopService.LoopResult execute(

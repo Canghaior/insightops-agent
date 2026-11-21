@@ -39,6 +39,7 @@ public interface ReportReviewStore {
     Optional<Decision> decisionRequest(UUID reportId, UUID requestId);
     Optional<Verification> verification(UUID reportId, UUID versionId);
     boolean hasCorrection(UUID reportId, UUID versionId);
+    boolean isTaskResult(UUID reportId, UUID versionId);
     void addVerification(Context context, ActorContext actor, UUID id, UUID requestId,
                          UUID previousVersionId, int version, VerificationInput fields, String buildSummary);
     void addDecision(Context context, ActorContext actor, UUID id, UUID requestId, DecisionInput fields);

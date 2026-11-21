@@ -96,6 +96,11 @@ public class JdbcReportReviewStore implements ReportReviewStore {
                 .query((rs, n) -> verification(rs)).optional();
     }
 
+    @Override public boolean isTaskResult(UUID reportId, UUID versionId) {
+        return jdbc.sql("select exists(select 1 from report_engineering_task_result where report_id=? and verification_version_id=?)")
+                .params(reportId, versionId).query(Boolean.class).single();
+    }
+
     @Override public boolean hasCorrection(UUID reportId, UUID versionId) {
         return jdbc.sql("select exists(select 1 from report_verification where report_id=? and previous_version_id=?)")
                 .params(reportId, versionId).query(Boolean.class).single();

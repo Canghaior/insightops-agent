@@ -42,6 +42,15 @@ public class ReportReviewService {
 
     @Transactional
     public Verification record(ActorContext actor, UUID reportId, VerificationCommand cmd) {
+        return record(actor, reportId, cmd, false);
+    }
+
+    // EngineeringTaskService holds the same report lock and appends the task link in this transaction.
+    Verification recordForTask(ActorContext actor, UUID reportId, VerificationCommand cmd) {
+        return record(actor, reportId, cmd, true);
+    }
+
+    private Verification record(ActorContext actor, UUID reportId, VerificationCommand cmd, boolean taskResult) {
         var context = context(actor, reportId, true);
         if (cmd == null || cmd.requestId() == null || cmd.fields() == null) throw invalidRequest();
         var fields = validate(cmd.fields());
@@ -53,6 +62,9 @@ public class ReportReviewService {
         }
         int version = 1;
         if (cmd.previousVersionId() != null) {
+            if (!taskResult && store.isTaskResult(reportId, cmd.previousVersionId())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "请在单项任务中更正该执行结果，以保留任务版本和实际执行信息。");
+            }
             var previous = store.verification(reportId, cmd.previousVersionId()).orElseThrow(() ->
                     new IllegalArgumentException("要更正的记录不属于本报告。"));
             if (store.hasCorrection(reportId, previous.id())) throw new ResponseStatusException(
@@ -90,7 +102,7 @@ public class ReportReviewService {
                 new ResponseStatusException(HttpStatus.NOT_FOUND, "未找到可记录验证的业务系统报告。"));
     }
 
-    private static VerificationInput validate(VerificationInput f) {
+    static VerificationInput validate(VerificationInput f) {
         if (f.origin() == null || f.status() == null || f.impact() == null)
             throw new IllegalArgumentException("请选择建议来源、执行状态和对判断的影响。");
         boolean executed = f.status() == Execution.EXECUTED;

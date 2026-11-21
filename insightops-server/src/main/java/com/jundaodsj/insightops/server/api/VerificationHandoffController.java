@@ -1,5 +1,6 @@
 package com.jundaodsj.insightops.server.api;
 
+import com.jundaodsj.insightops.infrastructure.report.TemporaryReportArchive;
 import com.jundaodsj.insightops.server.auth.CurrentAccount;
 import com.jundaodsj.insightops.server.report.VerificationHandoffService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -30,14 +31,28 @@ public class VerificationHandoffController {
     public void download(@PathVariable UUID reportId, @PathVariable UUID versionId,
                          HttpServletRequest request, HttpServletResponse response) throws IOException {
         var actor = CurrentAccount.actor(request);
+        send(response, "insightops-verification-" + versionId + ".zip", () -> service.prepare(actor, reportId, versionId));
+    }
+
+    @GetMapping("/api/v1/reports/{reportId}/tasks/versions/{taskVersionId}/execution.zip")
+    public void execution(@PathVariable UUID reportId, @PathVariable UUID taskVersionId,
+                          HttpServletRequest request, HttpServletResponse response) throws IOException {
+        var actor = CurrentAccount.actor(request);
+        send(response, "insightops-task-" + taskVersionId + ".zip", () -> service.prepareExecution(actor, reportId, taskVersionId));
+    }
+
+    @FunctionalInterface
+    private interface PendingArchive { TemporaryReportArchive prepare() throws IOException; }
+
+    private void send(HttpServletResponse response, String filename, PendingArchive pending) throws IOException {
         if (!downloads.tryAcquire())
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "已有两个交接包正在生成或下载，请稍后重试。");
-        try (var archive = service.prepare(actor, reportId, versionId)) {
+        try (var archive = pending.prepare()) {
             response.setContentType("application/zip");
             response.setContentLengthLong(archive.size());
             response.setHeader(HttpHeaders.CACHE_CONTROL, "private, no-store");
             response.setHeader(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
-                    .filename("insightops-verification-" + versionId + ".zip").build().toString());
+                    .filename(filename).build().toString());
             archive.copyTo(response.getOutputStream());
         } finally {
             downloads.release();

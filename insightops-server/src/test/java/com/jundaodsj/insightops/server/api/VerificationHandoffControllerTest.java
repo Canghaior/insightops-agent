@@ -42,6 +42,9 @@ class VerificationHandoffControllerTest {
             try {
                 assertThat(preparing.await(5, TimeUnit.SECONDS)).isTrue();
                 assertThatThrownBy(this::download).isInstanceOf(ResponseStatusException.class).hasMessageContaining("503");
+                assertThatThrownBy(() -> controller.execution(report,version,request(),new MockHttpServletResponse()))
+                        .isInstanceOf(ResponseStatusException.class).hasMessageContaining("503");
+                verify(service,never()).prepareExecution(any(),any(),any());
                 verify(service, times(2)).prepare(account.actor(), report, version);
             } finally {
                 finish.countDown();
@@ -71,6 +74,16 @@ class VerificationHandoffControllerTest {
         var response = new MockHttpServletResponse();
         controller.download(report, version, request(), response);
         return response;
+    }
+
+    @Test void downloadsTheExactTaskEditionWithPrivateAttachmentHeaders() throws IOException {
+        when(service.prepareExecution(account.actor(),report,version)).thenAnswer(ignored -> archive());
+        var response = new MockHttpServletResponse();
+        controller.execution(report,version,request(),response);
+        assertThat(response.getContentType()).isEqualTo("application/zip");
+        assertThat(response.getHeader("Content-Disposition")).contains("insightops-task-" + version + ".zip");
+        assertThat(response.getHeader("Cache-Control")).contains("no-store");
+        assertThat(response.getContentAsByteArray()).isNotEmpty().hasSize((int)response.getContentLengthLong());
     }
 
     private MockHttpServletRequest request() {

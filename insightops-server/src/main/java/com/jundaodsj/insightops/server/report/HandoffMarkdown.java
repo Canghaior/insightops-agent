@@ -13,7 +13,8 @@ final class HandoffMarkdown {
     private HandoffMarkdown() { }
 
     static String overview(String title, Context context, Verification verification, BuildEvidenceComparison comparison, List<Decision> decisions,
-                           List<VerificationHandoffService.Missing> missing, List<HandoffArchiveWriter.Entry> entries) {
+                           List<VerificationHandoffService.Missing> missing, List<HandoffArchiveWriter.Entry> entries,
+                           boolean additionalEvidence) {
         var f = verification.fields();
         var text = new StringBuilder("# 验证交接包\n\n");
         block(text, title);
@@ -70,7 +71,8 @@ final class HandoffMarkdown {
         text.append("\n## 已有人工决定\n\n");
         if (decisions.isEmpty()) text.append("截至导出时，没有已保存的人工决定引用此验证版本。\n\n");
         else {
-            text.append("下列决定明确引用此版本。每项决定的其他依据也按已保存的版本 ID 列出。包内原件仅来自选定的验证版本。\n\n");
+            text.append("下列决定明确引用此版本。每项决定的其他依据也按已保存的版本 ID 列出。");
+            text.append(additionalEvidence ? "本节列出的构建与补充资料按选定的验证版本取件。\n\n" : "包内原件仅来自选定的验证版本。\n\n");
             for (var decision : decisions) {
                 field(text, "决定及决定者", decision.fields().choice() + " · " + decision.author().name() + " · " + decision.createdAt());
                 field(text, "理由", decision.fields().reason());
@@ -168,7 +170,7 @@ final class HandoffMarkdown {
         return value == null || value.toString().isBlank() ? "未知" : value.toString();
     }
 
-    private static void field(StringBuilder text, String label, Object content) {
+    static void field(StringBuilder text, String label, Object content) {
         text.append(label).append("\n\n");
         block(text, value(content));
     }

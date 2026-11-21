@@ -4,9 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.businesssystem.application.EngineeringBaselineStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
+import com.jundaodsj.insightops.infrastructure.report.TemporaryReportArchive;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeFileStorage;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeUploadStore;
 import com.jundaodsj.insightops.report.application.BuildEvidence.*;
+import com.jundaodsj.insightops.report.application.EngineeringTaskStore.*;
 import com.jundaodsj.insightops.report.application.ReportDeliveryStore.ReportRecord;
 import com.jundaodsj.insightops.report.application.ReportDeliveryStore.ResearchSnapshot;
 import com.jundaodsj.insightops.report.application.ReportReviewStore;
@@ -42,8 +44,9 @@ class VerificationHandoffServiceTest {
     private final KnowledgeFileStorage storage = mock(KnowledgeFileStorage.class);
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
     private final EngineeringBaselineStore baselines = mock(EngineeringBaselineStore.class);
+    private final EngineeringTaskService tasks = mock(EngineeringTaskService.class);
     private final VerificationHandoffService service = new VerificationHandoffService(reviews,reports,builds,uploads,storage,json,
-            new FrozenBaselineHandoff(baselines, json));
+            new FrozenBaselineHandoff(baselines, json), tasks);
     private final ActorContext actor = new ActorContext(UUID.randomUUID(),UUID.randomUUID());
     private final UUID report = UUID.randomUUID(), system = UUID.randomUUID(), run = UUID.randomUUID();
     private final UUID version = UUID.randomUUID(), previous = UUID.randomUUID();
@@ -223,6 +226,132 @@ class VerificationHandoffServiceTest {
         return snapshot;
     }
 
+    @Test void taskPackageIncludesTheExactReportBaselineAndEverySelectedVersionAttachmentAndBuild() throws Exception {
+        UUID baselineId = UUID.randomUUID(), taskId = UUID.randomUUID(), note = UUID.randomUUID();
+        byte[] oldPom = "<project>revision-one</project>".getBytes(StandardCharsets.UTF_8);
+        var snapshot = freeze(baselineId, system, "pom.xml", sha(oldPom));
+        when(baselines.find(actor,system,baselineId)).thenReturn(Optional.of(snapshot));
+        when(baselines.original(actor,system,baselineId)).thenReturn(Optional.of(oldPom));
+        var attachments = List.of(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+        var left = build(Role.BASELINE, Status.PASSED);
+        var right = build(Role.CANDIDATE, Status.ERROR);
+        saveVersion(left, right, attachments);
+        for (int i = 0; i < attachments.size(); i++) allowFile(attachments.get(i), "验证依据-" + i + ".md", new byte[]{(byte)i});
+        allowFile(note, "范围.md", new byte[]{9});
+        var pinned = task(taskId, baselineId, List.of(version), List.of(note));
+        when(tasks.version(actor,report,taskId)).thenReturn(pinned);
+
+        var zip = unzip(service.prepareExecution(actor,report,taskId));
+        String folder = "basis/" + version + "/";
+        var guide = new String(zip.get("task.md"), StandardCharsets.UTF_8);
+        assertThat(guide).contains("允许修改或检查的范围", "只验证主人查询", "停止条件", "返回", "建议提出者", "v1",
+                folder + "comparison/results.md", "task/materials/" + note, "仍未定位", "原报告摘录，起始行 1");
+        assertThat(new String(zip.get("task/suggestion.md"), StandardCharsets.UTF_8)).isEqualTo(pinned.fields().excerpt());
+        assertThat(zip.get("engineering-baseline/" + baselineId + "/pom.xml")).isEqualTo(oldPom);
+        assertThat(zip).containsKeys(folder + "version.json", folder + "comparison/baseline.json", folder + "comparison/candidate.json",
+                folder + HandoffArchiveWriter.originalPath(Role.BASELINE, left.files().getFirst()),
+                folder + HandoffArchiveWriter.originalPath(Role.CANDIDATE, right.files().getFirst()), "task/materials/" + note + "/范围.md");
+        for (int i = 0; i < attachments.size(); i++) {
+            String path = folder + "supplementary/" + attachments.get(i) + "/验证依据-" + i + ".md";
+            assertThat(guide).contains(path);
+            assertThat(zip.get(path)).isEqualTo(new byte[]{(byte)i});
+        }
+        var manifest = read(zip, "manifest.json");
+        assertThat(manifest.path("packageType").asText()).isEqualTo("TASK_EXECUTION");
+        assertThat(manifest.path("taskVersionId").asText()).isEqualTo(taskId.toString());
+        assertThat(manifest.at("/engineeringBaseline/id").asText()).isEqualTo(baselineId.toString());
+        assertThat(read(zip, folder + "comparison/diff.json").toString()).contains("Example.java:9", "ERROR");
+        String index = new String(zip.get(folder + "materials.md"),StandardCharsets.UTF_8);
+        assertThat(index).contains(HandoffArchiveWriter.originalPath(Role.BASELINE, left.files().getFirst()),
+                HandoffArchiveWriter.originalPath(Role.CANDIDATE, right.files().getFirst()), "验证依据-3.md");
+        assertThat(read(zip,"task/version.json").at("/fields/verificationVersionIds/0").asText()).isEqualTo(version.toString());
+        verify(baselines, never()).list(any(),any());
+        verify(reviews, never()).verifications(any());
+    }
+
+    @Test void resultPackageKeepsItsTaskAndVerificationVersionsAndReturnsTheRecordedPatch() throws Exception {
+        UUID initialId = UUID.randomUUID(), newerId = UUID.randomUUID(), returnedNote = UUID.randomUUID();
+        var initial = task(initialId, null, List.of(previous), List.of());
+        when(tasks.version(actor,report,initialId)).thenReturn(initial);
+        var originalFields = new VerificationInput("旧观察", "保存于先前验证", Origin.HUMAN_OR_TOOL, Execution.BLOCKED, "",
+                "", "", Impact.INCONCLUSIVE, "仍无法执行", "缺少 JDK", List.of());
+        var basis = new Verification(previous, null, 1, originalFields, author, Instant.EPOCH, null);
+        when(reviews.verification(report,previous)).thenReturn(Optional.of(basis));
+        var bytes = "diff --git a/pom.xml b/pom.xml\n".getBytes(StandardCharsets.UTF_8);
+        var info = new PatchInfo("candidate.patch", bytes.length, sha(bytes));
+        var result = new TaskResult(initialId, version, Instant.EPOCH, "基线标签", "候选标签", "未验证其他方法", info, author, Instant.EPOCH);
+        when(tasks.resultForVerification(actor,report,version)).thenReturn(Optional.of(result));
+        when(tasks.patch(actor,report,version)).thenReturn(bytes);
+        saveVersion(build(Role.BASELINE, Status.PASSED), build(Role.CANDIDATE, Status.ERROR), List.of(returnedNote));
+        allowFile(returnedNote, "返回记录.md", new byte[]{7});
+        var relevant = new Decision(UUID.randomUUID(),new DecisionInput("暂缓合并","此版报错","定位后重议",List.of(version)),author,Instant.EPOCH);
+        var other = new Decision(UUID.randomUUID(),new DecisionInput("其他决定","其他版本","之后",List.of(previous)),author,Instant.EPOCH);
+        when(reviews.decisions(report)).thenReturn(List.of(other, relevant));
+        // A new task edition exists. Export still follows the result's stored key.
+        when(tasks.version(actor,report,newerId)).thenReturn(task(newerId, null, List.of(), List.of()));
+
+        var zip = export();
+        assertThat(zip.get("execution/patch/candidate.patch")).isEqualTo(bytes);
+        assertThat(new String(zip.get("result.md"), StandardCharsets.UTF_8)).contains(initialId.toString(), version.toString(),
+                "实际执行者", "外部执行者", "记录者", "基线标签", "候选标签", "仍无法判断", "未验证其他方法", "candidate.patch", sha(bytes));
+        assertThat(new String(zip.get("task.md"), StandardCharsets.UTF_8)).contains("没有关联工程基线", previous.toString());
+        assertThat(read(zip,"task/version.json").path("id").asText()).isEqualTo(initialId.toString());
+        assertThat(read(zip,"execution/result.json").path("verificationVersionId").asText()).isEqualTo(version.toString());
+        assertThat(read(zip,"manifest.json").path("taskVersionId").asText()).isEqualTo(initialId.toString());
+        assertThat(read(zip,"decisions.json").toString()).contains(relevant.id().toString()).doesNotContain(other.id().toString());
+        assertThat(zip).containsKeys("basis/" + previous + "/version.json", "supplementary/" + returnedNote + "/返回记录.md");
+        assertThat(zip.get("report/original.md")).isEqualTo("# 已存报告\r\n原始字节\n".getBytes(StandardCharsets.UTF_8));
+        assertThat(new String(zip.get("README.md"), StandardCharsets.UTF_8)).contains("task.md", "result.md");
+        verify(tasks,never()).version(actor,report,newerId);
+        verify(reviews,never()).verifications(any());
+
+        when(tasks.patch(actor,report,version)).thenReturn(new byte[]{7});
+        assertThatThrownBy(this::export).hasMessageContaining("409").hasMessageContaining("SHA-256");
+    }
+
+    @Test void wrongActorWrongFrozenReferenceAndInvisibleEvidenceCannotBeExportedSilently() throws Exception {
+        UUID taskId = UUID.randomUUID(), hidden = UUID.randomUUID();
+        var outsider = new ActorContext(UUID.randomUUID(),actor.workspaceId());
+        assertThatThrownBy(() -> service.prepareExecution(outsider,report,taskId)).hasMessageContaining("404");
+        verifyNoInteractions(tasks, uploads, storage);
+        when(tasks.version(actor,report,taskId)).thenReturn(task(taskId, UUID.randomUUID(), List.of(), List.of(hidden)));
+        assertThatThrownBy(() -> service.prepareExecution(actor,report,taskId)).hasMessageContaining("409");
+        verifyNoInteractions(uploads, storage);
+        when(tasks.version(actor,report,taskId)).thenReturn(task(taskId, null, List.of(), List.of(hidden)));
+        var zip = unzip(service.prepareExecution(actor,report,taskId));
+        assertThat(read(zip,"manifest.json").path("missing").toString()).contains(hidden.toString(),"没有可取得");
+        assertThat(new String(zip.get("task.md"),StandardCharsets.UTF_8)).contains("本次交接缺项",hidden.toString());
+        assertThat(zip.keySet()).noneMatch(p -> p.startsWith("task/materials/"));
+        verifyNoInteractions(storage);
+        when(tasks.version(actor,report,taskId)).thenReturn(task(taskId, null, List.of(UUID.randomUUID()), List.of()));
+        assertThatThrownBy(() -> service.prepareExecution(actor,report,taskId)).hasMessageContaining("404");
+    }
+
+    private TaskVersion task(UUID id, UUID baselineId, List<UUID> basis, List<UUID> materials) {
+        var fields = new TaskFields(Origin.HUMAN_OR_TOOL, "外部工程师", "# 原报告", Readiness.READY,
+                "两例能否复现？", "原始 XML", "只验证主人查询", "其他模块", "见归档", "可能影响查询",
+                "仍未定位", "定向测试", "能读到 XML 和退出码", "依赖缺失即停止", "隔离 H2", "", basis, materials);
+        return new TaskVersion(id, UUID.randomUUID(), null, 1, fields, report, run, system, 3, baselineId,
+                baselineId == null ? null : 1, 1, author, Instant.EPOCH);
+    }
+
+    @Test void taskIncludesASelectedEarlierExecutionsPatchWithoutPullingItsWholeTaskGraph() throws Exception {
+        UUID taskId = UUID.randomUUID(), earlierId = UUID.randomUUID();
+        when(tasks.version(actor,report,taskId)).thenReturn(task(taskId, null, List.of(version), List.of()));
+        saveVersion(null,null,List.of());
+        byte[] patch = "diff --git a/a b/a\n".getBytes(StandardCharsets.UTF_8);
+        var returned = new TaskResult(earlierId, version, Instant.EPOCH, "old", "candidate", "其他模块未运行",
+                new PatchInfo("previous.patch", patch.length, sha(patch)), author, Instant.EPOCH);
+        when(tasks.resultForVerification(actor,report,version)).thenReturn(Optional.of(returned));
+        when(tasks.patch(actor,report,version)).thenReturn(patch);
+        var zip = unzip(service.prepareExecution(actor,report,taskId));
+        String prefix = "basis/" + version + "/";
+        assertThat(zip.get(prefix + "execution/patch/previous.patch")).isEqualTo(patch);
+        assertThat(read(zip,prefix + "execution/result.json").path("taskVersionId").asText()).isEqualTo(earlierId.toString());
+        assertThat(new String(zip.get(prefix + "materials.md"),StandardCharsets.UTF_8)).contains("execution/patch/previous.patch", sha(patch));
+        verify(tasks,never()).version(actor,report,earlierId);
+    }
+
     private void reportWithInputs(Map<String,Object> inputs) {
         var research = new ResearchSnapshot(run,"问题","冻结回答",inputs,List.of(),List.of(),List.of(),List.of(),Instant.EPOCH,Instant.EPOCH);
         when(reports.find(actor,report)).thenReturn(new ReportRecord(report,"冻结报告","RESEARCH",Instant.EPOCH,
@@ -260,12 +389,16 @@ class VerificationHandoffServiceTest {
         var row = new KnowledgeUploadStore.UploadRecord(id,UUID.randomUUID(),UUID.randomUUID(),"project",actor.userId(),
                 "author",name,"text/markdown",bytes.length,sha(bytes),"PRIVATE","SUCCEEDED",1,null,null,null,null,Instant.EPOCH,Instant.EPOCH);
         when(uploads.findVisible(actor.workspaceId(),actor.userId(),false,id)).thenReturn(Optional.of(row));
-        when(storage.open(id+".bin")).thenReturn(new ByteArrayInputStream(bytes));
+        when(storage.open(id+".bin")).thenAnswer(ignored -> new ByteArrayInputStream(bytes));
     }
 
     private Map<String, byte[]> export() throws Exception {
+        return unzip(service.prepare(actor,report,version));
+    }
+
+    private Map<String, byte[]> unzip(TemporaryReportArchive archive) throws Exception {
         var zipped = new ByteArrayOutputStream();
-        try (var archive = service.prepare(actor,report,version)) {
+        try (archive) {
             archive.copyTo(zipped);
             assertThat((long)zipped.size()).isEqualTo(archive.size());
         }
@@ -274,6 +407,13 @@ class VerificationHandoffServiceTest {
             for (var item = input.getNextEntry(); item != null; item = input.getNextEntry()) {
                 assertThat(entries.put(item.getName(),input.readAllBytes())).isNull();
             }
+        }
+        var manifest = read(entries, "manifest.json");
+        assertThat(manifest.path("entries")).hasSize(entries.size() - 1);
+        for (var entry : manifest.path("entries")) {
+            byte[] bytes = entries.get(entry.path("path").asText());
+            assertThat(bytes).isNotNull().hasSize(entry.path("size").asInt());
+            assertThat(sha(bytes)).isEqualTo(entry.path("sha256").asText());
         }
         return entries;
     }

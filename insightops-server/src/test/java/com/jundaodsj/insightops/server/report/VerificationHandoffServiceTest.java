@@ -2,11 +2,13 @@ package com.jundaodsj.insightops.server.report;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jundaodsj.insightops.businesssystem.application.EngineeringBaselineStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeFileStorage;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeUploadStore;
 import com.jundaodsj.insightops.report.application.BuildEvidence.*;
 import com.jundaodsj.insightops.report.application.ReportDeliveryStore.ReportRecord;
+import com.jundaodsj.insightops.report.application.ReportDeliveryStore.ResearchSnapshot;
 import com.jundaodsj.insightops.report.application.ReportReviewStore;
 import com.jundaodsj.insightops.report.application.ReportReviewStore.*;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,7 +41,9 @@ class VerificationHandoffServiceTest {
     private final KnowledgeUploadStore uploads = mock(KnowledgeUploadStore.class);
     private final KnowledgeFileStorage storage = mock(KnowledgeFileStorage.class);
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
-    private final VerificationHandoffService service = new VerificationHandoffService(reviews,reports,builds,uploads,storage,json);
+    private final EngineeringBaselineStore baselines = mock(EngineeringBaselineStore.class);
+    private final VerificationHandoffService service = new VerificationHandoffService(reviews,reports,builds,uploads,storage,json,
+            new FrozenBaselineHandoff(baselines, json));
     private final ActorContext actor = new ActorContext(UUID.randomUUID(),UUID.randomUUID());
     private final UUID report = UUID.randomUUID(), system = UUID.randomUUID(), run = UUID.randomUUID();
     private final UUID version = UUID.randomUUID(), previous = UUID.randomUUID();
@@ -122,7 +126,7 @@ class VerificationHandoffServiceTest {
         assertThatThrownBy(() -> service.prepare(actor,report,version)).isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("404");
         verify(reports, never()).find(any(),any());
-        verifyNoInteractions(uploads,builds,storage);
+        verifyNoInteractions(uploads,builds,storage,baselines);
     }
 
     @Test void changedOriginalFailsBeforeAFileCanBeReturned() throws Exception {
@@ -162,6 +166,67 @@ class VerificationHandoffServiceTest {
         assertThat(HandoffArchiveWriter.leaf("LPT¹.txt","attachment.txt")).isEqualTo("attachment.txt");
         assertThat(HandoffArchiveWriter.leaf("CON .md","attachment.md")).isEqualTo("attachment.md");
         assertThat(HandoffArchiveWriter.leaf("资".repeat(90)+".md","attachment.md")).isEqualTo("attachment.md");
+    }
+
+    @Test void baselineOriginalComesFromFrozenIdWithMatchingProvenanceAndSize() throws Exception {
+        saveVersion(null,null,List.of());
+        var id = UUID.randomUUID();
+        byte[] pom = "<project><version>old</version></project>".getBytes(StandardCharsets.UTF_8);
+        var snapshot = freeze(id, system, "pom.xml", sha(pom));
+        when(baselines.find(actor, system, id)).thenReturn(Optional.of(snapshot));
+        when(baselines.original(actor, system, id)).thenReturn(Optional.of(pom));
+        var entries = export();
+        String path = "engineering-baseline/" + id + "/pom.xml";
+        assertThat(entries.get(path)).isEqualTo(pom);
+        var manifest = read(entries, "manifest.json");
+        assertThat(manifest.at("/engineeringBaseline/id").asText()).isEqualTo(id.toString());
+        assertThat(manifest.at("/engineeringBaseline/path").asText()).isEqualTo(path);
+        assertThat(manifest.at("/engineeringBaseline/size").asLong()).isEqualTo(pom.length);
+        assertThat(manifest.at("/engineeringBaseline/sha256").asText()).isEqualTo(sha(pom));
+        assertThat(read(entries,"report/engineering-baseline.json").at("/baseline/id").asText()).isEqualTo(id.toString());
+        assertThat(new String(entries.get("README.md"),StandardCharsets.UTF_8)).contains(path,"外部执行","候选构建","v1");
+        verify(baselines, never()).list(any(),any());
+    }
+
+    @Test void missingInvisibleOrDamagedBaselineBlocksThePreviouslyFrozenDownload() throws Exception {
+        saveVersion(null,null,List.of());
+        var id = UUID.randomUUID();
+        byte[] original = {1,2,3};
+        var snapshot = freeze(id, system, "baseline.zip", sha(original));
+        assertThatThrownBy(this::export).hasMessageContaining("原件已缺失");
+        verify(baselines,never()).original(any(),any(),any());
+        when(baselines.find(actor, system, id)).thenReturn(Optional.of(snapshot));
+        assertThatThrownBy(this::export).hasMessageContaining("409").hasMessageContaining("原件");
+        when(baselines.original(actor, system, id)).thenReturn(Optional.of(new byte[] {3,2,1}));
+        assertThatThrownBy(this::export).hasMessageContaining("409").hasMessageContaining("SHA-256");
+        freeze(id, system, "baseline.zip", sha(new byte[]{4,5}));
+        assertThatThrownBy(this::export).hasMessageContaining("原报告冻结的版本或 SHA-256");
+    }
+
+    @Test void malformedAssociationCannotTurnIntoAnUnlinkedLegacyReport() throws Exception {
+        saveVersion(null,null,List.of());
+        var originalLegacy = export();
+        assertThat(read(originalLegacy,"manifest.json").has("engineeringBaseline")).isFalse();
+        assertThat(originalLegacy).doesNotContainKey("report/engineering-baseline.json");
+        freeze(UUID.randomUUID(), UUID.randomUUID(), "pom.xml", sha(new byte[]{1}));
+        assertThatThrownBy(this::export).hasMessageContaining("409").hasMessageContaining("归属");
+        reportWithInputs(Map.of("engineeringBaseline", "incomplete"));
+        assertThatThrownBy(this::export).hasMessageContaining("409");
+        verifyNoInteractions(baselines);
+    }
+
+    private EngineeringBaselineStore.Snapshot freeze(UUID id, UUID ownerSystem, String name, String hash) {
+        var summary = new EngineeringBaselineStore.Summary(id,ownerSystem,1,"保存版本",Instant.EPOCH);
+        var content = new EngineeringBaselineStore.Content("保存版本","","",null,null,List.of(),name,hash);
+        var snapshot = new EngineeringBaselineStore.Snapshot(summary,content);
+        reportWithInputs(Map.of("engineeringBaseline", json.valueToTree(snapshot)));
+        return snapshot;
+    }
+
+    private void reportWithInputs(Map<String,Object> inputs) {
+        var research = new ResearchSnapshot(run,"问题","冻结回答",inputs,List.of(),List.of(),List.of(),List.of(),Instant.EPOCH,Instant.EPOCH);
+        when(reports.find(actor,report)).thenReturn(new ReportRecord(report,"冻结报告","RESEARCH",Instant.EPOCH,
+                Instant.EPOCH,List.of(),List.of(),0,0,List.of(),"# 原报告",Instant.EPOCH,research));
     }
 
     private void saveVersion(Batch left, Batch right, List<UUID> fileIds) {

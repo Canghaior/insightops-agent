@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.server.report;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.infrastructure.report.TemporaryReportArchive;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeFileStorage;
@@ -24,7 +25,6 @@ import java.io.UncheckedIOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -34,22 +34,26 @@ public class VerificationHandoffService {
     private final BuildEvidenceService builds;
     private final KnowledgeUploadStore uploads;
     private final KnowledgeFileStorage storage;
+    private final FrozenBaselineHandoff frozenBaseline;
     private final ObjectMapper json;
 
     public VerificationHandoffService(ReportReviewStore reviews, ReportService reports, BuildEvidenceService builds,
-                                      KnowledgeUploadStore uploads, KnowledgeFileStorage storage, ObjectMapper json) {
+                                      KnowledgeUploadStore uploads, KnowledgeFileStorage storage, ObjectMapper json,
+                                      FrozenBaselineHandoff frozenBaseline) {
         this.reviews = reviews;
         this.reports = reports;
         this.builds = builds;
         this.uploads = uploads;
         this.storage = storage;
         this.json = json;
+        this.frozenBaseline = frozenBaseline;
     }
 
     record Missing(String category, String reference, String reason) { }
     record Manifest(int formatVersion, Instant exportedAt, Context report, UUID verificationVersionId, int version,
                     UUID baselineBuildId, UUID candidateBuildId, List<Missing> missing,
-                    List<HandoffArchiveWriter.Entry> entries) { }
+                    List<HandoffArchiveWriter.Entry> entries,
+                    @JsonInclude(JsonInclude.Include.NON_NULL) FrozenBaselineHandoff.Original engineeringBaseline) { }
     private record ParsedImport(Summary summary, Metadata userDeclarations, BuildRecord commandRecord, LogFacts log,
                                 List<ExcludedMethod> excludedMethodsFromManifest, List<EvidenceFile> files, List<String> warnings) { }
 
@@ -69,11 +73,7 @@ public class VerificationHandoffService {
             var writer = new HandoffArchiveWriter(zip, json.writerWithDefaultPrettyPrinter());
             var missing = new ArrayList<Missing>();
             writer.markdown("report/original.md", "ORIGINAL_REPORT", reportId, report.markdown());
-            if (report.research() != null && report.research().inputs().get("engineeringBaseline") instanceof Map<?,?> baseline) {
-                writer.json("report/engineering-baseline.json", "FROZEN_REPORT_BASELINE", reportId, baseline);
-                writer.markdown("report/baseline-scope.md", "BASELINE_SCOPE", versionId,
-                        "此工程基线来自原报告的启动输入。所选验证版本的实际执行环境和构建引用请见 verification/version.json。");
-            }
+            var engineering = frozenBaseline.write(writer, actor, context, report);
             writer.json("verification/version.json", "VERIFICATION_VERSION", versionId, version);
             writer.json("decisions.json", "DECISIONS_REFERENCING_VERSION", versionId, decisions);
             BuildEvidenceComparison comparison = null;
@@ -91,9 +91,10 @@ public class VerificationHandoffService {
             }
             for (UUID uploadId : fields.uploadIds()) writeSupplement(writer, actor, uploadId, missing);
             writer.markdown("README.md", "HANDOFF_GUIDE", versionId,
-                    HandoffMarkdown.overview(report.title(), context, version, comparison, decisions, missing, writer.entries()));
+                    HandoffMarkdown.overview(report.title(), context, version, comparison, decisions, missing, writer.entries())
+                            + (engineering == null ? "" : engineering.overview()));
             writer.json("manifest.json", "MANIFEST", versionId, new Manifest(1,Instant.now(),context,versionId,
-                    version.version(),fields.baselineBuildId(),fields.candidateBuildId(),List.copyOf(missing),writer.entries()));
+                    version.version(),fields.baselineBuildId(),fields.candidateBuildId(),List.copyOf(missing),writer.entries(),engineering));
         });
         // A failed transaction completion can prevent the controller from ever receiving this handle.
         if (TransactionSynchronizationManager.isSynchronizationActive()) {

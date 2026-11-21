@@ -6,6 +6,7 @@ import {
   availableSystemUploads, backgroundFields, createSystem, getSystem, listSystems, systemHistory, updateSystem,
   type BusinessSystem, type SystemAttachment, type SystemBackground, type SystemRun, type SystemSummary,
 } from '@/api/businessSystems'
+import EngineeringBaselinePanel from '@/components/EngineeringBaselinePanel.vue'
 import SystemBackgroundPanel from '@/components/SystemBackground.vue'
 
 const route = useRoute()
@@ -158,6 +159,7 @@ async function save() {
       </form>
       <template v-else-if="detail">
         <div class="panel"><SystemBackgroundPanel :system="detail" /></div>
+        <EngineeringBaselinePanel :key="detail.id" :system-id="detail.id" />
         <section class="panel history">
           <h3>评估历史</h3>
           <p v-if="historyError" role="alert">{{ historyError }} <button class="text-button" @click="history(page)">重试</button></p>

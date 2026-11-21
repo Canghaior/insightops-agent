@@ -86,7 +86,11 @@ public class ResearchReportService {
         // Keep the model's uncertainty section verbatim; never replace it with an inferred all-clear.
         var matcher = java.util.regex.Pattern.compile("(?m)^#{1,6}\\s*.*尚未确认事项[^\\n]*\\n").matcher(run.answer());
         if (matcher.find()) uncertainties.add(run.answer().substring(matcher.end()).strip());
-        if (run.citationDetails().isEmpty()) uncertainties.add("没有结构化引用，关键事实尚需核查。");
+        if (run.citationDetails().isEmpty()) {
+            uncertainties.add(inputs.get("engineeringBaseline") instanceof Map<?, ?>
+                    ? "工程事实可按冻结基线中的原件位置核对。缺少外部检索引用，外部适用性仍待查证。"
+                    : "没有结构化引用，关键事实尚需核查。");
+        }
         uncertainties.add(decision ? "客户系统的行为、根因和方案效果仍待实际验证。"
                 : "研究基于获取到的资料，未运行你的业务项目验证；不构成兼容性保证。");
         var snapshot = new ReportDeliveryStore.ResearchSnapshot(runId, run.question(), run.answer(), inputs,
@@ -152,7 +156,7 @@ public class ResearchReportService {
         if (decision || snapshot.inputs().containsKey("targetVersion")) {
             field(result, "评估类型", decision ? "系统决策评估" : "版本升级评估");
         }
-        if (system != null) result.append("\n### 本次工程基线\n\n").append(com.jundaodsj.insightops.server.businesssystem.EngineeringBaselineText.render(snapshot.inputs(), json)).append("\n");
+        if (system != null || decision || snapshot.inputs().containsKey("targetVersion")) result.append("\n### 本次工程基线\n\n").append(com.jundaodsj.insightops.server.businesssystem.EngineeringBaselineText.render(snapshot.inputs(), json)).append("\n");
         snapshot.inputs().forEach((key, value) -> {
             if ("assessmentType".equals(key) || "engineeringBaseline".equals(key)) return;
             if (system != null && List.of("systemSnapshot", "businessProject", "uploadIds").contains(key)) return;
@@ -183,7 +187,13 @@ public class ResearchReportService {
                     .append(" 对本项目的影响。\n");
         } else if (!decision) result.append("\n原始研究问题：\n\n").append(snapshot.question());
         result.append("\n\n## 来源依据（引用快照）\n\n");
-        if (decision && snapshot.citations().isEmpty()) result.append("本次没有取得可引用的资料，判断仅依据用户自述，需进一步验证。\n");
+        if (snapshot.citations().isEmpty()) {
+            if (snapshot.inputs().get("engineeringBaseline") instanceof Map<?, ?>) {
+                result.append("本次没有外部检索引用。项目侧事实可追溯到本次冻结的工程基线，请按上方原件与行号核对。\n");
+            } else if (decision) {
+                result.append("本次没有取得可引用的资料，判断仅依据用户自述，需进一步验证。\n");
+            }
+        }
         for (var citation : snapshot.citations()) {
             result.append("- [").append(citation.label()).append("] ").append(citation.title())
                     .append(" · ").append(citation.heading() == null ? "" : citation.heading())

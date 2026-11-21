@@ -374,6 +374,7 @@ onUnmounted(() => {
             <details v-if="engineering"><summary>本次工程基线 v{{ engineering.baseline.version }} · {{ engineering.baseline.label }}</summary><EngineeringBaselineFacts :content="engineering.content" :saved="engineering.baseline" /></details>
             <p v-else>本次评估未关联工程基线。</p>
           </div>
+          <p v-else-if="assessmentType && workflowRun?.runId === selectedRun.id">本次评估未关联工程基线。</p>
           <ResearchResultActions
             :run-id="selectedRun.id" :can-save="selectedRun.status === 'SUCCEEDED' && !!selectedRun.answer"
             :repeat-url="repeatUrl"

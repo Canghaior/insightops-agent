@@ -40,6 +40,7 @@ public class ResearchEvidenceQuality {
         }
         boolean decision = AssessmentType.SYSTEM_DECISION.name()
                 .equals(inputs.get("assessmentType")) && inputs.containsKey("systemSnapshot");
+        boolean hasBaseline = inputs.get("engineeringBaseline") instanceof Map<?, ?>;
         Map<String, Reason> reasons = new LinkedHashMap<>();
         boolean insufficient = false;
         String target = String.valueOf(inputs.getOrDefault("targetVersion", ""));
@@ -87,11 +88,18 @@ public class ResearchEvidenceQuality {
             }
         }
         if (decision && !inputs.containsKey("projectId") && inputs.get("uploadIds") instanceof List<?> files && files.isEmpty()) {
-            add(reasons, "NO_EVIDENCE_SELECTED", "本次未选框架或资料，没有外部资料依据。请优先补充与问题直接相关的记录。");
+            if (hasBaseline) {
+                add(reasons, "ENGINEERING_BASELINE_ONLY", "本次采用了工程基线，未选择外部框架或知识库资料。工程事实可按原件位置核对。");
+            } else {
+                add(reasons, "NO_EVIDENCE_SELECTED", "本次未选框架或资料，没有外部资料依据。请优先补充与问题直接相关的记录。");
+            }
             insufficient = true;
         }
         if (run.citationDetails().isEmpty()) {
-            add(reasons, "CITATIONS_MISSING", "没有结构化引用，无法将结论与来源逐项核对。"); insufficient = true;
+            add(reasons, "CITATIONS_MISSING", hasBaseline
+                    ? "没有外部检索引用，依赖外部资料的判断仍待查证。"
+                    : "没有结构化引用，无法将结论与来源逐项核对。");
+            insufficient = true;
         }
         Set<String> labels = new HashSet<>();
         run.citationDetails().forEach(citation -> labels.add(citation.label()));

@@ -374,6 +374,27 @@ class BusinessSystemDatabaseGateTest {
         return tx.execute(status -> decisions.launch(ACTOR, false, AccessLevel.WORKSPACE_MEMBER, systemId, revision, command, requestId.toString()));
     }
 
+    @Test void concurrentBaselineSaveReplaysOneReceiptAndFollowsTheSystemLifecycle() throws Exception {
+        var system = create("Java 17", List.of()).id();
+        var draft = new EngineeringBaselineService.Draft("pom.xml",
+                "<project><artifactId>sample</artifactId></project>".getBytes(java.nio.charset.StandardCharsets.UTF_8), "", "", "");
+        var preview = baselines.preview(ACTOR, system, draft);
+        UUID key = UUID.randomUUID();
+        var start = new CountDownLatch(1);
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var saves = java.util.stream.IntStream.range(0, 2).mapToObj(i -> pool.submit(() -> {
+                start.await();
+                return tx.execute(s -> baselines.save(ACTOR, system, key, preview.token(), draft)).baseline().id();
+            })).toList();
+            start.countDown();
+            assertThat(saves.getFirst().get(15, TimeUnit.SECONDS)).isEqualTo(saves.getLast().get(15, TimeUnit.SECONDS));
+        }
+        assertThat(baselines.list(ACTOR,system)).hasSize(1);
+        // Check the actual foreign key action without deleting any system or account.
+        assertThat(jdbc.sql("select confdeltype::text from pg_constraint where conrelid='engineering_baseline'::regclass and contype='f'")
+                .query(String.class).single()).isEqualTo("c");
+    }
+
     @Test void engineeringBaselineIsScopedImmutableAndUsedInBothPrompts() throws Exception {
         var system=create("Java 21",List.of()).id();
         var other=create("Other system",List.of()).id();
@@ -415,7 +436,11 @@ class BusinessSystemDatabaseGateTest {
         assertThatThrownBy(()->tx.execute(s->baselines.save(ACTOR,system,UUID.randomUUID(),p2.token(),different))).hasMessageContaining("409");
         assertThat(baselines.list(ACTOR,system)).hasSize(2);
         var report=saveFixtureReport(run.runId());
-        assertThat(exports.markdown(ACTOR,report)).contains("第一次","POM 声明","Java 21").doesNotContain("第二次","Java 24");
+        assertThat(exports.markdown(ACTOR,report))
+                .contains("第一次", "POM 声明", "Java 21", "本次没有外部检索引用", "工程事实可按原件位置核对")
+                .doesNotContain("第二次", "Java 24", "仅依据用户自述");
+        assertThat(exports.find(ACTOR,report).research().evidenceQuality().reasons())
+                .extracting("code").contains("ENGINEERING_BASELINE_ONLY").doesNotContain("NO_EVIDENCE_SELECTED");
         var repeat=new SystemDecisionAssessmentService.Command(decision.requestId(),"changed","","",null,List.of(),null,next.baseline().id());
         assertThat(tx.execute(s->decisions.launch(ACTOR,false,AccessLevel.WORKSPACE_MEMBER,system,2,repeat,"trace")).runId()).isEqualTo(run.runId());
         assertThat(workflows.find(run.runId()).orElseThrow().inputJson()).doesNotContain(next.baseline().id().toString());

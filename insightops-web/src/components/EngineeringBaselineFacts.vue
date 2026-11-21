@@ -22,7 +22,7 @@ defineProps<{ content: BaselineContent; saved?: BaselineSummary; downloads?: boo
     <p v-for="g in content.conflicts" :key="g" class="conflict" role="note">待核对 · {{ g }}</p>
     <details>
       <summary>原件与 SHA-256（{{ content.evidence.files.length }} 份）</summary>
-      <p>哈希可核对文件内容。源码提交的归属需要另行查证。</p>
+      <p>哈希可核对文件内容。源码提交的归属需要另行查证。原始提取清单可含源码或测试入口线索；本版事实表只解读 POM 和可识别的执行记录。外部检索引用另行统计。</p>
       <a v-if="downloads && saved" :href="originalUrl(saved.systemId, saved.id)" download>下载完整原件 · {{ content.originalName }}</a>
       <ul><li v-for="file in content.evidence.files" :key="file.path"><a v-if="downloads && saved" :href="originalUrl(saved.systemId, saved.id, file.path)" download>{{ file.path }}</a><span v-else>{{ file.path }}</span><small>{{ file.size }} 字节 · {{ file.sha256 }}</small></li></ul>
     </details>

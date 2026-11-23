@@ -26,6 +26,11 @@ class MavenBaselineArchiveTest {
 <dependencies><dependency><groupId>example</groupId><artifactId>lib</artifactId></dependency></dependencies>
 </project>
 """;
+    private static final String APPLICATION_LOG = """
+            2026 INFO Starting DemoApplication using Java 17.0.4 with PID 100
+            2026 INFO No active profile set, falling back to 1 default profile: "default"
+            2026 INFO HikariPool-1 - Added connection conn0: url=jdbc:h2:mem:demo
+            """;
 
     private static byte[] bytes(String s) {
         return s.getBytes(StandardCharsets.UTF_8);
@@ -86,9 +91,7 @@ class MavenBaselineArchiveTest {
         files.put(
                 "evidence/maven-version.txt",
                 bytes("Apache Maven 3.9.9\nJava version: 21.0.1, vendor: demo\n"));
-        files.put(
-                "evidence/application.log",
-                bytes("2026 INFO Starting DemoApplication using Java 17.0.4 with PID 100\n"));
+        files.put("evidence/application.log", bytes(APPLICATION_LOG));
         files.put(
                 "evidence/dependency-tree.txt",
                 bytes(
@@ -158,6 +161,20 @@ class MavenBaselineArchiveTest {
         assertThat(result.gaps())
                 .anyMatch(g -> g.contains("different-module") && g.contains("不能确定本模块"));
         assertThat(result.files()).anyMatch(f -> f.path().equals("evidence/dependency-tree.txt"));
+    }
+
+    @Test
+    void runtimeLogOriginalRetainsObservationsOmittedFromSupportedFacts() throws Exception {
+        var result = parser.parse("case.zip", zip(null));
+
+        assertThat(result.files()).filteredOn(file -> file.path().equals("evidence/application.log"))
+                .singleElement().satisfies(file -> assertThat(file.sha256())
+                        .isEqualTo(MavenBaselineArchive.hash(bytes(APPLICATION_LOG))));
+        assertThat(result.facts()).filteredOn(fact -> fact.kind() == RUNTIME_OBSERVATION)
+                .singleElement().satisfies(fact -> {
+                    assertThat(fact.value()).isEqualTo("17.0.4");
+                    assertThat(fact.source().line()).isEqualTo(1);
+                });
     }
 
     @Test

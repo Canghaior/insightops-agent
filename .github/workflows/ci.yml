@@ -39,6 +39,12 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+      - name: Prepare pgvector for isolated test schemas
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$POSTGRES_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U "$DB_USERNAME" -d insightops \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;'
       - name: Verify backend, P0 chain and P1 account administration
         run: ./mvnw --batch-mode --no-transfer-progress verify
 

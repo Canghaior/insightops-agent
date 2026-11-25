@@ -67,7 +67,8 @@ public class SpringAiDeepSeekPlanningModelGateway implements AgentPlanningModelG
             Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
             return new AgentPlanResponse(
                     content, toolCalls, target.provider(), responseModel, toModelUsage(usage),
-                    Duration.ofNanos(System.nanoTime() - startedAt));
+                    Duration.ofNanos(System.nanoTime() - startedAt), null,
+                    response.getMetadata() == null ? null : response.getMetadata().getId());
         }
         catch (ModelCallException exception) {
             throw exception;

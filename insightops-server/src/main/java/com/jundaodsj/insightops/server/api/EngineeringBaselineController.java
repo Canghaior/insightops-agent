@@ -60,6 +60,32 @@ public class EngineeringBaselineController {
                         CurrentAccount.actor(r), system, draft(file, label, note, expectedJava)));
     }
 
+    public record PackageSelection(String label, List<String> paths, List<String> focus) {}
+
+    @PostMapping(value = "/package", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<byte[]> packageModule(
+            @PathVariable UUID system, @RequestPart PackageSelection selection,
+            @RequestParam List<MultipartFile> files, HttpServletRequest request) throws IOException {
+        if (selection.paths() == null || files.size() != selection.paths().size() || files.size() > 30)
+            throw new IllegalArgumentException("工程文件与所选路径不匹配，每包最多 30 份原件。");
+        Map<String, byte[]> originals = new LinkedHashMap<>();
+        long total = 0;
+        for (int i = 0; i < files.size(); i++) {
+            var file = files.get(i);
+            String path = selection.paths().get(i);
+            if (path == null || originals.containsKey(path)) throw new IllegalArgumentException("工程文件路径无效或重复。");
+            total += file.getSize();
+            if (file.isEmpty() || file.getSize() > 1048576 || total > 6 * 1048576)
+                throw new IllegalArgumentException("单份工程原件最多 1 MiB，工程包合计最多 6 MiB。");
+            originals.put(path, file.getBytes());
+        }
+        byte[] bytes = service.packageModule(CurrentAccount.actor(request), system, selection.label(), selection.focus(), originals);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"maven-baseline.zip\"")
+                .body(bytes);
+    }
+
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<Snapshot> save(
             @PathVariable UUID system,

@@ -14,6 +14,7 @@ import { getReview, saveDecision, saveVerification, executions, impacts, origins
 
 const props = defineProps<{ reportId: string; originalAnswer?: string; reportTitle?: string; markdown?: string;
   baseline?: EngineeringBaseline | null; sources?: string[] }>()
+const emit = defineEmits<{ loaded: [reportId: string, verifications: Verification[]] }>()
 const history = ref<ReviewHistory>()
 const uploads = ref<SystemAttachment[]>([])
 const uploadsReady = ref(false)
@@ -61,10 +62,14 @@ function message(e: unknown) {
 }
 async function load() {
   const request = ++historyRequest
+  const reportId = props.reportId
   error.value = ''
   try {
-    const result = await getReview(props.reportId)
-    if (request === historyRequest) history.value = result
+    const result = await getReview(reportId)
+    if (request === historyRequest) {
+      history.value = result
+      emit('loaded', reportId, result.verifications)
+    }
   } catch (e) { if (request === historyRequest) error.value = message(e) }
 }
 async function loadUploads() {

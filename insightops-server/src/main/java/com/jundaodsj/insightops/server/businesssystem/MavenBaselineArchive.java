@@ -78,14 +78,68 @@ final class MavenBaselineArchive {
         }
     }
 
+    record PackedFile(String path, String sha256) {}
+    record SourceFile(String path, String sha256, String status, int bytes) {}
+    record ReceivedSources(String baselineLabel, List<SourceFile> files) {}
+    record PackageIndex(String format, String label, List<String> focus, List<PackedFile> files) {}
+
+    byte[] packageModule(String label, List<String> focus, Map<String, byte[]> originals) {
+        if (label == null || label.isBlank() || label.length() > 160
+                || label.chars().anyMatch(Character::isISOControl))
+            throw invalid("请填写 1 至 160 字的工程基线名称。");
+        if (focus == null || focus.size() > 32 || focus.stream().anyMatch(item ->
+                item == null || !item.matches(PART + ":" + PART)))
+            throw invalid("关注依赖须为 groupId:artifactId，每次最多 32 项。");
+        if (!originals.containsKey(MavenPomFacts.PATH) || originals.size() > 30)
+            throw invalid("请选择单个模块的根 POM，最多可纳入 30 份原件。");
+
+        Map<String, byte[]> files = new TreeMap<>(originals);
+        List<SourceFile> sources = new ArrayList<>();
+        for (var entry : files.entrySet()) {
+            String path = entry.getKey();
+            if (path.length() > 240 || MANIFEST.equals(path) || "baseline.json".equals(path)
+                    || (!KNOWN.contains(path) && !JAVA_PATH.matcher(path).matches()))
+                throw invalid("不支持打包该路径，请选择单模块 Maven 资料。");
+            byte[] data = entry.getValue();
+            if (data.length == 0 || data.length > MIB) throw invalid("每份工程原件须为 1 字节至 1 MiB。");
+            if (path.startsWith("sources/")) sources.add(new SourceFile(
+                    path.substring("sources/".length()), hash(data), "read", data.length));
+        }
+        try {
+            files.put(MANIFEST, json.writeValueAsBytes(new ReceivedSources(label, sources)));
+            var inventory = files.entrySet().stream()
+                    .map(entry -> new PackedFile(entry.getKey(), hash(entry.getValue()))).toList();
+            files.put("baseline.json", json.writeValueAsBytes(
+                    new PackageIndex("insightops.maven-baseline/v1", label, focus, inventory)));
+            if (files.values().stream().mapToInt(data -> data.length).sum() > 6 * MIB)
+                throw invalid("工程包连同清单合计最多 6 MiB，请减少可选材料。");
+            var output = new ByteArrayOutputStream();
+            try (var archive = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
+                for (var file : files.entrySet()) {
+                    var entry = new ZipEntry(file.getKey());
+                    entry.setTimeLocal(java.time.LocalDateTime.of(2000, 1, 1, 0, 0));
+                    archive.putNextEntry(entry);
+                    archive.write(file.getValue());
+                    archive.closeEntry();
+                }
+            }
+            byte[] result = output.toByteArray();
+            parse("module.zip", result);
+            return result;
+        } catch (IOException e) {
+            throw new IllegalStateException("无法生成工程基线包。", e);
+        }
+    }
+
     static Map<String, byte[]> entries(String name, byte[] bytes) {
         if (bytes.length == 0 || bytes.length > MAX_BYTES) throw invalid("工程原件大小不在支持范围。");
-        if ("pom.xml".equalsIgnoreCase(name)) {
-            if (bytes.length > MIB) throw invalid("pom.xml 超过 1 MiB。");
+        String lowerName = name.toLowerCase(Locale.ROOT);
+        if (lowerName.endsWith(".xml")) {
+            if (bytes.length > MIB) throw invalid("POM 文件最多 1 MiB，请选择该模块的根 POM。");
             return Map.of(MavenPomFacts.PATH, bytes);
         }
-        if (!name.toLowerCase(Locale.ROOT).endsWith(".zip"))
-            throw invalid("请选择 pom.xml 或 v1 工程资料 ZIP。");
+        if (!lowerName.endsWith(".zip"))
+            throw invalid("请选择单模块 Maven 的 POM XML 或 v1 工程资料 ZIP。");
         Map<String, byte[]> files = new TreeMap<>();
         Set<String> names = new HashSet<>();
         int total = 0;
@@ -97,7 +151,8 @@ final class MavenBaselineArchive {
                         || path.length() > 240
                         || (!KNOWN.contains(path) && !JAVA_PATH.matcher(path).matches())
                         || !names.add(path.toLowerCase(Locale.ROOT))
-                        || files.size() >= 32) throw invalid("工程包包含未支持或重复的路径。");
+                        || files.size() >= 32)
+                    throw invalid("工程包包含未支持或重复的路径。普通源码 ZIP 请解压后选择模块的根 POM。");
                 byte[] data = zip.readNBytes(MIB + 1);
                 total += data.length;
                 if (data.length == 0 || data.length > MIB || total > 6 * MIB)
@@ -108,7 +163,7 @@ final class MavenBaselineArchive {
             throw invalid("工程包损坏，无法读取原件。");
         }
         if (!files.keySet().containsAll(Set.of("baseline.json", MavenPomFacts.PATH, MANIFEST)))
-            throw invalid("工程包缺少格式说明、根 POM 或原始提取清单。");
+            throw invalid("工程包缺少格式说明、根 POM 或原始提取清单。普通源码 ZIP 请解压后选择模块的根 POM。");
         return files;
     }
 

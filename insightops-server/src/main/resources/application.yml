@@ -54,6 +54,14 @@ spring:
           max-retries: ${MODEL_MAX_RETRIES:2}
 
 insightops:
+  local-execution:
+    enabled: ${INSIGHTOPS_LOCAL_EXECUTION_ENABLED:false}
+    workspaces-root: ${INSIGHTOPS_LOCAL_EXECUTION_WORKSPACES_ROOT:}
+    legacy-workspace-id: ${INSIGHTOPS_LOCAL_EXECUTION_LEGACY_WORKSPACE_ID:}
+    data-root: ${INSIGHTOPS_LOCAL_EXECUTION_DATA_ROOT:}
+    maven-repository: ${INSIGHTOPS_LOCAL_EXECUTION_MAVEN_REPOSITORY:}
+    maven-image: ${INSIGHTOPS_LOCAL_EXECUTION_MAVEN_IMAGE:maven:3.9.11-eclipse-temurin-21}
+    build-timeout: ${INSIGHTOPS_LOCAL_EXECUTION_BUILD_TIMEOUT:3m}
   public-beta:
     workspace-budget:
       daily-token-limit: ${PUBLIC_BETA_DAILY_TOKEN_LIMIT:100000}

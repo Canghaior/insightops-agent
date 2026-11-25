@@ -154,7 +154,9 @@ async function launch() {
           </label>
           <p v-if="unavailableDossier" class="warning" role="alert">档案中有不可用的资料，请先编辑系统档案再载入。</p>
           <p v-if="removed.size" class="warning" role="alert">{{ removed.size }} 份原选资料未纳入本次研究。{{ [...removed.values()].filter(Boolean).join('、') }}。可在可见文件中重新选择。</p>
-          <p v-if="!selected.size && !form.projectId && !selectedBaseline">本次没有外部资料依据，将根据用户自述列出待验证的假设和补充材料。</p>
+          <p v-if="selected.size">本次将检索 {{ selected.size }} 份已选项目资料。</p>
+          <p v-else-if="!form.projectId && selectedBaseline">本次按所选工程基线分析，未选用外部资料。</p>
+          <p v-else-if="!form.projectId">本次没有外部资料依据，将根据用户自述列出待验证的假设和补充材料。</p>
         </fieldset>
         <div v-if="needsReview" class="review">
           <p v-if="previous">上次使用档案修订 {{ previous.revision }}，本次使用修订 {{ system.revision }}。补充背景来自上次评估，请核对后发起。</p>

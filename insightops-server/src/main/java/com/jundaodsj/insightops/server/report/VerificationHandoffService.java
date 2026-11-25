@@ -1,6 +1,9 @@
 package com.jundaodsj.insightops.server.report;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
+import com.fasterxml.jackson.core.util.DefaultIndenter;
+import com.fasterxml.jackson.core.util.DefaultPrettyPrinter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.infrastructure.report.TemporaryReportArchive;
@@ -39,7 +42,7 @@ public class VerificationHandoffService {
     private final KnowledgeFileStorage storage;
     private final FrozenBaselineHandoff frozenBaseline;
     private final EngineeringTaskService tasks;
-    private final ObjectMapper json;
+    private final ObjectWriter json;
 
     public VerificationHandoffService(ReportReviewStore reviews, ReportService reports, BuildEvidenceService builds,
                                       KnowledgeUploadStore uploads, KnowledgeFileStorage storage, ObjectMapper json,
@@ -49,7 +52,7 @@ public class VerificationHandoffService {
         this.builds = builds;
         this.uploads = uploads;
         this.storage = storage;
-        this.json = json;
+        this.json = json.writer(new DefaultPrettyPrinter().withObjectIndenter(new DefaultIndenter("  ", "\n")));
         this.frozenBaseline = frozenBaseline;
         this.tasks = tasks;
     }
@@ -77,7 +80,7 @@ public class VerificationHandoffService {
         var fields = version.fields();
         var result = tasks.resultForVerification(actor, reportId, versionId);
         return prepareArchive(zip -> {
-            var writer = new HandoffArchiveWriter(zip, json.writerWithDefaultPrettyPrinter());
+            var writer = new HandoffArchiveWriter(zip, json);
             var missing = new ArrayList<Missing>();
             writer.markdown("report/original.md", "ORIGINAL_REPORT", reportId, report.markdown());
             var engineering = frozenBaseline.write(writer, actor, context, report);
@@ -111,7 +114,7 @@ public class VerificationHandoffService {
         var task = tasks.version(actor, reportId, taskVersionId);
         var report = reports.find(actor, reportId);
         return prepareArchive(zip -> {
-            var writer = new HandoffArchiveWriter(zip, json.writerWithDefaultPrettyPrinter());
+            var writer = new HandoffArchiveWriter(zip, json);
             var missing = new ArrayList<Missing>();
             writer.markdown("report/original.md", "ORIGINAL_REPORT", reportId, report.markdown());
             var engineering = frozenBaseline.write(writer, actor, context, report);

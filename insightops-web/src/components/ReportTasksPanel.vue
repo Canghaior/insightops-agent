@@ -7,6 +7,7 @@ import { executions, impacts, origins, type ReviewHistory, type Verification } f
 import { getTasks, readinessLabels, type SavedTaskResult, type TaskHistory, type TaskResult, type TaskVersion } from '@/api/reportTasks'
 import { taskSections } from '@/utils/taskFields'
 import EngineeringBaselineFacts from './EngineeringBaselineFacts.vue'
+import LocalExecutionPanel from './LocalExecutionPanel.vue'
 import ReportTaskEditor from './ReportTaskEditor.vue'
 import ReportTaskResultEditor from './ReportTaskResultEditor.vue'
 import VerificationHandoffButton from './VerificationHandoffButton.vue'
@@ -161,6 +162,10 @@ function buildName(id: string) {
           <button v-if="!draft" type="button" class="secondary-button" @click="editResult(selected)">登记执行结果</button>
           <button v-if="!draft && latestTask(selected)?.id === selected.id" type="button" class="text-button" @click="editTask(selected)">补充或更正任务</button>
         </div>
+        <LocalExecutionPanel
+          v-if="!draft && selected.engineeringBaselineId" :key="selected.id"
+          :report-id="reportId" :task-version-id="selected.id" :frozen-task="selected.fields" @completed="refreshEvidence"
+        />
         <ReportTaskResultEditor
           v-if="draft?.kind === 'result'" :report-id="reportId" :version="draft.task" :previous="draft.base" :newest="latestResult(draft.base)"
           :uploads="uploads" :uploads-ready="uploadsReady" :upload-error="uploadError" :builds="builds"

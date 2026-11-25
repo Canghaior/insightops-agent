@@ -47,7 +47,9 @@ container_name="${container_name:0:96}"
 database_password="$(openssl rand -hex 24)"
 
 cleanup() {
-  docker rm -f "$container_name" >/dev/null 2>&1 || true
+  if [[ -s "$work_dir/created-container.id" ]]; then
+    docker rm -f "$(<"$work_dir/created-container.id")" >/dev/null 2>&1 || true
+  fi
   if [[ "$work_dir" == /tmp/insightops-recovery-* && -d "$work_dir" ]]; then
     rm -rf -- "$work_dir"
   fi
@@ -79,7 +81,7 @@ fi
 mkdir -p "$work_dir/uploads"
 tar -xzf "$uploads_file" -C "$work_dir/uploads"
 
-docker run -d --name "$container_name" \
+docker run -d --name "$container_name" --cidfile "$work_dir/created-container.id" \
   -e POSTGRES_DB=insightops_restore \
   -e POSTGRES_USER=insightops_restore \
   -e POSTGRES_PASSWORD="$database_password" \

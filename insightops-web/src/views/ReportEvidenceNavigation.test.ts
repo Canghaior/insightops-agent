@@ -23,21 +23,29 @@ const uploads = ['SUCCEEDED', 'PENDING', 'FAILED'].map((status, index) => ({
   errorMessage: status === 'FAILED' ? '原件格式无效' : null,
 }))
 let readUploads: () => Promise<typeof uploads>
+let listedReports: unknown[]
+let verificationVersions: unknown[]
 beforeEach(() => {
   readUploads = async () => uploads
+  listedReports = [report]
+  verificationVersions = []
   apiClient.defaults.adapter = async config => {
     let data: unknown
     switch (config.url) {
       case '/runs/source/report': data = report; break
-      case '/reports': data = { items: [report] }; break
+      case '/reports': data = { items: listedReports }; break
+      case '/reports/amount-rule/review/eligibility':
       case '/reports/saved-upgrade/review/eligibility': data = { eligible: true }; break
+      case '/reports/amount-rule/tasks':
       case '/reports/saved-upgrade/tasks': data = { versions: [], results: [] }; break
+      case '/reports/amount-rule/review': data = { context: { systemRevision: 1 }, verifications: verificationVersions, decisions: [] }; break
       case '/reports/saved-upgrade/review': data = { context: { systemRevision: 2 }, verifications: [], decisions: [] }; break
       case '/report-deliveries': data = { items: [] }; break
       case '/knowledge/uploads': data = await readUploads(); break
       case '/delivery-channels':
       case '/projects':
       case '/business-systems/available-uploads':
+      case '/reports/amount-rule/review/builds':
       case '/reports/saved-upgrade/review/builds': data = []; break
       default: throw new Error('Unexpected navigation request ' + config.url)
     }
@@ -77,6 +85,53 @@ describe('报告与构建证据导航', () => {
     const tools = host.querySelector<HTMLDetailsElement>('.report-tools')!
     expect(tools.querySelector('summary')?.textContent).toContain('周期报告')
     expect(tools.querySelectorAll('form')).toHaveLength(2)
+  })
+
+  it('shows engineering, external sources and execution for new reports and preserves the legacy card', async () => {
+    const savedQuality = { status: 'INSUFFICIENT_EVIDENCE', label: '证据不足', summary: '原报告保存的说明',
+      reasons: [{ code: 'ENGINEERING_BASELINE_ONLY', message: '原报告保存的原因' }] }
+    const baseline = { label: '已关联工程基线 v1', summary: '可核对原件', reasons: [], missing: false }
+    const coverage = {
+      engineering: baseline,
+      external: { label: '本次未选用', summary: '本次使用工程基线', reasons: [], missing: false },
+      validation: { label: '评估时未执行', summary: '后续可核对实测', reasons: [], missing: false },
+    }
+    const targetGap = { label: '缺少依据', summary: 'Vue · 3.4.38 → 3.5.1', missing: true,
+      reasons: [{ code: 'SOURCE_WARNING', message: '另外还有版本检查说明。' },
+        { code: 'TARGET_VERSION_EVIDENCE_MISSING', message: '缺少 Vue 目标版本 3.5.1 的可核对来源。' }] }
+    listedReports = [
+      { ...report, id: 'amount-rule', title: '金额规则', research: { ...report.research,
+        evidenceQuality: { status: 'REQUIRES_VALIDATION', label: '需要进一步核实', coverage } } },
+      { ...report, research: { ...report.research, evidenceQuality: { ...savedQuality, coverage: { ...coverage, external: targetGap } } } },
+      { ...report, id: 'legacy', research: { ...report.research, inputs: {}, evidenceQuality: savedQuality } },
+    ]
+    const version = { id: 'old-verification', previousVersionId: null, version: 1, createdAt: when, author: { name: '验收人' },
+      fields: { question: '检查零金额', status: 'NOT_EXECUTED', uploadIds: [] } }
+    verificationVersions = [version, { ...version, id: 'new-verification', previousVersionId: version.id, version: 2,
+      fields: { ...version.fields, status: 'EXECUTED' } }]
+
+    const router = await open('/reports?reportId=amount-rule')
+    const detail = () => host.querySelector('.report-detail')!
+    const section = (title: string) => detail().querySelector(`[aria-label="${title}"]`)!
+    expect(section('工程依据').textContent).toContain('已关联工程基线 v1')
+    expect(section('外部资料').textContent).toContain('本次未选用')
+    expect(section('外部资料').classList.contains('coverage-missing')).toBe(false)
+    expect(section('实际验证').textContent).toContain('评估时未执行')
+    expect(section('实际验证').textContent).toContain('后续关联 1 条验证记录，其中 1 条记录为已执行')
+    expect(section('实际验证').querySelector('a')?.getAttribute('href')).toBe('#report-verification-records')
+
+    await router.push('/reports?reportId=saved-upgrade'); await settle()
+    expect(section('外部资料').querySelector('li')?.textContent).toContain('缺少 Vue 目标版本 3.5.1 的可核对来源')
+    expect(section('外部资料').querySelector('details:not([open])')?.textContent).toContain('另外还有版本检查说明')
+    expect(section('实际验证').textContent).toContain('当前尚无后续验证记录')
+    expect(section('实际验证').textContent).not.toContain('1 条记录为已执行')
+
+    await router.push('/reports?reportId=legacy'); await settle()
+    expect(detail().querySelector('.evidence-coverage')).toBeNull()
+    expect(detail().querySelector('.evidence-quality')?.textContent).toContain('证据不足')
+    expect(detail().querySelector('.evidence-quality p')?.textContent).toBe('原报告保存的说明')
+    expect(detail().querySelector('.evidence-quality li')?.textContent).toBe('原报告保存的原因')
+    expect(detail().querySelector('details .markdown')?.textContent ?? detail().textContent).toContain('已保存的原研究')
   })
 
   it('separates saved, processed and failed knowledge material from evidence for an assessment', async () => {

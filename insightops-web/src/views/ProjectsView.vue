@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { listProjects, setProjectWatch, type ProjectWatch } from '@/api/projects'
 
 const projects = ref<ProjectWatch[]>([])
+const route = useRoute()
 const loading = ref(true)
 const error = ref('')
 async function load() {
@@ -19,6 +21,7 @@ onMounted(load)
 <template>
   <section>
     <div class="section-heading"><div><span class="eyebrow">个人关注范围</span><h2>首批开源项目</h2></div><RouterLink class="secondary-button" to="/updates">查看项目更新</RouterLink></div>
+    <p v-if="route.query.resume === 'upgrade'">关注本次升级的框架后，<RouterLink :to="{ path: '/upgrade-assessment', query: { systemId: typeof route.query.systemId === 'string' ? route.query.systemId : undefined } }">返回升级评估填写版本</RouterLink>。</p>
     <p v-if="loading">加载中…</p><p v-if="error" class="stream-error">{{ error }}</p>
     <div class="project-grid">
       <article v-for="project in projects" :key="project.id" class="project-card">

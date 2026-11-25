@@ -41,11 +41,43 @@ class ResearchEvidenceQualityTest {
                         Map.of("complete", true, "currentVersionFound", true,
                                 "targetVersionFound", fixture.path("targetFound").asBoolean(true))))));
         var result = quality.assess(run, Map.of("currentVersion", fixture.path("current").asText(),
-                "targetVersion", fixture.path("target").asText()), List.of());
+                "targetVersion", fixture.path("target").asText(), "projectName", fixture.path("project").asText()), List.of());
         assertThat(result.status()).as(fixture.path("id").asText()).isEqualTo(fixture.path("expectedStatus").asText());
         assertThat(result.reasons()).extracting("code").contains(fixture.path("expectedCode").asText());
         assertThat(result.compatibilityVerified()).isFalse();
+        assertThat(result.coverage().validation().label()).isEqualTo("评估时未执行");
+        assertThat(result.coverage().external().missing()).isEqualTo("INSUFFICIENT_EVIDENCE".equals(result.status()));
         assertThat(result.summary()).contains("尚未逐条核验结论", "不构成兼容性保证");
+    }
+
+    @Test void amountRuleCanBeReviewedFromTheFrozenBaselineWithoutExternalMaterials() {
+        var run = mock(AgentRunQuery.RunDetail.class);
+        when(run.status()).thenReturn("SUCCEEDED");
+        when(run.answer()).thenReturn("核对零金额实现与回归测试，实际业务行为待验证。");
+        var result = quality.assess(run, Map.of("assessmentType", "SYSTEM_DECISION", "systemSnapshot", Map.of(),
+                "engineeringBaseline", Map.of("baseline", Map.of("version", 1)), "uploadIds", List.of()), List.of());
+        assertThat(result.status()).isEqualTo("REQUIRES_VALIDATION");
+        assertThat(result.reasons()).extracting("code").contains("ENGINEERING_BASELINE_ONLY")
+                .doesNotContain("CITATIONS_MISSING", "NO_EVIDENCE_SELECTED");
+        assertThat(result.coverage().engineering().label()).isEqualTo("已关联工程基线 v1");
+        assertThat(result.coverage().external().label()).isEqualTo("本次未选用");
+        assertThat(result.coverage().external().missing()).isFalse();
+        assertThat(result.coverage().validation().label()).isEqualTo("评估时未执行");
+        assertThat(result.compatibilityVerified()).isFalse();
+    }
+
+    @Test void aBaselineDoesNotDismissTheGapForSelectedMaterials() {
+        var run = mock(AgentRunQuery.RunDetail.class);
+        when(run.status()).thenReturn("SUCCEEDED");
+        when(run.answer()).thenReturn("准备核对零金额规则。");
+        when(run.toolCalls()).thenReturn(List.of(new AgentRunQuery.RunToolCall(UUID.randomUUID(), UUID.randomUUID(),
+                "knowledge_hybrid_search", "SUCCEEDED", Map.of(), Map.of("answerable", false),
+                null, 1L, Instant.EPOCH, Instant.EPOCH, List.of())));
+        var result = quality.assess(run, Map.of("assessmentType", "SYSTEM_DECISION", "systemSnapshot", Map.of(),
+                "engineeringBaseline", Map.of("baseline", Map.of("version", 1)), "uploadIds", List.of(UUID.randomUUID())), List.of());
+        assertThat(result.status()).isEqualTo("INSUFFICIENT_EVIDENCE");
+        assertThat(result.coverage().external().reasons()).extracting("code").contains("RETRIEVAL_EMPTY", "CITATIONS_MISSING");
+        assertThat(result.coverage().engineering().missing()).isFalse();
     }
 
     @Test void incompleteExecutionIsNotAssessedAndAnUnreferencedAnswerIsInsufficient() {
@@ -89,6 +121,20 @@ class ResearchEvidenceQualityTest {
                 new ChatCitation("I1", "Issue", "https://example.com/issue", "Vue", "", "GITHUB_ISSUE", null)));
         assertThat(quality.assess(run, Map.of(), List.of()).reasons()).extracting("code")
                 .doesNotContain("ANSWER_CITATIONS_MISSING", "UNKNOWN_CITATION");
+    }
+
+    @Test void readsTheSavedLegacyAssessmentWithoutReclassifyingIt() throws Exception {
+        var historical = json.readValue("""
+                {"runId":"10000000-0000-0000-0000-000000000001","question":"原始问题","answer":"原始回答","inputs":{},
+                 "citations":[],"sources":[],"uncertainties":[],"evidence":[],"startedAt":null,"finishedAt":null,
+                 "evidenceQuality":{"status":"INSUFFICIENT_EVIDENCE","label":"证据不足","summary":"保存时的说明",
+                 "reasons":[{"code":"ENGINEERING_BASELINE_ONLY","message":"保存时的原因"}],
+                 "compatibilityVerified":false,"assessmentVersion":"decision-v1"}}
+                """, ReportDeliveryStore.ResearchSnapshot.class);
+        assertThat(historical.evidenceQuality().status()).isEqualTo("INSUFFICIENT_EVIDENCE");
+        assertThat(historical.evidenceQuality().summary()).isEqualTo("保存时的说明");
+        assertThat(historical.evidenceQuality().reasons()).extracting("message").containsExactly("保存时的原因");
+        assertThat(historical.evidenceQuality().coverage()).isNull();
     }
 
     @Test void absentRangeMetadataAndUnparseableVersionsAreNeverAssumedComplete() {

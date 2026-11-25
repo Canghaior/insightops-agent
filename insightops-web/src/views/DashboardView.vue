@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { listProjects } from '@/api/projects'
+import { getReport } from '@/api/reports'
 import { listRuns, type RunSummary } from '@/api/runs'
 import { listKnowledgeUploads } from '@/api/uploads'
 import RunEvidenceQuality from '@/components/RunEvidenceQuality.vue'
 
+import { useAuthStore } from '@/stores/auth'
 import { useSystemStore } from '@/stores/system'
 
+const auth = useAuthStore()
 const systemStore = useSystemStore()
 const modelLabel = computed(() => !systemStore.status ? '尚未取得状态'
   : systemStore.status.model.ready ? '已配置，尚未验证外部服务' : '尚未具备生成条件')
@@ -17,6 +20,21 @@ const capabilityLabels: Record<string, string> = {
 
 const projectCount = ref<number | null>(null), runCount = ref<number | null>(null), fileCount = ref<number | null>(null)
 const recentRuns = ref<RunSummary[]>([]), dataError = ref('')
+const exampleReportId = (import.meta.env.VITE_LOCAL_CASE_REPORT_ID as string | undefined)?.trim()
+const visibleExampleId = ref<string | null>(null)
+watch(() => [auth.account?.userId, auth.account?.workspaceId], async ([userId], _, onCleanup) => {
+  visibleExampleId.value = null
+  if (!exampleReportId || !userId) return
+  let current = true
+  onCleanup(() => { current = false })
+  try {
+    const report = await getReport(exampleReportId)
+    if (current && report?.id === exampleReportId) visibleExampleId.value = report.id
+  } catch {
+    // Report access is resolved by the normal authenticated endpoint.
+  }
+}, { immediate: true })
+
 onMounted(async () => {
   void systemStore.refresh()
   const results = await Promise.allSettled([listProjects(), listRuns(0, 3), listKnowledgeUploads()])
@@ -30,10 +48,16 @@ onMounted(async () => {
 <template>
   <section class="page-grid">
     <article class="hero-card">
-      <span class="eyebrow">今日研究入口</span>
-      <h2>按需研究，不做无证据判断</h2>
-      <p>围绕版本变化、兼容风险和迁移建议，形成带来源证据的技术判断。</p>
-      <RouterLink class="primary-action" to="/upgrade-assessment">开始升级评估 →</RouterLink>
+      <h2>你要解决哪类工程问题？</h2>
+      <p>业务规则和代码改动从系统档案开始。评估框架升级时，选择当前版本与目标版本。</p>
+      <div class="hero-actions">
+        <RouterLink class="primary-action" :to="{ path: '/business-systems', query: { intent: 'decision' } }">解决项目中的问题</RouterLink>
+        <RouterLink class="secondary-button" to="/upgrade-assessment">评估框架版本升级</RouterLink>
+        <RouterLink v-if="visibleExampleId" class="secondary-button" :to="{ path: '/reports', query: { reportId: visibleExampleId } }">
+          查看已完成案例
+        </RouterLink>
+        <RouterLink v-else class="secondary-button" to="/reports">查看已有报告</RouterLink>
+      </div>
     </article>
 
     <article class="panel system-panel">
@@ -77,12 +101,14 @@ onMounted(async () => {
       <ol class="flow-list">
         <li v-for="run in recentRuns" :key="run.id"><div><RouterLink :to="`/runs/${run.id}`">{{ run.question.split('\n')[0]?.slice(0, 100) }}</RouterLink><p>{{ run.status === 'SUCCEEDED' ? '执行完成' : run.status === 'FAILED' ? '研究失败，可查看原因' : '进行中或已暂停' }} · {{ new Date(run.createdAt).toLocaleString('zh-CN') }}</p><RunEvidenceQuality v-if="run.status === 'SUCCEEDED'" :run-id="run.id" compact /></div></li>
       </ol>
-      <p v-if="runCount === 0">还没有研究记录。选择框架与版本，发起第一次升级评估。</p>
+      <p v-if="runCount === 0">还没有研究记录。选择上方任一入口开始。</p>
     </article>
   </section>
 </template>
 
 <style scoped>
+.hero-actions { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+.hero-actions .primary-action { margin-top: 0; }
 .capability-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
 .capability-list li > div { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .capability-list span { font-size: 12px; color: var(--text-secondary, #526077); }

@@ -111,7 +111,7 @@ final class OpenAiResponsesPlanningGateway implements AgentPlanningModelGateway 
         var model = ObjectMappers.jsonMapper().convertValue(response.model(), String.class);
         var usage = response.usage().map(OpenAiResponsesPlanningGateway::usage).orElseGet(ModelUsage::unknown);
         return new AgentPlanResponse(text.toString(), calls, PROVIDER, model, usage,
-                Duration.ofNanos(System.nanoTime() - startedAt), next);
+                Duration.ofNanos(System.nanoTime() - startedAt), next, response._id().asKnown().orElse(null));
     }
 
     private static ModelUsage usage(ResponseUsage usage) {

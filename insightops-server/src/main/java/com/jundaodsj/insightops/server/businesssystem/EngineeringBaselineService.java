@@ -55,6 +55,12 @@ public class EngineeringBaselineService {
         return prepare(profile(actor, system, false), d);
     }
 
+    public byte[] packageModule(ActorContext actor, UUID system, String label, List<String> focus,
+                                Map<String, byte[]> selected) {
+        profile(actor, system, false);
+        return parser.packageModule(label, focus, selected);
+    }
+
     private String digest(Object value) {
         try {
             return MavenBaselineArchive.hash(json.writeValueAsBytes(value));

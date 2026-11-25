@@ -24,6 +24,9 @@ function pick(field: keyof ImportFiles, event: globalThis.Event) {
 async function submit() {
   if (busy.value) return
   if (count.value < 1 || count.value > 40) { error.value = '每个构建请选 1 至 40 份 Surefire XML。'; return }
+  if (files.value.xmlFiles.some(file => !file.name.startsWith('TEST-') || !file.name.toLowerCase().endsWith('.xml') || file.name.length <= 9)) {
+    error.value = '请选择该模块 target/surefire-reports 下原名为 TEST-*.xml 的测试报告。'; return
+  }
   if (selected.value.some(file => !file.size || file.size > 2 * 1024 * 1024)
     || selected.value.reduce((sum, file) => sum + file.size, 0) > 12 * 1024 * 1024) {
     error.value = '文件应有内容，每份最多 2 MiB，单批合计最多 12 MiB。'; return
@@ -44,7 +47,9 @@ async function submit() {
     }, files.value)
     emit('imported', result)
   } catch (cause) {
-    error.value = evidenceError(cause, '导入结果尚未确认。可用同一组材料重试，或刷新已保存的批次。')
+    error.value = (cause as { response?: { status?: number } })?.response?.status === 413
+      ? '服务拒绝了过大的上传。每份原件最多 2 MiB，单批合计最多 12 MiB。已符合时请检查部署环境的上传限制。'
+      : evidenceError(cause, '导入结果尚未确认。可用同一组材料重试，或刷新已保存的批次。')
   } finally { busy.value = false; emit('busy', false) }
 }
 </script>
@@ -56,15 +61,15 @@ async function submit() {
       <label class="wide">Surefire XML 原件
         <input type="file" multiple required accept=".xml" @change="pick('xmlFiles', $event)" />
       </label>
-      <p class="hint wide">选择同一模块、同一次构建的普通 TEST-*.xml。重跑、flaky 和多模块合并结果超出支持范围。每批最多 40 份 XML、4000 个测试项，每份最多 2 MiB，合计最多 12 MiB。</p>
+      <p class="hint wide">在该模块的 target/surefire-reports 中选取同一次构建的 TEST-*.xml。每批最多 40 份 XML、4000 个测试项，每份最多 2 MiB，合计最多 12 MiB。按模块和执行次数分别导入。</p>
       <label class="wide">构建标签或提交号（可选）<input v-model="fields.label" maxlength="180" placeholder="例如 Spring Boot 3.4.2 · 4a021e4c" /></label>
       <label>命令记录（可选 JSON）<input type="file" accept=".json" @change="pick('commandRecord', $event)" /></label>
       <label>Maven 构建日志（可选）<input type="file" accept=".log,.txt" @change="pick('mavenLog', $event)" /></label>
       <label class="wide">排除方法清单（可选 JSON）<input type="file" accept=".json" @change="pick('exclusionManifest', $event)" /></label>
       <details class="wide formats">
         <summary>可选文件格式</summary>
-        <p>命令记录可包含参数数组 command、整数退出码 exit 和带时区的 start、end。</p>
-        <pre>{{ '{ "command": ["mvnw", "-Dtest=!DatabaseTests", "package"], "exit": 0 }' }}</pre>
+        <p>命令记录支持 command、exit、start、end，也支持 exitCode、startedAt、endedAt。时间需带时区，两种写法同时出现时须一致。</p>
+        <pre>{{ '{ "command": ["mvn", "test"], "exitCode": 0 }' }}</pre>
         <p>排除方法清单提供独立的源码位置，用于说明命令排除的类里列明了哪些方法。</p>
         <pre>{{ '{ "excludedMethods": [{ "className": "DatabaseTests", "methodName": "findOwner", "source": "src/test/java/DatabaseTests.java:42" }] }' }}</pre>
       </details>

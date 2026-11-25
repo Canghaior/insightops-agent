@@ -15,6 +15,7 @@ import com.jundaodsj.insightops.server.chat.DurableChatRunCoordinator;
 import com.jundaodsj.insightops.server.chat.DurableChatRunProperties;
 import com.jundaodsj.insightops.server.report.ReportPdfRenderer;
 import com.jundaodsj.insightops.server.report.ReportService;
+import com.jundaodsj.insightops.server.report.ReportClaimReviews;
 import com.jundaodsj.insightops.server.report.ReportReviewService;
 import com.jundaodsj.insightops.report.application.ReportReviewStore.*;
 import com.jundaodsj.insightops.server.report.ResearchReportService;
@@ -218,6 +219,42 @@ class BusinessSystemDatabaseGateTest {
         assertThatThrownBy(() -> tx.execute(t -> review.record(ACTOR,two,cmd))).hasMessageContaining("404");
     }
 
+    @Test void claimReviewsBindToArchivedLineSourceAndExactVerificationWithoutChangingTheReport() throws Exception {
+        var sys = create("核对样例", List.of());
+        var id = saveFixtureReport(launch(ACTOR, sys.id(), 1, UUID.randomUUID()).runId());
+        String url = "https://example.org/releases/1.1.0";
+        String irrelevant = "本版本更新了页面字体。";
+        var original = exports.find(ACTOR, id).research();
+        var fixture = json.valueToTree(original).deepCopy();
+        var snapshot = (com.fasterxml.jackson.databind.node.ObjectNode) fixture;
+        snapshot.put("answer", "这个版本会改变金额舍入 [S1]");
+        ((com.fasterxml.jackson.databind.node.ObjectNode)snapshot.get("inputs")).put("targetVersion", "1.1.0");
+        snapshot.set("citations", json.valueToTree(List.of(Map.of("label","S1","title","1.1.0","url",url,"versionLabel","1.1.0"))));
+        snapshot.set("evidence", json.valueToTree(List.of(Map.of("claimReviewVersion",1,
+                "passages", List.of(Map.of("label","S1","text",irrelevant))))));
+        jdbc.sql("UPDATE research_report SET research_snapshot=CAST(? AS jsonb) WHERE id=?").params(json.writeValueAsString(snapshot),id).update();
+        var store = new JdbcReportDeliveryStore(jdbc, json, new DeliverySecretCipher("io01-report-fixture-only"));
+        var claims = new ReportClaimReviews(store, new JdbcReportReviewStore(jdbc), baselines, jdbc, json);
+        var savedBefore = exports.find(ACTOR, id);
+        var verification = tx.execute(t -> review.record(ACTOR,id,blocked(UUID.randomUUID(), List.of())));
+        var draft = new ReportClaimReviews.Draft(1, "", null, "S1", irrelevant, ReportClaimReviews.Verdict.INSUFFICIENT,
+                "原文讨论页面字体，没有提供金额舍入行为的依据。", "比较边界输入的实际返回值", verification.id());
+        var command = new ReportClaimReviews.Command(UUID.randomUUID(), draft);
+        var record = tx.execute(t -> claims.add(ACTOR, id, command));
+        assertThat(tx.execute(t -> claims.add(ACTOR, id, command)).id()).isEqualTo(record.id());
+        assertThat(claims.list(ACTOR,id)).singleElement().satisfies(r -> {
+            assertThat(r.evidence().claim()).contains("舍入");
+            assertThat(r.evidence().verificationStatus()).isEqualTo("BLOCKED");
+            assertThat(r.draft().verdict()).isEqualTo(ReportClaimReviews.Verdict.INSUFFICIENT);
+        });
+        var fabricated = new ReportClaimReviews.Draft(1, "", null, "S1", "金额现在舍入", ReportClaimReviews.Verdict.SUPPORTS,
+                "引用编号存在", "边界值", null);
+        assertThatThrownBy(() -> tx.execute(t -> claims.add(ACTOR,id,new ReportClaimReviews.Command(UUID.randomUUID(),fabricated))))
+                .hasMessageContaining("逐字");
+        assertThatThrownBy(() -> claims.list(new ActorContext(UUID.randomUUID(),WORKSPACE), id)).hasMessageContaining("404");
+        assertThat(exports.find(ACTOR,id)).isEqualTo(savedBefore);
+    }
+
     @Test void linkedUpgradeReviewRequiresArchivedRangeAndTrustedHistoricalTemplate() {
         var system = create("升级档案", List.of());
         var run = launch(ACTOR,system.id(),1,UUID.randomUUID()).runId();
@@ -411,6 +448,8 @@ class BusinessSystemDatabaseGateTest {
         assertThat(baselines.download(ACTOR,system,id,"sources/pom.xml").bytes()).isEqualTo(bytes);
         for(var actor:List.of(new ActorContext(UUID.randomUUID(),WORKSPACE),new ActorContext(USER,UUID.randomUUID()))) {
             assertThatThrownBy(()->baselines.detail(actor,system,id)).hasMessageContaining("404");
+            assertThatThrownBy(()->baselines.packageModule(actor,system,"unauthorized",List.of(),
+                    Map.of("sources/pom.xml",bytes))).hasMessageContaining("404");
             assertThatThrownBy(()->baselines.list(actor,system)).hasMessageContaining("404");
             assertThatThrownBy(()->baselines.download(actor,system,id,null)).hasMessageContaining("404");
             assertThatThrownBy(()->baselines.save(actor,system,request,preview.token(),first)).hasMessageContaining("404");
@@ -438,9 +477,19 @@ class BusinessSystemDatabaseGateTest {
         var report=saveFixtureReport(run.runId());
         assertThat(exports.markdown(ACTOR,report))
                 .contains("第一次", "POM 声明", "Java 21", "本次没有外部检索引用", "工程事实可按原件位置核对")
+                .contains("### 工程依据", "### 外部资料", "### 实际验证", "本次未选用", "评估时未执行")
                 .doesNotContain("第二次", "Java 24", "仅依据用户自述");
-        assertThat(exports.find(ACTOR,report).research().evidenceQuality().reasons())
+        var quality = exports.find(ACTOR,report).research().evidenceQuality();
+        assertThat(quality.status()).isEqualTo("REQUIRES_VALIDATION");
+        assertThat(quality.reasons())
                 .extracting("code").contains("ENGINEERING_BASELINE_ONLY").doesNotContain("NO_EVIDENCE_SELECTED");
+        assertThat(quality.coverage().external().missing()).isFalse();
+        var upgradeReport = saveFixtureReport(upgradeRun.runId());
+        var upgradeQuality = exports.find(ACTOR, upgradeReport).research().evidenceQuality();
+        assertThat(upgradeQuality.status()).isEqualTo("INSUFFICIENT_EVIDENCE");
+        assertThat(upgradeQuality.coverage().engineering().label()).isEqualTo("已关联工程基线 v1");
+        assertThat(upgradeQuality.coverage().external().reasons()).extracting("code").contains("TARGET_VERSION_EVIDENCE_MISSING");
+        assertThat(exports.markdown(ACTOR, upgradeReport)).contains("目标版本 1.1.0 的可核对来源", "评估时未执行");
         var repeat=new SystemDecisionAssessmentService.Command(decision.requestId(),"changed","","",null,List.of(),null,next.baseline().id());
         assertThat(tx.execute(s->decisions.launch(ACTOR,false,AccessLevel.WORKSPACE_MEMBER,system,2,repeat,"trace")).runId()).isEqualTo(run.runId());
         var originalInputs = workflows.find(run.runId()).orElseThrow().inputJson();

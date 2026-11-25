@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { isAxiosError } from 'axios'
 
 export const kindLabels = {
   DECLARATION: 'POM 声明', STATIC_DERIVATION: '静态推导', MAVEN_RESOLUTION: 'Maven 实际解析记录',
@@ -27,6 +28,21 @@ export async function baselineDetail(system: string, id: string): Promise<Engine
 }
 export async function previewBaseline(system: string, data: FormData): Promise<BaselinePreview> {
   return (await apiClient.post(path(system) + '/preview', data)).data.data
+}
+export async function packageBaseline(system: string, data: FormData): Promise<Blob> {
+  try {
+    return (await apiClient.post(path(system) + '/package', data, { responseType: 'blob' })).data
+  } catch (error) {
+    if (isAxiosError(error)) {
+      if (error.response?.status === 413) throw new Error('材料超过上传限制。每份最多 1 MiB，工程包合计最多 6 MiB。')
+      const body = error.response?.data
+      if (body instanceof Blob && body.type.includes('json')) {
+        const problem = await body.text().then(text => JSON.parse(text)).catch(() => null)
+        if (typeof problem?.detail === 'string') throw new Error(problem.detail)
+      }
+    }
+    throw error
+  }
 }
 export async function saveBaseline(system: string, data: FormData): Promise<EngineeringBaseline> {
   return (await apiClient.post(path(system), data)).data.data

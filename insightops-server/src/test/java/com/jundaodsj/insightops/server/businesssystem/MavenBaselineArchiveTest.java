@@ -37,6 +37,46 @@ class MavenBaselineArchiveTest {
     }
 
     @Test
+    void selectedModulePackagesOnlyApprovedOriginalsWithVerifiableHashes() {
+        var files = Map.of("sources/pom.xml", bytes(POM), "sources/src/main/java/Amount.java",
+                bytes("class Amount {}"), "evidence/maven-version.txt", bytes("Java version: 21, vendor: Example"));
+        byte[] result = parser.packageModule("orders", List.of("example:lib"), files);
+        assertThat(parser.packageModule("orders", List.of("example:lib"), files)).isEqualTo(result);
+        var received = MavenBaselineArchive.entries("module.zip", result);
+        assertThat(received.keySet()).containsExactlyInAnyOrder("baseline.json", "evidence/extractor.json",
+                "sources/pom.xml", "sources/src/main/java/Amount.java", "evidence/maven-version.txt");
+        files.forEach((path, contents) -> assertThat(received.get(path)).isEqualTo(contents));
+        assertThat(parser.parse("module.zip", result).facts()).anyMatch(f -> f.kind() == BUILD_ENVIRONMENT);
+        assertThatThrownBy(() -> parser.packageModule("orders", List.of(), Map.of("sources/pom.xml", bytes(POM),
+                "sources/../.env", bytes("example")))).hasMessageContaining("不支持打包");
+        assertThatThrownBy(() -> parser.packageModule("orders", List.of(), Map.of("sources/pom.xml",
+                bytes(POM.replace("<artifactId>demo", "<modules><module>app</module></modules><artifactId>demo")))))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void renamedMavenPomKeepsTheSameFactsAndOriginalBytes() {
+        var original = bytes(POM);
+        assertThat(parser.parse("pom-target.XML", original)).isEqualTo(parser.parse("pom.xml", original));
+        assertThat(MavenBaselineArchive.entries("pom-target.XML", original).get("sources/pom.xml"))
+                .containsExactly(original);
+        assertThatThrownBy(() -> parser.parse("settings.xml", bytes("<settings/>")))
+                .hasMessageContaining("需要普通 Maven 根 POM");
+    }
+
+    @Test
+    void ordinarySourceZipSuggestsSelectingItsRootPom() throws IOException {
+        var out = new ByteArrayOutputStream();
+        try (var zip = new ZipOutputStream(out)) {
+            zip.putNextEntry(new ZipEntry("pom.xml"));
+            zip.write(bytes(POM));
+            zip.closeEntry();
+        }
+        assertThatThrownBy(() -> parser.parse("downloaded-source.zip", out.toByteArray()))
+                .hasMessageContaining("请解压后选择模块的根 POM");
+    }
+
+    @Test
     void returnsDeclarationsAndLocalProvenanceAndLeavesInheritedUnknown() {
         var result = parser.parse("pom.xml", bytes(POM));
         assertThat(result.facts())

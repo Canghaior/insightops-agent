@@ -1,16 +1,32 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
 import { baselines, baselineDetail, previewBaseline, saveBaseline, type BaselineSummary, type EngineeringBaseline, type BaselinePreview } from '@/api/engineeringBaselines'
 import EngineeringBaselineFacts from './EngineeringBaselineFacts.vue'
+import ModuleBaselinePicker from './ModuleBaselinePicker.vue'
 
 const props = defineProps<{ systemId: string }>()
 const rows = ref<BaselineSummary[]>([]), selected = ref<EngineeringBaseline | null>(null)
 const preview = ref<BaselinePreview | null>(null), file = ref<globalThis.File | null>(null)
 const label = ref(''), note = ref(''), expectedJava = ref(''), message = ref(''), error = ref('')
 const busy = ref(false), importing = ref(false)
+const mode = ref<'file' | 'directory'>('file'), packing = ref(false)
+const fileError = computed(() => {
+  const original = file.value
+  if (!original) return ''
+  const name = original.name.toLowerCase()
+  const mib = 1024 * 1024
+  if (!name.endsWith('.xml') && !name.endsWith('.zip')) return '请选择单模块 Maven 的 POM XML 或规范工程 ZIP。'
+  if (!original.size) return '选中的工程文件为空，请重新选择。'
+  if (name.endsWith('.xml') && original.size > mib) return 'POM 文件最多 1 MiB，请选择该模块的根 POM。'
+  if (name.endsWith('.zip') && original.size > 6 * mib + 65536) return '工程 ZIP 超出大小上限，请缩小工程包范围，或单独导入模块的 POM。'
+  return ''
+})
 let generation = 0, requestId = ''
-function explain(e: unknown) { return isAxiosError(e) ? (e.response?.data?.detail || '读取失败，请重试。') : e instanceof Error ? e.message : '请求失败，请重试。' }
+function explain(e: unknown) {
+  if (isAxiosError(e) && e.response?.status === 413) return '工程材料超过上传上限。根 POM 最多 1 MiB，工程包内材料和清单合计最多 6 MiB。'
+  return isAxiosError(e) ? (e.response?.data?.detail || '读取失败，请重试。') : e instanceof Error ? e.message : '请求失败，请重试。'
+}
 function invalidate() { preview.value = null; requestId = ''; message.value = ''; error.value = '' }
 watch([file, label, note, expectedJava], invalidate, { flush: 'sync' })
 async function load() {
@@ -27,7 +43,7 @@ async function open(id: string) {
 }
 function pick(event: globalThis.Event) { file.value = (event.target as globalThis.HTMLInputElement).files?.[0] ?? null }
 async function submit(save: boolean) {
-  if (!file.value || busy.value || (save && !preview.value)) return
+  if (!file.value || fileError.value || busy.value || (save && !preview.value)) return
   const current = ++generation
   const body = new globalThis.FormData()
   body.append('file', file.value); body.append('label', label.value); body.append('note', note.value); body.append('expectedJava', expectedJava.value)
@@ -47,7 +63,18 @@ async function submit(save: boolean) {
   } catch (e) { if (current === generation) { if (isAxiosError(e) && e.response?.status === 409) invalidate(); error.value = explain(e) } }
   finally { if (current === generation) busy.value = false }
 }
-function begin() { importing.value = true; selected.value = null; file.value = null; label.value = ''; note.value = ''; expectedJava.value = ''; invalidate() }
+function begin() { importing.value = true; selected.value = null; mode.value = 'file'; packing.value = false; file.value = null; label.value = ''; note.value = ''; expectedJava.value = ''; invalidate() }
+function changeMode(next: 'file' | 'directory') {
+  if (mode.value === next) return
+  mode.value = next; file.value = null; invalidate()
+}
+function packed(archive: globalThis.File) { file.value = archive; void submit(false) }
+function downloadArchive() {
+  if (!file.value) return
+  const url = globalThis.URL.createObjectURL(file.value)
+  const link = globalThis.document.createElement('a'); link.href = url; link.download = file.value.name; link.click()
+  globalThis.setTimeout(() => globalThis.URL.revokeObjectURL(url), 30_000)
+}
 </script>
 
 <template>
@@ -55,20 +82,31 @@ function begin() { importing.value = true; selected.value = null; file.value = n
     <header><h3>工程基线</h3><button v-if="!importing" type="button" class="secondary-button" :disabled="busy" @click="begin">导入工程资料</button></header>
     <p>保存单个 Maven 模块的工程事实与原件。发起评估时可选择要使用的版本。</p>
     <p v-if="error" role="alert">{{ error }} <button v-if="!importing" type="button" @click="load">重新读取</button></p><p v-if="message" role="status">{{ message }}</p>
-    <div v-if="rows.length" class="versions"><button v-for="r in rows" :key="r.id" type="button" :disabled="busy" @click="importing = false; open(r.id)">v{{ r.version }} · {{ r.label }}</button></div>
+    <div v-if="rows.length" class="versions"><button v-for="r in rows" :key="r.id" type="button" :disabled="busy || packing" @click="importing = false; open(r.id)">v{{ r.version }} · {{ r.label }}</button></div>
     <p v-else-if="!error">尚无已保存的工程基线。</p>
     <form v-if="importing" @submit.prevent="submit(!!preview)">
-      <fieldset :disabled="busy">
+      <fieldset :disabled="busy || packing">
         <legend>导入一个模块</legend>
-        <label>工程原件 <input type="file" accept=".xml,.zip" required @change="pick" /></label>
-        <small>选择 pom.xml 或由 maven_baseline_pack.py 生成的 v1 ZIP。原件单独保存，评估只接收所选基线的结构化事实。</small>
+        <div class="versions"><button type="button" :aria-pressed="mode === 'file'" @click="changeMode('file')">已有 POM 或工程包</button>
+          <button type="button" :aria-pressed="mode === 'directory'" @click="changeMode('directory')">选择本机模块目录</button></div>
+        <template v-if="mode === 'file'">
+        <label>工程原件 <input type="file" accept=".xml,.zip" required :aria-invalid="!!fileError" aria-describedby="baseline-file-help" @change="pick" /></label>
+        <small id="baseline-file-help">先选一个 Maven 模块的根 POM。POM 可以保留自定义的 .xml 文件名。手头是普通源码 ZIP 时，先解压再选根 POM。</small>
+        <details>
+          <summary>规范 ZIP 需要哪些文件</summary>
+          <small>使用 scripts/maven_baseline_pack.py 生成 v1 工程包，包含 baseline.json、sources/pom.xml 和 evidence/extractor.json。可随包带入该模块的构建记录。评估读取该版本的结构化事实，原件可单独下载。</small>
+        </details>
+        </template>
+        <ModuleBaselinePicker v-else :key="systemId" :system-id="systemId" :label="label" @change="file = null; invalidate()" @ready="packed" @busy="packing = $event" />
+        <p v-if="fileError" role="alert">{{ fileError }}</p>
         <label>基线名称 <input v-model="label" maxlength="160" placeholder="例如 Petclinic · 升级前" /></label>
         <label>我认为 POM 声明的 Java 版本（可选） <input v-model="expectedJava" maxlength="32" /></label>
         <label>来源或环境说明（用户提供，可选） <textarea v-model="note" maxlength="600" /></label>
       </fieldset>
       <EngineeringBaselineFacts v-if="preview" :content="preview.content" />
-      <button type="submit" class="primary-button" :disabled="busy || !file">{{ preview ? '保存为新基线版本' : '预览工程资料' }}</button>
-      <button type="button" :disabled="busy" @click="importing = false">取消</button>
+      <button v-if="mode === 'file' || file" type="submit" class="primary-button" :disabled="busy || packing || !file || !!fileError">{{ preview ? '保存为新基线版本' : '预览工程资料' }}</button>
+      <button v-if="mode === 'directory' && file" type="button" :disabled="busy || packing" @click="downloadArchive">下载可导入的工程包</button>
+      <button type="button" :disabled="busy || packing" @click="importing = false">取消</button>
     </form>
     <EngineeringBaselineFacts v-if="!importing && selected" :content="selected.content" :saved="selected.baseline" downloads />
   </section>

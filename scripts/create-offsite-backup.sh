@@ -6,6 +6,11 @@ BACKUP_DIR="$ROOT_DIR/backups"
 OFFSITE_DIR="$BACKUP_DIR/offsite"
 PASSPHRASE_FILE="$ROOT_DIR/.secrets/offsite-backup-passphrase"
 marker="${1:-manual}"
+profile="${2:-}"
+if [[ -n "$profile" && "$profile" != "--tiny" ]]; then
+  echo "Usage: $0 [marker] [--tiny]" >&2
+  exit 2
+fi
 
 if ! [[ "$marker" =~ ^[A-Za-z0-9._-]{1,96}$ ]]; then
   echo "Backup marker must use only letters, digits, dot, underscore or dash" >&2
@@ -17,7 +22,7 @@ if [[ ! -s "$PASSPHRASE_FILE" ]]; then
 fi
 command -v openssl >/dev/null || { echo "openssl is required" >&2; exit 1; }
 
-bash "$ROOT_DIR/scripts/backup-prod.sh"
+BACKUP_DIR="$BACKUP_DIR" bash "$ROOT_DIR/scripts/backup-prod.sh" ${profile:+"$profile"}
 source_dump="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'insightops-*.dump' \
   -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
 if [[ -z "$source_dump" || ! -s "$source_dump" ]]; then

@@ -8,6 +8,7 @@ import com.jundaodsj.insightops.agent.application.AgentWorkflowRunStore;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.server.businesssystem.BusinessSystemService;
 import com.jundaodsj.insightops.report.application.ReportDeliveryStore;
+import com.jundaodsj.insightops.report.application.ResearchEvidenceAssessment.Section;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -49,6 +50,7 @@ public class ResearchReportService {
         }
         boolean decision = workflow != null && workflow.businessSystemId() != null
                 && AssessmentType.SYSTEM_DECISION.name().equals(inputs.get("assessmentType"));
+        var quality = evidenceQuality.assess(run, inputs, workflow == null ? List.of() : workflow.nodes());
         List<String> uncertainties = new ArrayList<>();
         List<Map<String, Object>> evidence = new ArrayList<>();
         for (var tool : run.toolCalls()) {
@@ -58,7 +60,16 @@ public class ResearchReportService {
             item.put("status", tool.status());
             item.put("completedAt", tool.finishedAt() == null ? "未完成" : tool.finishedAt().toString());
             for (String field : List.of("fetchedAt", "range", "warnings", "sources")) {
-                if (output != null && output.has(field)) item.put(field, json.convertValue(output.get(field), Object.class));
+                if (output == null || !output.has(field)) continue;
+                var value = output.get(field).deepCopy();
+                if ("sources".equals(field) && value.isArray()) for (var source : value) {
+                    if (source instanceof com.fasterxml.jackson.databind.node.ObjectNode row) row.remove("passage");
+                }
+                item.put(field, json.convertValue(value, Object.class));
+            }
+            if (quality.coverage() != null) {
+                item.put("claimReviewVersion", 1);
+                item.put("passages", ClaimPassages.from(tool, run.citationDetails(), json));
             }
             evidence.add(item);
             if (!"SUCCEEDED".equals(tool.status())) uncertainties.add(tool.toolName() + " 未成功，相关结论缺少该工具证据。");
@@ -86,18 +97,19 @@ public class ResearchReportService {
         // Keep the model's uncertainty section verbatim; never replace it with an inferred all-clear.
         var matcher = java.util.regex.Pattern.compile("(?m)^#{1,6}\\s*.*尚未确认事项[^\\n]*\\n").matcher(run.answer());
         if (matcher.find()) uncertainties.add(run.answer().substring(matcher.end()).strip());
-        if (run.citationDetails().isEmpty()) {
-            uncertainties.add(inputs.get("engineeringBaseline") instanceof Map<?, ?>
-                    ? "工程事实可按冻结基线中的原件位置核对。缺少外部检索引用，外部适用性仍待查证。"
-                    : "没有结构化引用，关键事实尚需核查。");
+        if (quality.coverage() == null) {
+            if (run.citationDetails().isEmpty()) {
+                uncertainties.add(inputs.get("engineeringBaseline") instanceof Map<?, ?>
+                        ? "工程事实可按冻结基线中的原件位置核对。缺少外部检索引用，外部适用性仍待查证。"
+                        : "没有结构化引用，关键事实尚需核查。");
+            }
+            uncertainties.add("研究基于获取到的资料，未运行你的业务项目验证；不构成兼容性保证。");
         }
-        uncertainties.add(decision ? "客户系统的行为、根因和方案效果仍待实际验证。"
-                : "研究基于获取到的资料，未运行你的业务项目验证；不构成兼容性保证。");
         var snapshot = new ReportDeliveryStore.ResearchSnapshot(runId, run.question(), run.answer(), inputs,
                 run.citationDetails(), run.sources(), uncertainties.stream().distinct().toList(), evidence,
                 run.startedAt() == null ? run.createdAt() : run.startedAt(),
                 run.finishedAt() == null ? run.createdAt() : run.finishedAt(),
-                evidenceQuality.assess(run, inputs, workflow == null ? List.of() : workflow.nodes()),
+                quality,
                 run.requestedModel(), run.modelName());
         String title = workflow != null ? workflow.templateName() : "研究报告 · " + run.question();
         if (decision) title += " · " + String.valueOf(inputs.get("decisionQuestion")).replaceAll("\\s+", " ").strip();
@@ -122,9 +134,16 @@ public class ResearchReportService {
         }
         if (snapshot.evidenceQuality() != null) {
             var quality = snapshot.evidenceQuality();
-            result.append("## 资料完整性检查\n\n执行状态：已完成。证据状态：").append(quality.label()).append("。\n\n")
-                    .append(quality.summary()).append("\n\n");
-            quality.reasons().forEach(reason -> result.append("- ").append(reason.message()).append('\n'));
+            if (quality.coverage() == null) {
+                result.append("## 资料完整性检查\n\n执行状态：已完成。证据状态：").append(quality.label()).append("。\n\n")
+                        .append(quality.summary()).append("\n\n");
+                quality.reasons().forEach(reason -> result.append("- ").append(reason.message()).append('\n'));
+            } else {
+                result.append("## 评估依据与验证\n\n");
+                evidenceSection(result, "工程依据", quality.coverage().engineering());
+                evidenceSection(result, "外部资料", quality.coverage().external());
+                evidenceSection(result, "实际验证", quality.coverage().validation());
+            }
             result.append("\n此检查随报告保存，后续重新研究不会改写本快照。\n\n");
         }
         result.append(snapshot.answer());
@@ -227,6 +246,15 @@ public class ResearchReportService {
     private static void field(StringBuilder out, String label, String value) {
         out.append("- ").append(label).append("：")
                 .append(value == null || value.isBlank() ? "未提供" : value.replaceAll("\\R", " / ")).append('\n');
+    }
+
+    private static void evidenceSection(StringBuilder out, String title, Section section) {
+        out.append("### ").append(title).append('\n').append('\n')
+                .append(section.label()).append('\n').append('\n')
+                .append(section.summary()).append('\n');
+        if (!section.reasons().isEmpty()) out.append('\n');
+        section.reasons().forEach(reason -> out.append("- ").append(reason.message()).append('\n'));
+        out.append('\n');
     }
 
     private String url(String value) { return value.startsWith("/api/v1/knowledge/uploads/") ? publicUrl + value : value; }

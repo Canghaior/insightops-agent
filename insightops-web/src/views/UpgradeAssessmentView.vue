@@ -262,7 +262,10 @@ onMounted(async () => {
     </div>
     <div v-if="loading" class="panel padded">正在加载关注框架与保存的配置…</div>
     <div v-else-if="initializationFailed" class="panel padded"><RouterLink to="/business-systems">返回业务系统</RouterLink></div>
-    <div v-else-if="setup && !setup.projects.length" class="panel padded">还没有关注的框架。<RouterLink to="/projects">先选择关注项目</RouterLink>，再回来填写版本。</div>
+    <div v-else-if="setup && !setup.projects.length" class="panel padded">
+      <p>还没有关注的框架。<RouterLink :to="{ path: '/projects', query: { resume: 'upgrade', systemId: system?.id } }">选择要升级的框架</RouterLink>，再核对当前版本、目标版本和适用资料。</p>
+      <RouterLink :to="system ? { name: 'system-decision', params: { id: system.id } } : { path: '/business-systems', query: { intent: 'decision' } }">评估项目内部的问题</RouterLink>
+    </div>
     <div v-else-if="eventFailed" class="panel padded"><p>无法确认所选事件，尚未发起研究。</p><RouterLink to="/updates">返回更新列表重新选择</RouterLink></div>
     <form v-else-if="setup" class="panel padded" @submit.prevent="launch">
       <div v-if="system" class="linked-system">

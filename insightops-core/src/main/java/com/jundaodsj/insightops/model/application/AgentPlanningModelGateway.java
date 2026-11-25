@@ -93,11 +93,17 @@ public interface AgentPlanningModelGateway {
             String model,
             ModelUsage usage,
             Duration duration,
-            Continuation continuation) {
+            Continuation continuation,
+            String responseId) {
+
+        public AgentPlanResponse(String content, List<PlannedToolCall> toolCalls, String provider,
+                String model, ModelUsage usage, Duration duration, Continuation continuation) {
+            this(content, toolCalls, provider, model, usage, duration, continuation, null);
+        }
 
         public AgentPlanResponse(String content, List<PlannedToolCall> toolCalls, String provider,
                 String model, ModelUsage usage, Duration duration) {
-            this(content, toolCalls, provider, model, usage, duration, null);
+            this(content, toolCalls, provider, model, usage, duration, null, null);
         }
 
         public AgentPlanResponse {

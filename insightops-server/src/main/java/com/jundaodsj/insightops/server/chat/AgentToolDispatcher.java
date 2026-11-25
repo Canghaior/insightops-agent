@@ -545,6 +545,7 @@ public class AgentToolDispatcher {
             sources.add(Map.of(
                     "citation", label, "chunkId", item.chunkId(),
                     "project", item.projectName(), "url", item.canonicalUrl(),
+                    "heading", clean(item.headingPath()), "sourceUrl", sourceUrl, "passage", item.content(),
                     "score", item.score(), "version", item.versionLabel() == null ? "未标注" : item.versionLabel(),
                     "collectedAt", item.collectedAt() == null ? "未知" : item.collectedAt().toString()));
             prompt.append('[').append(label).append("]\n项目：").append(clean(item.projectName()))

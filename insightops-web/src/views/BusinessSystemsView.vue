@@ -12,6 +12,8 @@ import SystemBackgroundPanel from '@/components/SystemBackground.vue'
 const route = useRoute()
 const router = useRouter()
 const mode = computed(() => route.name)
+const decisionIntent = computed(() => route.query.intent === 'decision')
+const intentQuery = computed(() => decisionIntent.value ? { intent: 'decision' } : {})
 const id = computed(() => String(route.params.id ?? ''))
 const editing = computed(() => mode.value === 'business-system-edit' || mode.value === 'business-system-new')
 const empty = (): SystemBackground => ({ name: '', purpose: '', keyProcesses: '', technologyStack: '', currentProblems: '', constraints: '' })
@@ -103,7 +105,7 @@ async function save() {
   try {
     const draft = { background: { ...background.value }, uploadIds: [...uploadIds.value] }
     const saved = detail.value ? await updateSystem(id.value, detail.value.revision, draft) : await createSystem(draft)
-    if (generation === loadSequence) await router.push({ name: 'business-system', params: { id: saved.id } })
+    if (generation === loadSequence) await router.push({ name: 'business-system', params: { id: saved.id }, query: intentQuery.value })
   } catch (reason) {
     if (generation !== loadSequence) return
     conflict.value = isAxiosError(reason) && reason.response?.status === 409
@@ -116,10 +118,10 @@ async function save() {
   <section class="systems-page">
     <div class="section-heading">
       <div>
-        <RouterLink v-if="mode !== 'business-systems'" class="back" to="/business-systems">← 业务系统列表</RouterLink>
+        <RouterLink v-if="mode !== 'business-systems'" class="back" :to="{ path: '/business-systems', query: intentQuery }">← 业务系统列表</RouterLink>
         <h2>{{ editing ? (id ? '编辑业务系统' : '新建业务系统') : mode === 'business-systems' ? '业务系统' : '系统档案' }}</h2>
       </div>
-      <RouterLink v-if="mode === 'business-systems'" class="primary-button" to="/business-systems/new">新建系统</RouterLink>
+      <RouterLink v-if="mode === 'business-systems'" class="primary-button" :to="{ path: '/business-systems/new', query: intentQuery }">新建系统</RouterLink>
       <div v-if="detail && !editing" class="actions">
         <RouterLink class="secondary-button" :to="{ name: 'business-system-edit', params: { id } }">编辑档案</RouterLink>
         <RouterLink class="primary-button" :to="{ name: 'system-decision', params: { id } }">系统决策评估</RouterLink>
@@ -130,9 +132,10 @@ async function save() {
     <p v-if="loading" role="status">正在载入…</p>
     <template v-else-if="!failed">
       <section v-if="mode === 'business-systems'" class="panel">
+        <p v-if="decisionIntent">先选择或新建业务系统，再导入工程基线，发起系统决策评估。内部业务规则可以只使用工程材料。</p>
         <p class="scope">当前工作区 · 仅本人可见</p>
         <p v-if="!systems.length">还没有业务系统。创建档案后，即可从同一系统发起和回看评估。</p>
-        <RouterLink v-for="system in systems" :key="system.id" class="system-row" :to="{ name: 'business-system', params: { id: system.id } }">
+        <RouterLink v-for="system in systems" :key="system.id" class="system-row" :to="{ name: 'business-system', params: { id: system.id }, query: intentQuery }">
           <span><strong>{{ system.name }}</strong><small>{{ system.purpose || '用途未填写' }}</small></span>
           <span class="row-meta">修订 {{ system.revision }}<small>{{ date(system.updatedAt) }}</small></span>
         </RouterLink>
@@ -158,6 +161,7 @@ async function save() {
         </div>
       </form>
       <template v-else-if="detail">
+        <p v-if="decisionIntent">在「工程基线」导入相关模块，随后点「系统决策评估」选择该版本并提出具体问题。</p>
         <div class="panel"><SystemBackgroundPanel :system="detail" /></div>
         <EngineeringBaselinePanel :key="detail.id" :system-id="detail.id" />
         <section class="panel history">

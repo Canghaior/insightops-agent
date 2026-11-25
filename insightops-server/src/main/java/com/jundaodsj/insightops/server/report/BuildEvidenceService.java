@@ -78,9 +78,7 @@ public class BuildEvidenceService {
                              Map<String, List<MultipartFile>> parts) {
         UUID system = system(actor, reportId);
         ImportCommand command = command(declaration);
-        Metadata meta = new Metadata(optional(command.label(), 180), optional(command.environment(), 1000),
-                BuildEvidenceDocuments.timestamp(optional(command.executedAt(), 100), "执行时间"),
-                optional(command.executedBy(), 180), command.exitCode(), optional(command.sourceNote(), 2000));
+        Metadata meta = metadata(command);
         List<Original> originals = originals(parts);
         List<List<String>> identities = originals.stream().map(Original::file)
                 .map(f -> List.of(f.kind().name(), f.name(), f.sha256())).toList();
@@ -96,6 +94,22 @@ public class BuildEvidenceService {
         if (store.insert(actor, command.requestId(), fingerprint, batch, originals)) return batch;
         // ON CONFLICT waits for the concurrent import transaction. Its receipt and originals are now committed.
         return replay(actor, system, store.request(actor, system, command.requestId()).orElseThrow(), fingerprint);
+    }
+
+    @Transactional(readOnly = true)
+    public Batch inspectBatch(ActorContext actor, UUID reportId, String declaration,
+                              Map<String, List<MultipartFile>> parts) {
+        UUID system = system(actor, reportId);
+        ImportCommand command = command(declaration);
+        Metadata meta = metadata(command);
+        var header = new Summary(UUID.randomUUID(), system, reportId, command.role(), meta.label(), Instant.now(), null);
+        return documents.analyze(header, meta, originals(parts));
+    }
+
+    private static Metadata metadata(ImportCommand command) {
+        return new Metadata(optional(command.label(), 180), optional(command.environment(), 1000),
+                BuildEvidenceDocuments.timestamp(optional(command.executedAt(), 100), "执行时间"),
+                optional(command.executedBy(), 180), command.exitCode(), optional(command.sourceNote(), 2000));
     }
 
     private UUID system(ActorContext actor, UUID reportId) {

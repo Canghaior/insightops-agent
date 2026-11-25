@@ -55,6 +55,38 @@ class BuildEvidenceServiceTest {
         return parts;
     }
 
+    @Test void supportsTypicalCommandFieldAliasesWithoutChangingTheOriginal() throws Exception {
+        var parts = sources();
+        var input = data("commandRecord", "command.json", """
+                {"command":["mvn","test"],"exitCode":0,
+                 "startedAt":"2026-11-24T09:00:00+08:00","endedAt":"2026-11-24T09:01:00+08:00",
+                 "start":"2026-11-24T01:00:00Z"}
+                """);
+        parts.put("commandRecord", List.of(input));
+        var batch = service.importBatch(actor, report, declaration(""), parts);
+        var command = batch.commandRecord();
+        assertThat(command.exitCode()).isZero();
+        assertThat(command.startedAt()).isEqualTo("2026-11-24T01:00:00Z");
+        assertThat(command.endedAt()).isEqualTo("2026-11-24T09:01:00+08:00");
+        String originalSha = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(input.getBytes()));
+        assertThat(batch.files()).filteredOn(file -> file.kind() == FileKind.COMMAND_RECORD)
+                .singleElement().satisfies(file -> assertThat(file.sha256()).isEqualTo(originalSha));
+    }
+
+    @Test void contradictoryCommandAliasesCannotBeSaved() {
+        var parts = sources();
+        parts.put("commandRecord", List.of(data("commandRecord", "command.json",
+                "{\"exit\":0,\"exitCode\":1}")));
+        assertThatIllegalArgumentException().isThrownBy(() -> service.importBatch(actor, report, declaration(""), parts))
+                .withMessageContaining("exit 和 exitCode 的值不一致");
+        parts.put("commandRecord", List.of(data("commandRecord", "command.json", """
+                {"end":"2026-11-24T01:01:00Z","endedAt":"2026-11-24T09:02:00+08:00"}
+                """)));
+        assertThatIllegalArgumentException().isThrownBy(() -> service.importBatch(actor, report, declaration(""), parts))
+                .withMessageContaining("end 和 endedAt 的时间不一致");
+        verify(store, never()).insert(any(), any(), any(), any(), any());
+    }
+
     @Test void storesOriginalBytesWithProvenanceAndKeepsConflictingClaimsSeparate() throws Exception {
         var parts = sources();
         parts.put("mavenLog", List.of(data("mavenLog","maven.log",

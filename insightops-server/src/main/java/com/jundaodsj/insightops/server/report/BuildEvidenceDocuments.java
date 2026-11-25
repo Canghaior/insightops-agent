@@ -154,19 +154,18 @@ final class BuildEvidenceDocuments {
 
     private static BuildRecord command(JsonNode root, List<String> warnings) {
         JsonNode args = root.get("command");
-        if (args == null && !root.has("exit") && !root.has("start") && !root.has("end"))
-            throw new IllegalArgumentException("未找到支持的 command、exit、start 或 end 字段。");
+        if (args == null && List.of("exit", "exitCode", "start", "startedAt", "end", "endedAt").stream().noneMatch(root::has))
+            throw new IllegalArgumentException("未找到支持的命令字段。可使用 command、exit/exitCode、start/startedAt 或 end/endedAt。");
         List<String> command = new ArrayList<>();
         if (args != null && !args.isNull()) {
             if (!args.isArray() || args.size() > 256) throw new IllegalArgumentException("command 应为最多 256 个参数的数组。");
             for (JsonNode arg : args) command.add(string(arg, 4096, "command 参数"));
         }
-        JsonNode status = root.get("exit");
-        Integer exit = null;
-        if (status != null && !status.isNull()) {
-            if (!status.isIntegralNumber() || !status.canConvertToInt()) throw new IllegalArgumentException("exit 应为整数。");
-            exit = status.intValue();
-        }
+        Integer exit = optionalExit(root, "exit");
+        Integer exitCode = optionalExit(root, "exitCode");
+        if (exit != null && exitCode != null && !exit.equals(exitCode))
+            throw new IllegalArgumentException("exit 和 exitCode 的值不一致，请核对原始构建记录。");
+        if (exit == null) exit = exitCode;
         List<String> selectors = new ArrayList<>();
         boolean otherTestProperty = false;
         for (int i = 0; i < command.size(); i++) {
@@ -194,7 +193,7 @@ final class BuildEvidenceDocuments {
         } else if (!selectors.isEmpty() || otherTestProperty) {
             warnings.add("选择器包含通配、方法、组合、重复或不支持的参数写法，保留原命令，具体排除范围未知。");
         }
-        String start = time(root, "start"), end = time(root, "end");
+        String start = time(root, "start", "startedAt"), end = time(root, "end", "endedAt");
         if (start != null && end != null && OffsetDateTime.parse(start).isAfter(OffsetDateTime.parse(end)))
             warnings.add("命令记录的结束时间早于开始时间，请核对原记录。");
         return new BuildRecord(List.copyOf(command), exit, start, end, selector, excluded);
@@ -234,6 +233,22 @@ final class BuildEvidenceDocuments {
 
     private static String time(JsonNode root, String key) {
         return !root.hasNonNull(key) ? null : timestamp(string(root.get(key), 100, key), key);
+    }
+
+    private static String time(JsonNode root, String key, String alias) {
+        String value = time(root, key);
+        String alternate = time(root, alias);
+        if (value != null && alternate != null && !OffsetDateTime.parse(value).isEqual(OffsetDateTime.parse(alternate)))
+            throw new IllegalArgumentException(key + " 和 " + alias + " 的时间不一致，请核对原始构建记录。");
+        return value == null ? alternate : value;
+    }
+
+    private static Integer optionalExit(JsonNode root, String key) {
+        if (!root.hasNonNull(key)) return null;
+        JsonNode value = root.get(key);
+        if (!value.isIntegralNumber() || !value.canConvertToInt())
+            throw new IllegalArgumentException(key + " 应为整数。");
+        return value.intValue();
     }
 
     private static String string(JsonNode node, int max, String key) {

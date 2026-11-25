@@ -3,10 +3,11 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import MarkdownContent from '@/components/MarkdownContent.vue'
+import ClaimReviewPanel from '@/components/ClaimReviewPanel.vue'
 import EvidenceQualityPanel from '@/components/EvidenceQualityPanel.vue'
 import ReportReviewPanel from '@/components/ReportReviewPanel.vue'
 import { frozenBaseline } from '@/api/engineeringBaselines'
-import { isReviewEligible } from '@/api/reportReview'
+import { isReviewEligible, type Verification } from '@/api/reportReview'
 import { listProjects, type ProjectWatch } from '@/api/projects'
 import {
   createDeliveryChannel, createReport, deleteDeliveryChannel, downloadReport,
@@ -28,10 +29,14 @@ const reviewCandidateId = computed(() => {
     ? report.id : null
 })
 const reviewAccess = ref<'closed' | 'checking' | 'open' | 'error'>('closed')
+const verificationSummary = ref('')
+const reviewVersions = ref<Verification[]>([])
 let reviewRequest = 0
 async function checkReviewAccess() {
   const id = reviewCandidateId.value
   const request = ++reviewRequest
+  verificationSummary.value = ''
+  reviewVersions.value = []
   reviewAccess.value = id ? 'checking' : 'closed'
   if (!id) return
   try {
@@ -40,6 +45,16 @@ async function checkReviewAccess() {
   } catch { if (request === reviewRequest) reviewAccess.value = 'error' }
 }
 watch(reviewCandidateId, checkReviewAccess, { flush: 'sync' })
+function updateVerificationSummary(reportId: string, versions: Verification[]) {
+  if (reportId !== reviewCandidateId.value) return
+  reviewVersions.value = versions
+  const superseded = new Set(versions.map(version => version.previousVersionId))
+  const latest = versions.filter(version => !superseded.has(version.id))
+  const executed = latest.filter(version => version.fields.status === 'EXECUTED').length
+  verificationSummary.value = latest.length
+    ? `后续关联 ${latest.length} 条验证记录，其中 ${executed} 条记录为已执行。`
+    : '当前尚无后续验证记录。'
+}
 function selectReport(report: ResearchReport) {
   selectedReport.value = report
   void router.replace({ query: { ...route.query, reportId: report.id } })
@@ -197,11 +212,20 @@ onMounted(load)
     </details>
     <div class="report-workspace">
       <div class="report-list"><h3 class="subsection-title">历史报告</h3><button v-for="report in reports" :key="report.id" :class="{active:selectedReport?.id===report.id}" @click="selectReport(report)"><span><b>{{ report.title }}</b><i>{{ report.reportType === 'RESEARCH' ? '研究快照' : `${report.highRiskCount} 高风险` }}</i></span><small><template v-if="report.research?.inputs?.systemSnapshot?.revision">档案修订 {{ report.research.inputs.systemSnapshot.revision }} · </template>{{ report.itemCount }} 条 · {{ time(report.createdAt) }}</small><EvidenceQualityPanel v-if="report.research?.evidenceQuality" :quality="report.research.evidenceQuality" compact /><small v-else-if="report.reportType === 'RESEARCH'">历史快照未记录资料完整性检查</small></button><div v-if="!reports.length" class="conversation-empty"><strong>尚无已保存报告</strong><p>在已完成的系统评估中点「保存为研究报告」，即可在此重新打开。</p></div></div><article v-if="selectedReport" class="panel report-detail">
-        <header><div><span class="eyebrow">{{ selectedReport.reportType === 'RESEARCH' ? '研究快照' : '情报汇总' }}</span><h3>{{ selectedReport.title }}</h3><p>{{ time(selectedReport.periodStart) }} — {{ time(selectedReport.periodEnd) }}</p></div><i class="status-pill">{{ selectedReport.itemCount }} 条</i></header><div class="quality-actions"><button class="secondary-button" :disabled="saving" @click="download(selectedReport,'md')">下载 Markdown</button><button class="secondary-button" :disabled="saving" @click="download(selectedReport,'pdf')">下载 PDF</button><select v-model="selectedChannelId"><option value="">选择 Webhook</option><option v-for="channel in enabledChannels" :key="channel.id" :value="channel.id">{{ channel.name }}</option></select><button class="send-button" :disabled="saving || !selectedChannelId" @click="deliver(selectedReport)">加入投递队列</button></div><EvidenceQualityPanel v-if="selectedReport.research?.evidenceQuality" :quality="selectedReport.research.evidenceQuality" /><p v-else-if="selectedReport.reportType === 'RESEARCH'" class="subtle" role="status">这份历史报告没有保存资料完整性检查结果，不能据此认定结论已核验。原快照保持不变，可发起新的研究。</p>
+        <header><div><span class="eyebrow">{{ selectedReport.reportType === 'RESEARCH' ? '研究快照' : '情报汇总' }}</span><h3>{{ selectedReport.title }}</h3><p>{{ time(selectedReport.periodStart) }} — {{ time(selectedReport.periodEnd) }}</p></div><i class="status-pill">{{ selectedReport.itemCount }} 条</i></header><div class="quality-actions"><button class="secondary-button" :disabled="saving" @click="download(selectedReport,'md')">下载 Markdown</button><button class="secondary-button" :disabled="saving" @click="download(selectedReport,'pdf')">下载 PDF</button><select v-model="selectedChannelId"><option value="">选择 Webhook</option><option v-for="channel in enabledChannels" :key="channel.id" :value="channel.id">{{ channel.name }}</option></select><button class="send-button" :disabled="saving || !selectedChannelId" @click="deliver(selectedReport)">加入投递队列</button></div>
+        <EvidenceQualityPanel v-if="selectedReport.research?.evidenceQuality" :quality="selectedReport.research.evidenceQuality">
+          <template #validation v-if="reviewAccess === 'open'">
+            <p v-if="verificationSummary">{{ verificationSummary }}</p>
+            <a href="#report-verification-records">查看验证记录与原件</a>
+          </template>
+        </EvidenceQualityPanel>
+        <p v-else-if="selectedReport.reportType === 'RESEARCH'" class="subtle" role="status">这份历史报告没有保存资料完整性检查结果，不能据此认定结论已核验。原快照保持不变，可发起新的研究。</p>
+        <ClaimReviewPanel v-if="selectedReport.research?.evidence?.some(item => item.claimReviewVersion === 1)" :key="selectedReport.id" :report="selectedReport" :verifications="reviewVersions" />
         <p v-if="reviewAccess === 'checking'" class="subtle" role="status">正在核对本报告的工程验证入口…</p>
         <p v-else-if="reviewAccess === 'error'" class="stream-error" role="alert">暂时无法核对本报告的验证入口。<button type="button" class="text-button" @click="checkReviewAccess">重试加载验证入口</button></p>
         <ReportReviewPanel
           v-else-if="reviewAccess === 'open'" :key="selectedReport.id" :report-id="selectedReport.id" :original-answer="selectedReport.research?.answer"
+          id="report-verification-records" @loaded="updateVerificationSummary"
           :report-title="selectedReport.title" :markdown="selectedReport.markdown" :baseline="frozenBaseline(selectedReport.research?.inputs)" :sources="reportSources"
         />
         <p v-if="selectedReport.reportType === 'RESEARCH' && !selectedReport.research?.inputs?.engineeringBaseline">本次评估未关联工程基线。</p>

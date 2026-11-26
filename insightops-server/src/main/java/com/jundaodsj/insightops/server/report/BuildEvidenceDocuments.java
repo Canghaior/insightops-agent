@@ -33,6 +33,8 @@ final class BuildEvidenceDocuments {
     private static final Pattern ANSI_COLORS = Pattern.compile("\\x1b\\[[;\\d]*m");
     private static final Pattern REACTOR_ROW = Pattern.compile(
             "^\\[INFO]\\s+(.+?)\\s+\\.{3,}\\s+(SUCCESS|FAILURE|SKIPPED)(?:\\s+\\[.*])?\\s*$");
+    private static final Pattern REACTOR_PROJECT = Pattern.compile("^\\[INFO]\\s+Building (.+?)\\s+\\S+\\s+\\[\\d+/\\d+]$");
+    private static final Pattern SUREFIRE_GOAL = Pattern.compile("^\\[INFO]\\s+--- (?:maven-)?surefire(?:-plugin)?:[^: ]+:test .* ---$");
     private static final int MAX_MANIFEST_METHODS = 1000;
 
     private final ObjectMapper json;
@@ -114,6 +116,7 @@ final class BuildEvidenceDocuments {
         if ("SUCCESS".equals(log.outcome()) && counts.failures() + counts.errors() > 0)
             warnings.add("日志报告构建成功，但 XML 有失败或报错；请核对日志与测试配置。");
         if (cases.isEmpty()) warnings.add("已导入的套件没有记录任何 testcase。");
+        if (reactor) verifyModuleDirectories(declarations, directoriesByModule, casesByModule, warnings);
         List<Module> modules = modules(declarations, logSource, casesByModule, warnings);
         warnings.add(reactor
                 ? "统计仅涵盖按模块提交的 XML。模块路径、项目名和选择范围来自提交者。日志状态按唯一的项目名称对应。"
@@ -162,16 +165,45 @@ final class BuildEvidenceDocuments {
         return value.startsWith("\uFEFF") ? value.substring(1) : value;
     }
 
+    private static void verifyModuleDirectories(List<ModuleDeclaration> declared, Map<String, Set<String>> basedirs,
+                                                Map<String, List<TestCase>> cases, List<String> warnings) {
+        var roots = new HashSet<String>();
+        for (var module : declared) {
+            if (!cases.containsKey(module.path())) continue;
+            var directory = basedirs.getOrDefault(module.path(), Set.of()).stream().findFirst().orElse("");
+            var normalized = directory.replace('\\', '/').replaceAll("/+$", "");
+            boolean windows = normalized.startsWith("//") || normalized.matches("(?i)^[a-z]:.*");
+            if (!windows && !normalized.startsWith("/")) {
+                warnings.add("模块 " + module.path() + " 的 XML 缺少绝对 basedir，目录归属按提交声明归档。");
+                continue;
+            }
+            String path = module.path();
+            if (windows) {
+                normalized = normalized.toLowerCase(Locale.ROOT);
+                path = path.toLowerCase(Locale.ROOT);
+            }
+            if (path.equals(".")) {
+                roots.add(normalized);
+            } else {
+                String suffix = "/" + path;
+                if (!normalized.endsWith(suffix))
+                    throw new IllegalArgumentException("模块 " + module.path() + " 的 XML 原始 basedir 与所选目录不匹配。");
+                roots.add(normalized.substring(0, normalized.length() - suffix.length()));
+            }
+        }
+        if (roots.size() > 1) throw new IllegalArgumentException("多模块 XML 的 basedir 未对应到同一 Reactor 根目录。");
+    }
+
     private static List<Module> modules(List<ModuleDeclaration> declared, String source,
                                          Map<String, List<TestCase>> casesByModule, List<String> warnings) {
         if (declared.isEmpty()) return List.of();
-        Map<String, ModuleState> observed = reactorSummary(source);
+        var observed = reactorSummary(source);
         Map<String, Integer> names = new HashMap<>();
         for (var module : declared) names.merge(module.projectName(), 1, Integer::sum);
         var modules = new ArrayList<Module>();
         for (var module : declared) {
             ModuleState state = names.get(module.projectName()) == 1
-                    ? observed.getOrDefault(module.projectName(), ModuleState.UNKNOWN) : ModuleState.UNKNOWN;
+                    ? observed.states().getOrDefault(module.projectName(), ModuleState.UNKNOWN) : ModuleState.UNKNOWN;
             var cases = casesByModule.get(module.path());
             if (Boolean.FALSE.equals(module.selected())) {
                 if (state == ModuleState.UNKNOWN && cases == null) state = ModuleState.NOT_SELECTED;
@@ -183,13 +215,16 @@ final class BuildEvidenceDocuments {
             if (state == ModuleState.UNKNOWN) {
                 warnings.add("模块 " + module.path() + " 缺少可唯一对应的 Reactor 状态。");
             }
+            boolean noTests = state == ModuleState.SUCCESS && (cases == null || cases.isEmpty())
+                    && observed.noTests().contains(module.projectName());
             modules.add(new Module(module.path(), module.projectName(), module.selected(), state,
-                    cases == null ? null : Counts.from(cases)));
+                    cases == null ? null : Counts.from(cases), noTests));
         }
         return List.copyOf(modules);
     }
 
-    private static Map<String, ModuleState> reactorSummary(String source) {
+    private record ReactorSummary(Map<String, ModuleState> states, Set<String> noTests) {}
+    private static ReactorSummary reactorSummary(String source) {
         var states = new HashMap<String, ModuleState>();
         var duplicateNames = new HashSet<String>();
         boolean started = false;
@@ -211,7 +246,33 @@ final class BuildEvidenceDocuments {
             }
         }
         duplicateNames.forEach(states::remove);
-        return states;
+        return new ReactorSummary(states, noTestModules(source));
+    }
+
+    private static Set<String> noTestModules(String source) {
+        // Maven serial output identifies the project for a Surefire goal by its preceding Building line.
+        if (source.contains("MultiThreadedBuilder")) return Set.of();
+        var noTests = new HashSet<String>();
+        var observedTests = new HashSet<String>();
+        String project = null;
+        boolean surefire = false;
+        for (String raw : source.lines().toList()) {
+            String line = ANSI_COLORS.matcher(raw).replaceAll("").strip();
+            if (line.startsWith("[INFO] Reactor Summary")) break;
+            if (line.startsWith("[INFO] Building ")) {
+                var building = REACTOR_PROJECT.matcher(line);
+                project = building.matches() ? building.group(1) : null;
+                surefire = false;
+            } else if (line.startsWith("[INFO] --- ")) {
+                surefire = SUREFIRE_GOAL.matcher(line).matches();
+            } else if (surefire && project != null) {
+                if (line.equals("[INFO] No tests to run.")) noTests.add(project);
+                var count = LOG_COUNTS.matcher(line);
+                if (count.matches() && Integer.parseInt(count.group(1)) > 0) observedTests.add(project);
+            }
+        }
+        noTests.removeAll(observedTests);
+        return noTests;
     }
 
     private static LogFacts log(String source, List<String> warnings, boolean reactor) {

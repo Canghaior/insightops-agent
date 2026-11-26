@@ -116,6 +116,38 @@ class BuildEvidenceServiceTest {
                 HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(gbk)));
     }
 
+    @Test void reactorRejectsMisassignedXmlAndSeparateBuildRoots() {
+        String modules = """
+                ,"modules":[{"path":"alpha","projectName":"alpha"},{"path":"beta","projectName":"beta"}]
+                """;
+        var alpha = data("moduleXml0", "TEST-pkg.A.xml", xml("pkg.A", "/one/alpha"));
+        var beta = data("moduleXml1", "TEST-pkg.A.xml", xml("pkg.A", "/two/beta"));
+        assertThatIllegalArgumentException().isThrownBy(() -> service.inspectBatch(actor, report,
+                declaration(modules), Map.of("moduleXml0", List.of(beta), "moduleXml1", List.of(alpha))))
+                .withMessageContaining("与所选目录不匹配");
+        assertThatIllegalArgumentException().isThrownBy(() -> service.inspectBatch(actor, report,
+                declaration(modules), Map.of("moduleXml0", List.of(alpha), "moduleXml1", List.of(beta))))
+                .withMessageContaining("同一 Reactor 根目录");
+    }
+
+    @Test void reactorDistinguishesObservedNoTestsFromMissingArtifacts() {
+        var batch = service.inspectBatch(actor, report, declaration("""
+                ,"modules":[{"path":".","projectName":"root"},{"path":"empty","projectName":"empty"}]
+                """), Map.of("mavenLog", List.of(data("mavenLog", "reactor.log", """
+                [INFO] Building root 1.0 [1/2]
+                [INFO] Building empty 1.0 [2/2]
+                [INFO] --- surefire:3.5.4:test (default-test) @ empty ---
+                [INFO] No tests to run.
+                [INFO] Reactor Summary:
+                [INFO] root ............... SUCCESS [ 0.001 s]
+                [INFO] empty .............. SUCCESS [ 0.005 s]
+                [INFO] ---------------------------------------
+                [INFO] BUILD SUCCESS
+                """))));
+        assertThat(batch.modules()).extracting(module -> module.noTestsReported()).containsExactly(false, true);
+        assertThat(batch.modules()).allMatch(module -> module.counts() == null);
+    }
+
     @Test void reactorDoesNotGuessWhenSummaryNamesAreAmbiguous() {
         var batch = service.inspectBatch(actor, report, declaration("""
                 ,"modules":[{"path":"one","projectName":"same"},{"path":"two","projectName":"same"}]

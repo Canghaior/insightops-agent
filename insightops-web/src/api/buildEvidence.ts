@@ -44,6 +44,7 @@ export interface BuildModuleDeclaration {
 export interface BuildModule extends BuildModuleDeclaration {
   state: 'SUCCESS' | 'FAILURE' | 'SKIPPED' | 'NOT_SELECTED' | 'UNKNOWN'
   counts: BuildCounts | null
+  noTestsReported?: boolean
 }
 const moduleStates: Record<BuildModule['state'], string> = {
   SUCCESS: '构建成功', FAILURE: '构建失败', SKIPPED: '构建跳过', NOT_SELECTED: '声明未选中', UNKNOWN: '状态未知',
@@ -52,7 +53,8 @@ export function describeModule(module: BuildModule | null) {
   if (!module) return '未提供该模块'
   const c = module.counts
   const evidence = c ? `通过 ${c.passed}，断言失败 ${c.failures}，执行报错 ${c.errors}，跳过 ${c.skipped}` : '未取得模块 XML'
-  return `${moduleStates[module.state]} · ${evidence}`
+  const noTests = module.noTestsReported ? ' · Surefire 日志记录无测试' : ''
+  return `${moduleStates[module.state]}${noTests} · ${evidence}`
 }
 export function evidenceFileName(file: EvidenceFile) {
   return file.modulePath ? `${file.modulePath}/${file.name}` : file.name

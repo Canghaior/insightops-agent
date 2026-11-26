@@ -122,6 +122,7 @@ public record BuildEvidenceComparison(UUID baselineId, UUID candidateId, Scope s
     private static boolean differingCoverage(Module before, Module after) {
         return before == null || after == null || !Objects.equals(before.selected(), after.selected())
                 || (before.counts() == null) != (after.counts() == null)
+                || before.noTestsReported() != after.noTestsReported()
                 || skipped(before.state()) != skipped(after.state());
     }
 

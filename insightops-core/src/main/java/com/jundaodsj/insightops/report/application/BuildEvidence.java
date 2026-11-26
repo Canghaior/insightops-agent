@@ -37,7 +37,8 @@ public final class BuildEvidence {
     public record LogFacts(String outcome, Counts counts) {}
     public record ExcludedMethod(String className, String methodName, String source) {}
     public record ModuleDeclaration(String path, String projectName, Boolean selected) {}
-    public record Module(String path, String projectName, Boolean selected, ModuleState state, Counts counts) {}
+    public record Module(String path, String projectName, Boolean selected, ModuleState state, Counts counts,
+                         boolean noTestsReported) {}
     public record EvidenceFile(UUID id, String name, FileKind kind, long size, String sha256, String modulePath) {
         public EvidenceFile(UUID id, String name, FileKind kind, long size, String sha256) {
             this(id, name, kind, size, sha256, null);

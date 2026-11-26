@@ -140,7 +140,8 @@ final class HandoffMarkdown {
         var count = module.counts();
         String xml = count == null ? "未取得模块 XML" : "%d 项，%d 通过、%d 断言失败、%d 执行报错、%d 跳过"
                 .formatted(count.total(), count.passed(), count.failures(), count.errors(), count.skipped());
-        return module.projectName() + " · " + state + " · " + xml;
+        String noTests = module.noTestsReported() ? " · Surefire 日志记录无测试" : "";
+        return module.projectName() + " · " + state + noTests + " · " + xml;
     }
 
     private static void writeBuild(StringBuilder text, String label, Batch batch) {

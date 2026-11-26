@@ -96,6 +96,7 @@ class BuildEvidenceServiceTest {
         assertThat(comparison.groups()).extracting(group -> group.modulePath()).containsExactly("alpha", "beta");
         assertThat(comparison.groups().get(1).change().name()).isEqualTo("BASELINE_ONLY");
         assertThat(comparison.modules()).hasSize(4);
+        assertThat(comparison.objectiveSummary()).contains("模块实际执行或 XML 覆盖存在差异");
     }
 
     @Test void reactorReadsWindowsLogWhilePreservingBytes() throws Exception {

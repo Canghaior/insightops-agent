@@ -37,7 +37,7 @@ const fileNames = computed(() => new Map([...props.baseline.files, ...props.cand
       {{ comparison.scope === 'SAME_OBSERVED'
         ? '两批 XML 中上报的测试身份与出现次数一致。'
         : comparison.modules?.length
-          ? '两侧模块选择或 XML 测试范围有差异。请核对分模块结果。'
+          ? '两侧模块记录或 XML 测试覆盖有差异。请核对分模块结果。'
           : '两批 XML 的测试集合或出现次数不同。请逐项核对单侧测试与重复项。' }}
     </p>
     <div class="summary" aria-label="产品解析摘要">

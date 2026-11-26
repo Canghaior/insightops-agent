@@ -76,8 +76,10 @@ public record BuildEvidenceComparison(UUID baselineId, UUID candidateId, Scope s
         keys.addAll(left.keySet());
         keys.addAll(right.keySet());
         var groups = new ArrayList<Group>();
-        boolean changedModuleScope = modules.stream().anyMatch(module -> differingCoverage(module.baseline(), module.candidate()));
-        var scope = changedModuleScope ? Scope.DIFFERENT_OBSERVED : Scope.SAME_OBSERVED;
+        boolean changedSelection = modules.stream().anyMatch(module -> module.baseline() == null
+                || module.candidate() == null || !Objects.equals(module.baseline().selected(), module.candidate().selected()));
+        boolean changedCoverage = modules.stream().anyMatch(module -> differingCoverage(module.baseline(), module.candidate()));
+        var scope = changedSelection || changedCoverage ? Scope.DIFFERENT_OBSERVED : Scope.SAME_OBSERVED;
         int ambiguous = 0, changed = 0;
         for (var key : keys) {
             var before = left.getOrDefault(key, List.of());
@@ -94,7 +96,8 @@ public record BuildEvidenceComparison(UUID baselineId, UUID candidateId, Scope s
         var rightCounts = Counts.of(candidate.summary().counts());
         String observation = scope == Scope.SAME_OBSERVED ? "两边 XML 中的测试身份和出现次数一致。"
                 : "两边 XML 中的测试身份或出现次数不同，无法按同一范围比较通过率。";
-        if (changedModuleScope) observation = "两边声明的模块集合或选择范围不同，请核对分模块证据。";
+        if (changedSelection) observation = "两边声明的模块集合或选择范围不同，请核对分模块证据。";
+        else if (changedCoverage) observation = "两边模块实际执行或 XML 覆盖存在差异，请核对分模块证据。";
         String summary = "基线 XML 记录 " + leftCounts.describe() + "。候选 XML 记录 " + rightCounts.describe() + "。" + observation
                 + "可逐项匹配的身份中，" + changed + " 项状态发生变化。";
         if (ambiguous > 0) summary += "另有 " + ambiguous + " 组重复身份，仅能比较各侧次数和状态分布。";
@@ -120,10 +123,10 @@ public record BuildEvidenceComparison(UUID baselineId, UUID candidateId, Scope s
     }
 
     private static boolean differingCoverage(Module before, Module after) {
-        return before == null || after == null || !Objects.equals(before.selected(), after.selected())
-                || (before.counts() == null) != (after.counts() == null)
+        return before != null && after != null
+                && ((before.counts() == null) != (after.counts() == null)
                 || before.noTestsReported() != after.noTestsReported()
-                || skipped(before.state()) != skipped(after.state());
+                || skipped(before.state()) != skipped(after.state()));
     }
 
     private static boolean skipped(ModuleState state) {

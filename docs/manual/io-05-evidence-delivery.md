@@ -61,3 +61,18 @@ python scripts/github_upgrade_review.py --repo <检出目录> --repository <owne
 输出包含精确共同祖先的 Git 差异、改变的文件、候选 SHA 的 GitHub Actions 结果和草稿 PR 文本。CI 可用时仅保留相同 SHA 的记录，权限不足或尚未运行时显示实际状态。`--local-only` 适合先生成本机材料。
 
 实际创建草稿需使用 `--open-draft` 及已授权的 `INSIGHTOPS_GITHUB_TOKEN` 或 `GITHUB_TOKEN`。工具核对远端分支仍指向所选提交，重复执行时读取同一分支组合的已存在 PR。项目按已有规则审阅和合并。
+
+## 本机多仓库验证批次
+
+`scripts/upgrade_batch.py` 从 JSON 项目清单固定每个仓库的提交，按项目保存独立运行状态和证据。示例中的 `revision` 使用对应仓库的完整提交 SHA。
+
+```json
+{
+  "projects": [
+    {"id": "billing", "repo": "D:/repos/billing", "revision": "<完整提交 SHA>", "approved": true, "attempts": 2},
+    {"id": "orders", "repo": "D:/repos/orders", "revision": "<完整提交 SHA>", "approved": false}
+  ]
+}
+```
+
+先用 `python scripts/upgrade_batch.py --plan <清单> --output <新目录>` 预览。实际执行时指定 `--execute --offline-repository <缓存>`。获批准的项目使用离线 Reactor 执行器。每做完一个项目更新 `batch-status.json`，保留失败、超时、证据不足和等待批准的项目。需要遇到构建失败便暂停后续项目时启用 `--stop-on-failure`。

@@ -36,3 +36,16 @@ IO-04B 旧核对文件中的 `temporaryCollectorStopped=true` 是执行方记录
 API 沿用报告构建导入接口。`metadata.modules` 按顺序包含 `path`、`projectName` 和可选的 `selected`。每个模块的 XML 用同序号的文件字段提交，从 `moduleXml0` 开始。单模块调用沿用 `xmlFiles`。多模块每批最多登记 32 个模块、160 份 XML，沿用总字节和 testcase 上限。Reactor 日志支持 UTF-8、GB18030 及兼容的 GBK 原件。该公开工程回放没有客户效率或付费比较基线。
 
 最终 Petclinic 环境为 `http://127.0.0.1:20057`。报告 `af22050f-6d5b-4a76-9247-8742947555e6` 的第 3 版验证为 `c4b7ebdf-41d2-4391-8136-417e6331713c`。独立版本升级扩展环境为 `http://127.0.0.1:20067`。两者只监听本机。
+
+
+## 采集联合构建及重跑证据
+
+在本机已有 Maven JDK 21 镜像和只读 Maven 缓存的环境中，固定经授权仓库的提交后执行以下命令。
+
+```powershell
+python scripts/maven_reactor_evidence.py --repo <Git仓库> --revision <提交> --offline-repository <依赖缓存> --output <新目录> --attempts 2
+```
+
+脚本为每次执行导出独立 Git 快照，在无网络的本机 Docker 容器中跑完整 Reactor 的 `mvn test`。普通模块通过固定 POM 的静态声明定位。动态 Profile 模块需另行核对。`attempts.json` 保留每一轮退出码、截断和收集状态。每个 `attempt-N` 目录中有命令、Maven 日志、模块清单、XML 及文件哈希。无唯一对应关系的重跑观察保留在各轮原件中。
+
+在报告中导入某一轮时，使用其 `manifest.json` 的模块分组选择原件。不同尝试分别保存，测试结果以每轮实际 XML 为准。`matchedTestsWithDifferentObservations` 仅标出同提交、同命令下各轮都唯一出现且状态有变化的用例。

@@ -49,3 +49,15 @@ python scripts/maven_reactor_evidence.py --repo <Git仓库> --revision <提交> 
 脚本为每次执行导出独立 Git 快照，在无网络的本机 Docker 容器中跑完整 Reactor 的 `mvn test`。普通模块通过固定 POM 的静态声明定位。动态 Profile 模块需另行核对。`attempts.json` 保留每一轮退出码、截断和收集状态。每个 `attempt-N` 目录中有命令、Maven 日志、模块清单、XML 及文件哈希。无唯一对应关系的重跑观察保留在各轮原件中。
 
 在报告中导入某一轮时，使用其 `manifest.json` 的模块分组选择原件。不同尝试分别保存，测试结果以每轮实际 XML 为准。`matchedTestsWithDifferentObservations` 仅标出同提交、同命令下各轮都唯一出现且状态有变化的用例。
+
+## 关联 GitHub CI 和 PR 审阅材料
+
+`scripts/github_upgrade_review.py` 将 GitHub 仓库、基线分支和候选提交绑定到一份交付记录。指定本地 origin 对应的仓库、两侧引用、分支名和一个新输出目录。可用 `--attempts` 关联同一候选提交的 Maven 实跑清单。
+
+```powershell
+python scripts/github_upgrade_review.py --repo <检出目录> --repository <owner/repo> --base-ref <基线> --candidate <候选> --base-branch <基线分支> --head-branch <候选分支> --output <新目录>
+```
+
+输出包含精确共同祖先的 Git 差异、改变的文件、候选 SHA 的 GitHub Actions 结果和草稿 PR 文本。CI 可用时仅保留相同 SHA 的记录，权限不足或尚未运行时显示实际状态。`--local-only` 适合先生成本机材料。
+
+实际创建草稿需使用 `--open-draft` 及已授权的 `INSIGHTOPS_GITHUB_TOKEN` 或 `GITHUB_TOKEN`。工具核对远端分支仍指向所选提交，重复执行时读取同一分支组合的已存在 PR。项目按已有规则审阅和合并。

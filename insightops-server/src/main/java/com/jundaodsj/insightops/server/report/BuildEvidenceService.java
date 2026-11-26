@@ -17,10 +17,12 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -32,12 +34,18 @@ import static com.jundaodsj.insightops.server.workflow.ResearchProfiles.text;
 @Service
 public class BuildEvidenceService {
     private static final int MAX_XML = 40, MAX_FILE = 2 * 1024 * 1024, MAX_TOTAL = 12 * 1024 * 1024;
+    private static final int MAX_MODULES = 32, MAX_REACTOR_XML = 160;
     private static final Map<String, FileKind> PARTS = Map.of("xmlFiles", FileKind.SUREFIRE_XML,
             "mavenLog", FileKind.MAVEN_LOG, "commandRecord", FileKind.COMMAND_RECORD,
             "exclusionManifest", FileKind.EXCLUSION_MANIFEST);
 
     public record ImportCommand(UUID requestId, Role role, String label, String environment, String executedAt,
-                                String executedBy, Integer exitCode, String sourceNote) {}
+                                String executedBy, Integer exitCode, String sourceNote, List<ModuleDeclaration> modules) {
+        public ImportCommand(UUID requestId, Role role, String label, String environment, String executedAt,
+                             String executedBy, Integer exitCode, String sourceNote) {
+            this(requestId, role, label, environment, executedAt, executedBy, exitCode, sourceNote, null);
+        }
+    }
 
     private final ReportReviewStore reports;
     private final BuildEvidenceStore store;
@@ -79,18 +87,24 @@ public class BuildEvidenceService {
         UUID system = system(actor, reportId);
         ImportCommand command = command(declaration);
         Metadata meta = metadata(command);
-        List<Original> originals = originals(parts);
+        List<ModuleDeclaration> modules = modules(command.modules());
+        List<Original> originals = originals(parts, modules);
         List<List<String>> identities = originals.stream().map(Original::file)
-                .map(f -> List.of(f.kind().name(), f.name(), f.sha256())).toList();
+                .map(f -> f.modulePath() == null ? List.of(f.kind().name(), f.name(), f.sha256())
+                        : List.of(f.kind().name(), f.name(), f.sha256(), f.modulePath())).toList();
+        var signature = new ArrayList<>(List.of(reportId, command.role(), meta, identities));
+        if (!modules.isEmpty()) {
+            signature.add(modules.stream().sorted(Comparator.comparing(ModuleDeclaration::path)).toList());
+        }
         String fingerprint;
-        try { fingerprint = sha(json.writeValueAsBytes(List.of(reportId, command.role(), meta, identities))); }
+        try { fingerprint = sha(json.writeValueAsBytes(signature)); }
         catch (JsonProcessingException ex) { throw new IllegalStateException("无法计算导入标识。", ex); }
         var previous = store.request(actor, system, command.requestId());
         if (previous.isPresent()) return replay(actor, system, previous.get(), fingerprint);
 
         var header = new Summary(UUID.randomUUID(), system, reportId, command.role(), meta.label(),
                 Instant.now().truncatedTo(ChronoUnit.MICROS), null);
-        Batch batch = documents.analyze(header, meta, originals);
+        Batch batch = documents.analyze(header, meta, originals, modules);
         if (store.insert(actor, command.requestId(), fingerprint, batch, originals)) return batch;
         // ON CONFLICT waits for the concurrent import transaction. Its receipt and originals are now committed.
         return replay(actor, system, store.request(actor, system, command.requestId()).orElseThrow(), fingerprint);
@@ -103,7 +117,8 @@ public class BuildEvidenceService {
         ImportCommand command = command(declaration);
         Metadata meta = metadata(command);
         var header = new Summary(UUID.randomUUID(), system, reportId, command.role(), meta.label(), Instant.now(), null);
-        return documents.analyze(header, meta, originals(parts));
+        List<ModuleDeclaration> modules = modules(command.modules());
+        return documents.analyze(header, meta, originals(parts, modules), modules);
     }
 
     private static Metadata metadata(ImportCommand command) {
@@ -127,7 +142,7 @@ public class BuildEvidenceService {
     }
 
     private ImportCommand command(String source) {
-        if (source == null || source.length() > 10_000) throw new IllegalArgumentException("导入字段缺失或过长。");
+        if (source == null || source.length() > 24_576) throw new IllegalArgumentException("导入字段缺失或过长。");
         try {
             var input = json.readTree(source);
             if (input == null || !input.isObject()) throw new IllegalArgumentException("导入声明应为 JSON 对象。");
@@ -137,6 +152,16 @@ public class BuildEvidenceService {
             }
             if (input.hasNonNull("exitCode") && (!input.get("exitCode").isIntegralNumber() || !input.get("exitCode").canConvertToInt()))
                 throw new IllegalArgumentException("退出码应为整数。");
+            if (input.hasNonNull("modules")) {
+                var supplied = input.get("modules");
+                if (!supplied.isArray() || supplied.size() > MAX_MODULES)
+                    throw new IllegalArgumentException("每批最多支持 " + MAX_MODULES + " 个模块。");
+                for (var module : supplied) {
+                    if (!module.isObject() || !module.path("path").isTextual() || !module.path("projectName").isTextual()
+                            || (module.hasNonNull("selected") && !module.get("selected").isBoolean()))
+                        throw new IllegalArgumentException("模块应提供相对路径、Reactor 项目名和可选的选择状态。");
+                }
+            }
             ImportCommand cmd = json.treeToValue(input, ImportCommand.class);
             if (cmd == null || cmd.role() == null || cmd.requestId() == null)
                 throw new IllegalArgumentException("请选择基线或候选构建，并提供提交标识。");
@@ -144,22 +169,55 @@ public class BuildEvidenceService {
         } catch (JsonProcessingException ex) { throw new IllegalArgumentException("导入字段或数据类型无效。"); }
     }
 
-    private static List<Original> originals(Map<String, List<MultipartFile>> parts) {
-        int xmlCount = parts.getOrDefault("xmlFiles", List.of()).size();
-        if (xmlCount < 1 || xmlCount > MAX_XML)
-            throw new IllegalArgumentException("请选择 1 至 " + MAX_XML + " 份普通 Surefire TEST-*.xml。");
+    private static List<ModuleDeclaration> modules(List<ModuleDeclaration> declared) {
+        if (declared == null || declared.isEmpty()) return List.of();
+        var pathKeys = new HashSet<String>();
+        var normalized = new ArrayList<ModuleDeclaration>();
+        for (var module : declared) {
+            String path = module.path();
+            if (path.length() > 240 || (!path.equals(".") && !path.matches("[\\p{L}\\p{N}_. -]+(?:/[\\p{L}\\p{N}_. -]+)*")))
+                throw new IllegalArgumentException("模块路径应为相对目录，根模块使用 .");
+            if (!path.equals(".")) {
+                for (String segment : path.split("/")) {
+                    if (!segment.equals(segment.strip()) || segment.equals(".") || segment.equals(".."))
+                        throw new IllegalArgumentException("模块路径应为规范的相对目录。");
+                }
+            }
+            if (!pathKeys.add(path.toLowerCase(Locale.ROOT))) throw new IllegalArgumentException("存在重复模块路径。");
+            String projectName = optional(module.projectName(), 180);
+            if (projectName == null) throw new IllegalArgumentException("模块需要 Reactor 摘要中的项目名。");
+            normalized.add(new ModuleDeclaration(path, projectName, module.selected()));
+        }
+        return List.copyOf(normalized);
+    }
+
+    private static List<Original> originals(Map<String, List<MultipartFile>> parts, List<ModuleDeclaration> modules) {
+        var moduleParts = new HashMap<String, String>();
+        for (int i = 0; i < modules.size(); i++) moduleParts.put("moduleXml" + i, modules.get(i).path());
+        if (!modules.isEmpty() && parts.containsKey("xmlFiles"))
+            throw new IllegalArgumentException("多模块 XML 需分配到明确的模块。");
+        int xmlCount = parts.entrySet().stream()
+                .filter(part -> part.getKey().equals("xmlFiles") || moduleParts.containsKey(part.getKey()))
+                .mapToInt(part -> part.getValue().size()).sum();
+        int maxXml = modules.isEmpty() ? MAX_XML : MAX_REACTOR_XML;
+        if (xmlCount > maxXml)
+            throw new IllegalArgumentException("每批最多支持 " + maxXml + " 份普通 Surefire TEST-*.xml。");
+        if (xmlCount == 0 && (modules.isEmpty() || !parts.containsKey("mavenLog")))
+            throw new IllegalArgumentException("请选择 Surefire XML。缺少 XML 的多模块运行可提交 Reactor 日志。");
         List<Original> items = new ArrayList<>();
         HashSet<String> names = new HashSet<>();
         long total = 0;
         for (var entry : parts.entrySet()) {
-            FileKind kind = PARTS.get(entry.getKey());
+            String modulePath = moduleParts.get(entry.getKey());
+            FileKind kind = modulePath == null ? PARTS.get(entry.getKey()) : FileKind.SUREFIRE_XML;
             if (kind == null) throw new IllegalArgumentException("存在不支持的原件字段。");
             if (kind != FileKind.SUREFIRE_XML && entry.getValue().size() != 1)
                 throw new IllegalArgumentException("每批只能选择一份日志、命令记录和排除方法清单。");
             for (MultipartFile upload : entry.getValue()) {
                 String name = fileName(upload.getOriginalFilename(), kind);
-                if (!names.add(name.toLowerCase(Locale.ROOT)))
-                    throw new IllegalArgumentException(name + "：同一批含重复文件名，请按模块、按次导入。");
+                var identity = Objects.toString(modulePath, "") + "\n" + name.toLowerCase(Locale.ROOT);
+                if (!names.add(identity))
+                    throw new IllegalArgumentException(name + "：同一模块含重复文件名，请按次导入。");
                 long size = upload.getSize();
                 if (size < 1 || size > MAX_FILE) throw new IllegalArgumentException(name + "：单个原件须为 1 字节至 2 MiB。");
                 if (total + size > MAX_TOTAL) throw new IllegalArgumentException("每批原件合计最多 12 MiB。");
@@ -167,13 +225,14 @@ public class BuildEvidenceService {
                 try (var stream = upload.getInputStream()) {
                     byte[] data = stream.readNBytes((int) size + 1);
                     if (data.length != size) throw new IllegalArgumentException(name + "：读取长度与提交长度不符。");
-                    var file = new EvidenceFile(UUID.randomUUID(), name, kind, data.length, sha(data));
+                    var file = new EvidenceFile(UUID.randomUUID(), name, kind, data.length, sha(data), modulePath);
                     items.add(new Original(file, data));
                 } catch (IOException ex) { throw new IllegalArgumentException(name + "：原件读取失败。"); }
             }
         }
         // File order sent by the browser is immaterial to a retried request.
         items.sort(Comparator.comparing((Original x) -> x.file().kind())
+                .thenComparing(x -> Objects.toString(x.file().modulePath(), ""))
                 .thenComparing(x -> x.file().name(), String.CASE_INSENSITIVE_ORDER).thenComparing(x -> x.file().name()));
         return items;
     }

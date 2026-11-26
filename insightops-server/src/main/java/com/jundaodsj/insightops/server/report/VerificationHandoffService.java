@@ -10,6 +10,7 @@ import com.jundaodsj.insightops.infrastructure.report.TemporaryReportArchive;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeFileStorage;
 import com.jundaodsj.insightops.knowledge.application.KnowledgeUploadStore;
 import com.jundaodsj.insightops.report.application.BuildEvidence.*;
+import com.jundaodsj.insightops.report.application.BuildEvidence.Module;
 import com.jundaodsj.insightops.report.application.BuildEvidenceComparison;
 import com.jundaodsj.insightops.report.application.EngineeringTaskStore.TaskResult;
 import com.jundaodsj.insightops.report.application.EngineeringTaskStore.TaskVersion;
@@ -52,7 +53,11 @@ public class VerificationHandoffService {
         this.builds = builds;
         this.uploads = uploads;
         this.storage = storage;
-        this.json = json.writer(new DefaultPrettyPrinter().withObjectIndenter(new DefaultIndenter("  ", "\n")));
+        this.json = json.copy()
+                .addMixIn(EvidenceFile.class, OptionalModulePath.class)
+                .addMixIn(BuildEvidenceComparison.Group.class, OptionalModulePath.class)
+                .addMixIn(BuildEvidenceComparison.class, OptionalModuleComparisons.class)
+                .writer(new DefaultPrettyPrinter().withObjectIndenter(new DefaultIndenter("  ", "\n")));
         this.frozenBaseline = frozenBaseline;
         this.tasks = tasks;
     }
@@ -68,7 +73,16 @@ public class VerificationHandoffService {
                                      FrozenBaselineHandoff.Original engineeringBaseline, List<Missing> missing,
                                      List<HandoffArchiveWriter.Entry> entries) { }
     private record ParsedImport(Summary summary, Metadata userDeclarations, BuildRecord commandRecord, LogFacts log,
-                                List<ExcludedMethod> excludedMethodsFromManifest, List<EvidenceFile> files, List<String> warnings) { }
+                                List<ExcludedMethod> excludedMethodsFromManifest, List<EvidenceFile> files, List<String> warnings,
+                                @JsonInclude(JsonInclude.Include.NON_EMPTY) List<Module> modules) { }
+
+    private interface OptionalModulePath {
+        @JsonInclude(JsonInclude.Include.NON_NULL) String modulePath();
+    }
+
+    private interface OptionalModuleComparisons {
+        @JsonInclude(JsonInclude.Include.NON_EMPTY) List<BuildEvidenceComparison.ModuleComparison> modules();
+    }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public TemporaryReportArchive prepare(ActorContext actor, UUID reportId, UUID versionId) throws IOException {
@@ -230,7 +244,7 @@ public class VerificationHandoffService {
             missing.add(new Missing(label, reference, "命令有排除类，具体排除方法数量缺少独立依据。"));
         }
         writer.json(prefix + "comparison/" + side + ".json", "PARSED_BUILD", summary.id(), new ParsedImport(summary,batch.metadata(),
-                batch.commandRecord(),batch.log(),batch.excludedMethods(),batch.files(),batch.warnings()));
+                batch.commandRecord(),batch.log(),batch.excludedMethods(),batch.files(),batch.warnings(),batch.modules()));
         for (var file : batch.files()) {
             var original = builds.download(actor, reportId, summary.id(), file.id());
             if (!file.equals(original.file())) throw new ResponseStatusException(HttpStatus.CONFLICT,

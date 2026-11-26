@@ -34,6 +34,28 @@ export interface EvidenceFile {
   kind: EvidenceFileKind
   size: number
   sha256: string
+  modulePath?: string | null
+}
+export interface BuildModuleDeclaration {
+  path: string
+  projectName: string
+  selected: boolean | null
+}
+export interface BuildModule extends BuildModuleDeclaration {
+  state: 'SUCCESS' | 'FAILURE' | 'SKIPPED' | 'NOT_SELECTED' | 'UNKNOWN'
+  counts: BuildCounts | null
+}
+const moduleStates: Record<BuildModule['state'], string> = {
+  SUCCESS: '构建成功', FAILURE: '构建失败', SKIPPED: '构建跳过', NOT_SELECTED: '声明未选中', UNKNOWN: '状态未知',
+}
+export function describeModule(module: BuildModule | null) {
+  if (!module) return '未提供该模块'
+  const c = module.counts
+  const evidence = c ? `通过 ${c.passed}，断言失败 ${c.failures}，执行报错 ${c.errors}，跳过 ${c.skipped}` : '未取得模块 XML'
+  return `${moduleStates[module.state]} · ${evidence}`
+}
+export function evidenceFileName(file: EvidenceFile) {
+  return file.modulePath ? `${file.modulePath}/${file.name}` : file.name
 }
 export interface CaseOccurrence {
   fileId: string
@@ -59,9 +81,12 @@ export interface BuildBatch {
   files: EvidenceFile[]
   cases: (CaseOccurrence & { suite: string; className: string; name: string })[]
   warnings: string[]
+  modules?: BuildModule[]
 }
+export interface BuildModuleFiles extends BuildModuleDeclaration { xmlFiles: File[] }
 export interface ImportFiles {
   xmlFiles: File[]
+  modules?: BuildModuleFiles[]
   mavenLog?: File
   commandRecord?: File
   exclusionManifest?: File
@@ -77,8 +102,12 @@ export async function getBuild(reportId: string, batchId: string): Promise<Build
 }
 export async function importBuild(reportId: string, metadata: BuildMetadata & { requestId: string; role: BuildRole }, files: ImportFiles): Promise<BuildBatch> {
   const data = new FormData()
-  data.append('metadata', JSON.stringify(metadata))
+  const modules = files.modules?.map(({ path, projectName, selected }) => ({ path, projectName, selected }))
+  data.append('metadata', JSON.stringify({ ...metadata, modules }))
   for (const file of files.xmlFiles) data.append('xmlFiles', file)
+  files.modules?.forEach((module, index) => {
+    for (const file of module.xmlFiles) data.append('moduleXml' + index, file)
+  })
   for (const field of ['mavenLog', 'commandRecord', 'exclusionManifest'] as const) {
     const file = files[field]
     if (file) data.append(field, file)

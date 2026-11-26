@@ -228,6 +228,8 @@ management:
       show-details: when-authorized
 
 server:
+  tomcat:
+    max-part-count: 164
   address: ${SERVER_ADDRESS:127.0.0.1}
   port: ${SERVER_PORT:18080}
 

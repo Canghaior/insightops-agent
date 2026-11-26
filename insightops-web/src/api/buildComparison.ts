@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import { reviewPath, type CaseOccurrence } from './buildEvidence'
+import { reviewPath, type BuildModule, type CaseOccurrence } from './buildEvidence'
 
 export type TestChange = 'UNCHANGED' | 'CHANGED' | 'AMBIGUOUS' | 'BASELINE_ONLY' | 'CANDIDATE_ONLY'
 export const testChanges: Record<TestChange, string> = {
@@ -7,6 +7,7 @@ export const testChanges: Record<TestChange, string> = {
 }
 export interface ComparisonCounts { passed: number; failure: number; error: number; skipped: number; total: number }
 export interface CaseGroup {
+  modulePath?: string | null
   suite: string
   className: string
   name: string
@@ -23,6 +24,7 @@ export interface BuildComparison {
   baselineCounts: ComparisonCounts
   candidateCounts: ComparisonCounts
   groups: CaseGroup[]
+  modules?: { path: string; baseline: BuildModule | null; candidate: BuildModule | null }[]
   objectiveSummary: string
   limitations: string[]
 }

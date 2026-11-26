@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { batchName, displayTime, type BuildBatch } from '@/api/buildEvidence'
+import { batchName, describeModule, displayTime, evidenceFileName, type BuildBatch } from '@/api/buildEvidence'
 import { testChanges, type BuildComparison, type ComparisonCounts, type TestChange } from '@/api/buildComparison'
 import BuildCaseResult from './BuildCaseResult.vue'
 
@@ -27,7 +27,7 @@ const filtered = computed(() => {
     return visible && (!query || `${group.suite} ${group.className} ${group.name}`.toLowerCase().includes(query))
   })
 })
-const fileNames = computed(() => new Map([...props.baseline.files, ...props.candidate.files].map(file => [file.id, file.name])))
+const fileNames = computed(() => new Map([...props.baseline.files, ...props.candidate.files].map(file => [file.id, evidenceFileName(file)])))
 </script>
 
 <template>
@@ -36,10 +36,22 @@ const fileNames = computed(() => new Map([...props.baseline.files, ...props.cand
     <p class="scope" :class="{ warn: comparison.scope === 'DIFFERENT_OBSERVED' }">
       {{ comparison.scope === 'SAME_OBSERVED'
         ? '两批 XML 中上报的测试身份与出现次数一致。'
-        : '两批 XML 的测试集合或出现次数不同。请逐项核对单侧测试与重复项。' }}
+        : comparison.modules?.length
+          ? '两侧模块选择或 XML 测试范围有差异。请核对分模块结果。'
+          : '两批 XML 的测试集合或出现次数不同。请逐项核对单侧测试与重复项。' }}
     </p>
     <div class="summary" aria-label="产品解析摘要">
       <strong>产品解析摘要</strong><p>{{ comparison.objectiveSummary }}</p>
+    </div>
+    <div v-if="comparison.modules?.length" class="table-wrap">
+      <table aria-label="Maven 模块对照">
+        <thead><tr><th scope="col">Maven 模块</th><th scope="col">基线</th><th scope="col">候选</th></tr></thead>
+        <tbody>
+          <tr v-for="module in comparison.modules" :key="module.path">
+            <th scope="row"><code>{{ module.path }}</code></th><td>{{ describeModule(module.baseline) }}</td><td>{{ describeModule(module.candidate) }}</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
     <div class="table-wrap">
       <table aria-label="构建信息和测试数量">
@@ -75,8 +87,9 @@ const fileNames = computed(() => new Map([...props.baseline.files, ...props.cand
     </div>
     <p class="subtle">当前显示 {{ filtered.length }} 组测试身份，共 {{ comparison.groups.length }} 组。</p>
     <p v-if="!filtered.length">当前条件下没有测试。<button type="button" class="text-button" @click="filter = 'ALL'; search = ''">查看全部测试</button></p>
-    <article v-for="group in filtered.slice(page * size, (page + 1) * size)" :key="JSON.stringify([group.suite, group.className, group.name])" class="test-result">
+    <article v-for="group in filtered.slice(page * size, (page + 1) * size)" :key="JSON.stringify([group.modulePath, group.suite, group.className, group.name])" class="test-result">
       <header><b>{{ group.name }}</b><span>{{ testChanges[group.change] }}</span></header>
+      <small v-if="group.modulePath">模块 {{ group.modulePath }}</small>
       <small>{{ group.className }}</small><small v-if="group.suite !== group.className">套件 {{ group.suite }}</small>
       <p v-if="group.change === 'AMBIGUOUS'">同一身份有多条结果，无法可靠地逐条配对。下列结果按各自原件位置展示。</p>
       <div class="sides">

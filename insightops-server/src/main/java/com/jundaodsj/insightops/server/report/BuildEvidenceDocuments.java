@@ -4,15 +4,20 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.report.application.BuildEvidence.*;
+import com.jundaodsj.insightops.report.application.BuildEvidence.Module;
 import com.jundaodsj.insightops.report.application.SurefireEvidenceParser;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -26,6 +31,8 @@ final class BuildEvidenceDocuments {
     private static final Pattern LOG_COUNTS = Pattern.compile(
             "^\\[(?:INFO|WARN|WARNING|ERROR)]\\s+Tests run:\\s*(\\d{1,8}),\\s*Failures:\\s*(\\d{1,8}),\\s*Errors:\\s*(\\d{1,8}),\\s*Skipped:\\s*(\\d{1,8})(?:,\\s*Flakes:\\s*(\\d{1,8}))?\\s*$");
     private static final Pattern ANSI_COLORS = Pattern.compile("\\x1b\\[[;\\d]*m");
+    private static final Pattern REACTOR_ROW = Pattern.compile(
+            "^\\[INFO]\\s+(.+?)\\s+\\.{3,}\\s+(SUCCESS|FAILURE|SKIPPED)(?:\\s+\\[.*])?\\s*$");
     private static final int MAX_MANIFEST_METHODS = 1000;
 
     private final ObjectMapper json;
@@ -33,10 +40,13 @@ final class BuildEvidenceDocuments {
 
     BuildEvidenceDocuments(ObjectMapper json) { this.json = json; }
 
-    Batch analyze(Summary header, Metadata metadata, List<Original> originals) {
+    Batch analyze(Summary header, Metadata metadata, List<Original> originals, List<ModuleDeclaration> declarations) {
         List<TestCase> cases = new ArrayList<>();
-        Set<String> suites = new HashSet<>();
-        Set<String> basedirs = new HashSet<>();
+        Map<String, Set<String>> suitesByModule = new HashMap<>();
+        Map<String, Set<String>> directoriesByModule = new HashMap<>();
+        Map<String, List<TestCase>> casesByModule = new HashMap<>();
+        boolean reactor = !declarations.isEmpty();
+        String logSource = "";
         List<String> warnings = new ArrayList<>();
         BuildRecord command = new BuildRecord(List.of(), null, null, null, null, List.of());
         LogFacts log = new LogFacts(null, null);
@@ -45,16 +55,23 @@ final class BuildEvidenceDocuments {
             EvidenceFile file = original.file();
             if (file.kind() == FileKind.SUREFIRE_XML) {
                 var suite = xml.parse(file.id(), file.name(), original.content());
+                String module = Objects.toString(file.modulePath(), "");
+                var suites = suitesByModule.computeIfAbsent(module, ignored -> new HashSet<>());
+                var basedirs = directoriesByModule.computeIfAbsent(module, ignored -> new HashSet<>());
                 if (!suites.add(suite.name())) throw bad(file.name(), "套件名称重复。请将多模块、分次运行或重复 XML 分开。");
                 if (suite.basedir() != null && !suite.basedir().isBlank()) basedirs.add(suite.basedir());
-                if (basedirs.size() > 1) throw bad(file.name(), "XML 的 basedir 属于不同目录。首版仅支持单模块的一次构建。");
+                if (basedirs.size() > 1) throw bad(file.name(), "同一模块的 XML basedir 属于不同目录。请核对文件所属模块。");
                 if (cases.size() + suite.cases().size() > SurefireEvidenceParser.MAX_CASES)
                     throw bad(file.name(), "每批最多支持 " + SurefireEvidenceParser.MAX_CASES + " 个 testcase。");
                 cases.addAll(suite.cases());
+                casesByModule.computeIfAbsent(module, ignored -> new ArrayList<>()).addAll(suite.cases());
             } else {
                 try {
                     switch (file.kind()) {
-                        case MAVEN_LOG -> log = log(text(original.content()), warnings);
+                        case MAVEN_LOG -> {
+                            logSource = logText(original.content(), reactor, warnings);
+                            log = log(logSource, warnings, reactor);
+                        }
                         case COMMAND_RECORD -> command = command(object(original.content()), warnings);
                         case EXCLUSION_MANIFEST -> methods = manifest(object(original.content()));
                         default -> throw new IllegalStateException("Unsupported evidence kind");
@@ -97,11 +114,14 @@ final class BuildEvidenceDocuments {
         if ("SUCCESS".equals(log.outcome()) && counts.failures() + counts.errors() > 0)
             warnings.add("日志报告构建成功，但 XML 有失败或报错；请核对日志与测试配置。");
         if (cases.isEmpty()) warnings.add("已导入的套件没有记录任何 testcase。");
-        warnings.add("统计仅涵盖已上传的 XML。文件哈希可核对字节。原件是否均来自同一模块、同一次构建和所填提交，以及材料是否齐全，尚未核实。");
+        List<Module> modules = modules(declarations, logSource, casesByModule, warnings);
+        warnings.add(reactor
+                ? "统计仅涵盖按模块提交的 XML。模块路径、项目名和选择范围来自提交者。日志状态按唯一的项目名称对应。"
+                : "统计仅涵盖已上传的 XML。文件哈希可核对字节。原件是否均来自同一模块、同一次构建和所填提交，以及材料是否齐全，尚未核实。");
         var summary = new Summary(header.id(), header.systemId(), header.reportId(), header.role(),
                 header.label(), header.importedAt(), counts);
         return new Batch(summary, metadata, command, log, methods, originals.stream().map(Original::file).toList(),
-                List.copyOf(cases), List.copyOf(warnings));
+                List.copyOf(cases), List.copyOf(warnings), modules);
     }
 
     private JsonNode object(byte[] data) {
@@ -114,14 +134,87 @@ final class BuildEvidenceDocuments {
 
     private static String text(byte[] data) {
         try {
-            String value = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(data)).toString();
-            if (value.indexOf('\0') >= 0) throw new IllegalArgumentException("包含无法按文本处理的字符。");
-            return value.startsWith("\uFEFF") ? value.substring(1) : value;
-        } catch (CharacterCodingException ex) { throw new IllegalArgumentException("需要 UTF-8 文本文件。"); }
+            return decode(data, StandardCharsets.UTF_8);
+        } catch (CharacterCodingException ex) {
+            throw new IllegalArgumentException("需要 UTF-8 文本文件。");
+        }
     }
 
-    private static LogFacts log(String source, List<String> warnings) {
+    private static String logText(byte[] data, boolean reactor, List<String> warnings) {
+        if (!reactor) return text(data);
+        try {
+            return decode(data, StandardCharsets.UTF_8);
+        } catch (CharacterCodingException invalidUtf8) {
+            try {
+                String value = decode(data, Charset.forName("GB18030"));
+                warnings.add("Reactor 日志按 GB18030 解码，已保留原始文件字节。");
+                return value;
+            } catch (CharacterCodingException invalidChineseEncoding) {
+                throw new IllegalArgumentException("Reactor 日志应为 UTF-8 或 GB18030 文本。");
+            }
+        }
+    }
+
+    private static String decode(byte[] data, Charset charset) throws CharacterCodingException {
+        String value = charset.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(data)).toString();
+        if (value.indexOf('\0') >= 0) throw new IllegalArgumentException("包含无法按文本处理的字符。");
+        return value.startsWith("\uFEFF") ? value.substring(1) : value;
+    }
+
+    private static List<Module> modules(List<ModuleDeclaration> declared, String source,
+                                         Map<String, List<TestCase>> casesByModule, List<String> warnings) {
+        if (declared.isEmpty()) return List.of();
+        Map<String, ModuleState> observed = reactorSummary(source);
+        Map<String, Integer> names = new HashMap<>();
+        for (var module : declared) names.merge(module.projectName(), 1, Integer::sum);
+        var modules = new ArrayList<Module>();
+        for (var module : declared) {
+            ModuleState state = names.get(module.projectName()) == 1
+                    ? observed.getOrDefault(module.projectName(), ModuleState.UNKNOWN) : ModuleState.UNKNOWN;
+            var cases = casesByModule.get(module.path());
+            if (Boolean.FALSE.equals(module.selected())) {
+                if (state == ModuleState.UNKNOWN && cases == null) state = ModuleState.NOT_SELECTED;
+                else warnings.add("模块 " + module.path() + " 的选择声明与日志或 XML 不一致。");
+            }
+            if (state == ModuleState.SKIPPED && cases != null) {
+                warnings.add("模块 " + module.path() + " 在 Reactor 摘要中跳过，但仍有 XML。请核对原件归属。");
+            }
+            if (state == ModuleState.UNKNOWN) {
+                warnings.add("模块 " + module.path() + " 缺少可唯一对应的 Reactor 状态。");
+            }
+            modules.add(new Module(module.path(), module.projectName(), module.selected(), state,
+                    cases == null ? null : Counts.from(cases)));
+        }
+        return List.copyOf(modules);
+    }
+
+    private static Map<String, ModuleState> reactorSummary(String source) {
+        var states = new HashMap<String, ModuleState>();
+        var duplicateNames = new HashSet<String>();
+        boolean started = false;
+        boolean inSummary = false;
+        for (String raw : source.lines().toList()) {
+            String line = ANSI_COLORS.matcher(raw).replaceAll("").strip();
+            if (line.startsWith("[INFO] Reactor Summary")) {
+                if (started) throw new IllegalArgumentException("日志含多个 Reactor 摘要，请按次导入。");
+                started = true;
+                inSummary = true;
+            } else if (inSummary) {
+                var row = REACTOR_ROW.matcher(line);
+                if (row.matches()) {
+                    if (states.putIfAbsent(row.group(1), ModuleState.valueOf(row.group(2))) != null)
+                        duplicateNames.add(row.group(1));
+                } else if (!line.equals("[INFO]") && !line.isEmpty()) {
+                    inSummary = false;
+                }
+            }
+        }
+        duplicateNames.forEach(states::remove);
+        return states;
+    }
+
+    private static LogFacts log(String source, List<String> warnings, boolean reactor) {
         Counts summary = null;
         String outcome = null;
         int totals = 0, finishes = 0;
@@ -130,7 +223,7 @@ final class BuildEvidenceDocuments {
             if (line.indexOf('\u001b') >= 0) line = ANSI_COLORS.matcher(line).replaceAll("");
             line = line.strip();
             if (!line.startsWith("[")) continue;
-            if (line.startsWith("[INFO] Reactor Build Order") || line.startsWith("[INFO] Reactor Summary"))
+            if (!reactor && (line.startsWith("[INFO] Reactor Build Order") || line.startsWith("[INFO] Reactor Summary")))
                 throw new IllegalArgumentException("检测到 Maven Reactor 日志，请按模块、按次导入构建材料。");
             var count = LOG_COUNTS.matcher(line);
             if (count.matches()) {
@@ -139,7 +232,7 @@ final class BuildEvidenceDocuments {
                 int n = Integer.parseInt(count.group(1)), f = Integer.parseInt(count.group(2));
                 int e = Integer.parseInt(count.group(3)), s = Integer.parseInt(count.group(4));
                 if (f + e + s > n) throw new IllegalArgumentException("Maven 日志中的测试总结计数互相矛盾。");
-                summary = new Counts(n - f - e - s, f, e, s);
+                if (!reactor) summary = new Counts(n - f - e - s, f, e, s);
                 totals++;
             }
             if (line.equals("[INFO] BUILD SUCCESS") || line.equals("[INFO] BUILD FAILURE")) {
@@ -147,8 +240,9 @@ final class BuildEvidenceDocuments {
                 finishes++;
             }
         }
-        if (finishes > 1 || totals > 1) throw new IllegalArgumentException("日志有多个构建或测试总结，请提供同一模块、同一次构建的日志。");
-        if (summary == null) warnings.add("日志中没有识别到整次测试的 Maven 总结行。");
+        if (finishes > 1 || (!reactor && totals > 1))
+            throw new IllegalArgumentException("日志有多个构建或测试总结，请提供同一次构建的日志。");
+        if (summary == null && !reactor) warnings.add("日志中没有识别到整次测试的 Maven 总结行。");
         return new LogFacts(outcome, summary);
     }
 

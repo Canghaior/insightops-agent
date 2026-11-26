@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { buildFileUrl, buildRoles, caseStatuses, displayTime, fileKinds, type BuildBatch, type CaseStatus } from '@/api/buildEvidence'
+import { buildFileUrl, buildRoles, caseStatuses, describeModule, displayTime, evidenceFileName, fileKinds, type BuildBatch, type CaseStatus } from '@/api/buildEvidence'
 import BuildCaseResult from './BuildCaseResult.vue'
 
 const props = defineProps<{ reportId: string; batch: BuildBatch }>()
@@ -8,7 +8,7 @@ const page = ref(0)
 const filter = ref<CaseStatus | ''>('')
 const search = ref('')
 const size = 15
-const fileNames = computed(() => new Map(props.batch.files.map(file => [file.id, file.name])))
+const fileNames = computed(() => new Map(props.batch.files.map(file => [file.id, evidenceFileName(file)])))
 const cases = computed(() => {
   const query = search.value.trim().toLowerCase()
   return props.batch.cases.filter(row => (!filter.value || row.status === filter.value)
@@ -21,6 +21,12 @@ watch([filter, search, () => props.batch.summary.id], () => { page.value = 0 })
   <section class="batch-detail" :aria-label="buildRoles[batch.summary.role] + '材料'">
     <header><h5>{{ buildRoles[batch.summary.role] }}材料</h5><span>已保存并解析 · {{ batch.files.length }} 份原件</span></header>
     <p>从 XML 读到 {{ batch.cases.length }} 项，{{ batch.summary.counts.passed }} 通过，{{ batch.summary.counts.failures }} 断言失败，{{ batch.summary.counts.errors }} 执行报错，{{ batch.summary.counts.skipped }} 跳过。</p>
+    <details v-if="batch.modules?.length" open>
+      <summary>Maven 模块（{{ batch.modules.length }}）</summary>
+      <ul>
+        <li v-for="module in batch.modules" :key="module.path"><code>{{ module.path }}</code> · {{ module.projectName }} · {{ describeModule(module) }}</li>
+      </ul>
+    </details>
     <ul v-if="batch.warnings.length" class="warnings"><li v-for="warning in batch.warnings" :key="warning">{{ warning }}</li></ul>
     <details open>
       <summary>标签、执行环境与命令范围</summary>
@@ -51,7 +57,7 @@ watch([filter, search, () => props.batch.summary.id], () => { page.value = 0 })
       <p>SHA-256 可用于核对下载文件与已保存原件是否相同。</p>
       <ul class="originals">
         <li v-for="file in batch.files" :key="file.id">
-          <a :href="buildFileUrl(reportId, batch.summary.id, file.id)" download>{{ file.name }}</a>
+          <a :href="buildFileUrl(reportId, batch.summary.id, file.id)" download>{{ evidenceFileName(file) }}</a>
           <small>{{ fileKinds[file.kind] }} · {{ file.size.toLocaleString('zh-CN') }} 字节</small><code>SHA-256 {{ file.sha256 }}</code>
         </li>
       </ul>

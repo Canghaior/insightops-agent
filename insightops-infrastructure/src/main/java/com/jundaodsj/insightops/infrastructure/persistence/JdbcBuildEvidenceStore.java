@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jundaodsj.insightops.identity.application.ActorContext;
 import com.jundaodsj.insightops.report.application.BuildEvidence.*;
+import com.jundaodsj.insightops.report.application.BuildEvidence.Module;
 import com.jundaodsj.insightops.report.application.BuildEvidenceStore;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -18,12 +19,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 public class JdbcBuildEvidenceStore implements BuildEvidenceStore {
     private record Analysis(BuildRecord commandRecord, LogFacts log, List<ExcludedMethod> excludedMethods,
-                            List<TestCase> cases, List<String> warnings) {}
+                            List<TestCase> cases, List<String> warnings, List<Module> modules) {}
     private record Details(Summary summary, Metadata metadata, Analysis analysis) {}
 
     private static final String SCOPE = " b.workspace_id=:workspace and b.owner_user_id=:owner and b.system_id=:system";
     private static final String SUMMARY = "b.id, b.system_id, b.report_id, b.role, b.metadata->>'label' as label, b.imported_at, b.counts";
-    private static final String MATERIAL = "f.id, f.file_name, f.kind, f.byte_size, f.sha256";
+    private static final String MATERIAL = "f.id, f.file_name, f.kind, f.byte_size, f.sha256, f.module_path";
     private final JdbcClient jdbc;
     private final ObjectMapper json;
 
@@ -52,7 +53,7 @@ public class JdbcBuildEvidenceStore implements BuildEvidenceStore {
                     .param("id", batchId).query((rs, n) -> file(rs)).list();
             Analysis a = parts.analysis();
             return new Batch(parts.summary(), parts.metadata(), a.commandRecord(), a.log(), a.excludedMethods(),
-                    files, a.cases(), a.warnings());
+                    files, a.cases(), a.warnings(), a.modules());
         });
     }
 
@@ -72,7 +73,7 @@ public class JdbcBuildEvidenceStore implements BuildEvidenceStore {
     @Override @Transactional
     public boolean insert(ActorContext actor, UUID requestId, String fingerprint, Batch batch, List<Original> originals) {
         Summary s = batch.summary();
-        var analysis = new Analysis(batch.commandRecord(), batch.log(), batch.excludedMethods(), batch.cases(), batch.warnings());
+        var analysis = new Analysis(batch.commandRecord(), batch.log(), batch.excludedMethods(), batch.cases(), batch.warnings(), batch.modules());
         int inserted = jdbc.sql("""
                 insert into build_evidence_batch
                     (id, workspace_id, owner_user_id, system_id, report_id, request_id, request_hash,
@@ -90,9 +91,9 @@ public class JdbcBuildEvidenceStore implements BuildEvidenceStore {
         for (Original original : originals) {
             EvidenceFile f = original.file();
             jdbc.sql("""
-                    insert into build_evidence_file(id,batch_id,position,file_name,kind,sha256,byte_size,content)
-                    values (?,?,?,?,?,?,?,?)
-                    """).params(f.id(), s.id(), position++, f.name(), f.kind().name(), f.sha256(), f.size(), original.content())
+                    insert into build_evidence_file(id,batch_id,position,file_name,kind,sha256,byte_size,content,module_path)
+                    values (?,?,?,?,?,?,?,?,?)
+                    """).params(f.id(), s.id(), position++, f.name(), f.kind().name(), f.sha256(), f.size(), original.content(), f.modulePath())
                     .update();
         }
         return true;
@@ -106,7 +107,7 @@ public class JdbcBuildEvidenceStore implements BuildEvidenceStore {
 
     private static EvidenceFile file(ResultSet rs) throws SQLException {
         return new EvidenceFile(rs.getObject("id", UUID.class), rs.getString("file_name"), FileKind.valueOf(rs.getString("kind")),
-                rs.getLong("byte_size"), rs.getString("sha256"));
+                rs.getLong("byte_size"), rs.getString("sha256"), rs.getString("module_path"));
     }
 
     private String write(Object value) {

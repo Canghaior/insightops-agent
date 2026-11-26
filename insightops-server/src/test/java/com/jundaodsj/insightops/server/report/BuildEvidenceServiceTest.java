@@ -55,6 +55,80 @@ class BuildEvidenceServiceTest {
         return parts;
     }
 
+    @Test void reactorUsesModuleIdentityAndDistinguishesSkippedFromAbsentXml() {
+        String modules = """
+                ,"modules":[{"path":".","projectName":"root","selected":true},
+                            {"path":"alpha","projectName":"alpha","selected":true},
+                            {"path":"beta","projectName":"beta","selected":true},
+                            {"path":"extra","projectName":"extra","selected":false}]
+                """;
+        var originals = Map.<String, List<MultipartFile>>of(
+                "moduleXml1", List.of(data("moduleXml1", "TEST-pkg.A.xml", xml("pkg.A", "/fixture/alpha"))),
+                "moduleXml2", List.of(data("moduleXml2", "TEST-pkg.A.xml", xml("pkg.A", "/fixture/beta"))),
+                "mavenLog", List.of(data("mavenLog", "reactor.log", """
+                        [INFO] Reactor Summary for root 1:
+                        [INFO]
+                        [INFO] root ............... SUCCESS [ 0.001 s]
+                        [INFO] alpha .............. SUCCESS [ 0.002 s]
+                        [INFO] beta ............... SUCCESS [ 0.003 s]
+                        [INFO] ---------------------------------------
+                        [INFO] BUILD SUCCESS
+                        """)));
+        var baseline = service.inspectBatch(actor, report, declaration(modules), originals);
+        var candidateParts = Map.<String, List<MultipartFile>>of(
+                "moduleXml1", originals.get("moduleXml1"),
+                "mavenLog", List.of(data("mavenLog", "reactor.log", """
+                        [INFO] Reactor Summary for root 1:
+                        [INFO]
+                        [INFO] root ............... SUCCESS [ 0.001 s]
+                        [INFO] alpha .............. FAILURE [ 0.002 s]
+                        [INFO] beta ............... SKIPPED
+                        [INFO] ---------------------------------------
+                        [INFO] BUILD FAILURE
+                        """)));
+        var candidate = service.inspectBatch(actor, report,
+                declaration(modules).replace("BASELINE", "CANDIDATE"), candidateParts);
+        assertThat(candidate.modules()).extracting(module -> module.state())
+                .containsExactly(ModuleState.SUCCESS, ModuleState.FAILURE, ModuleState.SKIPPED, ModuleState.NOT_SELECTED);
+        assertThat(candidate.modules().getFirst().counts()).isNull();
+        assertThat(candidate.modules().get(2).counts()).isNull();
+        var comparison = com.jundaodsj.insightops.report.application.BuildEvidenceComparison.compare(baseline, candidate);
+        assertThat(comparison.groups()).extracting(group -> group.modulePath()).containsExactly("alpha", "beta");
+        assertThat(comparison.groups().get(1).change().name()).isEqualTo("BASELINE_ONLY");
+        assertThat(comparison.modules()).hasSize(4);
+    }
+
+    @Test void reactorReadsWindowsLogWhilePreservingBytes() throws Exception {
+        var gbk = """
+                [INFO] Reactor Summary:
+                [INFO]
+                [INFO] 中文模块 ............... SUCCESS [ 0.001 s]
+                [INFO] ---------------------------------------
+                [INFO] BUILD SUCCESS
+                """.getBytes(java.nio.charset.Charset.forName("GBK"));
+        var log = new MockMultipartFile("mavenLog", "reactor.log", "text/plain", gbk);
+        var batch = service.inspectBatch(actor, report, declaration("""
+                ,"modules":[{"path":"module","projectName":"中文模块"}]
+                """), Map.of("mavenLog", List.of(log)));
+        assertThat(batch.modules().getFirst().state()).isEqualTo(ModuleState.SUCCESS);
+        assertThat(batch.warnings()).anyMatch(warning -> warning.contains("GB18030"));
+        assertThat(batch.files().getFirst().sha256()).isEqualTo(
+                HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(gbk)));
+    }
+
+    @Test void reactorDoesNotGuessWhenSummaryNamesAreAmbiguous() {
+        var batch = service.inspectBatch(actor, report, declaration("""
+                ,"modules":[{"path":"one","projectName":"same"},{"path":"two","projectName":"same"}]
+                """), Map.of("mavenLog", List.of(data("mavenLog", "reactor.log", """
+                [INFO] Reactor Summary:
+                [INFO] same ............... FAILURE [ 0.001 s]
+                [INFO] same ............... SKIPPED
+                [INFO] ---------------------------------------
+                [INFO] BUILD FAILURE
+                """))));
+        assertThat(batch.modules()).allMatch(module -> module.state() == ModuleState.UNKNOWN && module.counts() == null);
+    }
+
     @Test void supportsTypicalCommandFieldAliasesWithoutChangingTheOriginal() throws Exception {
         var parts = sources();
         var input = data("commandRecord", "command.json", """

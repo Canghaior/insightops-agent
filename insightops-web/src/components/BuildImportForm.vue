@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { buildRoles, evidenceError, importBuild, type BuildBatch, type BuildRole, type ImportFiles } from '@/api/buildEvidence'
+import { buildRoles, evidenceError, importBuild, type BuildBatch, type BuildModuleFiles, type BuildRole, type ImportFiles } from '@/api/buildEvidence'
 
 const props = defineProps<{ reportId: string; role: BuildRole }>()
 const emit = defineEmits<{ imported: [batch: BuildBatch]; cancel: []; busy: [value: boolean] }>()
@@ -9,13 +9,34 @@ const files = ref<ImportFiles>({ xmlFiles: [] })
 const busy = ref(false)
 const error = ref('')
 let submissionId: string | undefined
-const count = computed(() => files.value.xmlFiles.length)
+let nextModuleKey = 0
+const reactor = ref(false)
+const modules = ref<(BuildModuleFiles & { key: number })[]>([])
+const xmlFiles = computed(() => reactor.value ? modules.value.flatMap(module => module.xmlFiles) : files.value.xmlFiles)
 const selected = computed(() => [
-  ...files.value.xmlFiles, files.value.mavenLog, files.value.commandRecord, files.value.exclusionManifest,
+  ...xmlFiles.value, files.value.mavenLog, files.value.commandRecord, files.value.exclusionManifest,
 ].filter((file): file is globalThis.File => !!file))
+function addModule() {
+  dirty()
+  modules.value.push({ key: nextModuleKey++, path: '', projectName: '', selected: null, xmlFiles: [] })
+}
+function removeModule(index: number) {
+  dirty()
+  modules.value.splice(index, 1)
+}
+function changeMode() {
+  dirty()
+  files.value.xmlFiles = []
+  for (const module of modules.value) module.xmlFiles = []
+  if (reactor.value && !modules.value.length) addModule()
+}
+function pickModule(index: number, event: globalThis.Event) {
+  dirty()
+  modules.value[index].xmlFiles = Array.from((event.target as globalThis.HTMLInputElement).files ?? [])
+}
 
 function dirty() { submissionId = undefined; error.value = '' }
-function pick(field: keyof ImportFiles, event: globalThis.Event) {
+function pick(field: keyof Omit<ImportFiles, 'modules'>, event: globalThis.Event) {
   dirty()
   const chosen = (event.target as globalThis.HTMLInputElement).files
   if (field === 'xmlFiles') files.value.xmlFiles = Array.from(chosen ?? [])
@@ -23,8 +44,20 @@ function pick(field: keyof ImportFiles, event: globalThis.Event) {
 }
 async function submit() {
   if (busy.value) return
-  if (count.value < 1 || count.value > 40) { error.value = '每个构建请选 1 至 40 份 Surefire XML。'; return }
-  if (files.value.xmlFiles.some(file => !file.name.startsWith('TEST-') || !file.name.toLowerCase().endsWith('.xml') || file.name.length <= 9)) {
+  if (reactor.value && (!modules.value.length || modules.value.some(module => !module.path.trim() || !module.projectName.trim()))) {
+    error.value = '请填写每个模块的目录和 Reactor 摘要项目名。'
+    return
+  }
+  const maxXml = reactor.value ? 160 : 40
+  if (xmlFiles.value.length > maxXml) {
+    error.value = '每批最多 ' + maxXml + ' 份 XML。'
+    return
+  }
+  if (!xmlFiles.value.length && (!reactor.value || !files.value.mavenLog)) {
+    error.value = '请选择 XML。缺少 XML 的多模块运行可以上传 Reactor 日志。'
+    return
+  }
+  if (xmlFiles.value.some(file => !file.name.startsWith('TEST-') || !file.name.toLowerCase().endsWith('.xml') || file.name.length <= 9)) {
     error.value = '请选择该模块 target/surefire-reports 下原名为 TEST-*.xml 的测试报告。'; return
   }
   if (selected.value.some(file => !file.size || file.size > 2 * 1024 * 1024)
@@ -44,7 +77,7 @@ async function submit() {
       role: props.role, requestId: submissionId, label: fields.label.trim() || null,
       environment: fields.environment.trim() || null, sourceNote: fields.sourceNote.trim() || null,
       executedBy: fields.executedBy.trim() || null, executedAt: time?.toISOString() ?? null, exitCode,
-    }, files.value)
+    }, reactor.value ? { ...files.value, xmlFiles: [], modules: modules.value } : files.value)
     emit('imported', result)
   } catch (cause) {
     error.value = (cause as { response?: { status?: number } })?.response?.status === 413
@@ -58,10 +91,23 @@ async function submit() {
   <form class="build-import" @input="dirty" @submit.prevent="submit">
     <fieldset :disabled="busy">
       <legend>导入{{ buildRoles[role] }}</legend>
-      <label class="wide">Surefire XML 原件
+      <label class="mode wide"><input v-model="reactor" type="checkbox" @change="changeMode" /> Maven 多模块构建</label>
+      <template v-if="reactor">
+        <p class="hint wide">为每个模块填写根目录相对路径和 Reactor 摘要项目名。聚合根使用 .。可登记无测试或未运行的模块。</p>
+        <div v-for="(module, index) in modules" :key="module.key" class="field-grid module wide">
+          <label>模块路径<input v-model.trim="module.path" maxlength="240" placeholder="例如 service/core" required /></label>
+          <label>Reactor 项目名<input v-model.trim="module.projectName" maxlength="180" required /></label>
+          <label>本次选择范围<select v-model="module.selected"><option :value="null">未知</option><option :value="true">选中</option><option :value="false">未选中</option></select></label>
+          <label>模块的 Surefire XML<input type="file" multiple accept=".xml" @change="pickModule(index, $event)" /></label>
+          <button type="button" class="text-button" @click="removeModule(index)">移除此模块</button>
+        </div>
+        <div class="wide"><button type="button" class="text-button" :disabled="modules.length >= 32" @click="addModule">增加模块</button></div>
+        <p class="hint wide">每批最多 32 个模块、160 份 XML 和 4000 个测试项。每份原件最多 2 MiB，合计最多 12 MiB。</p>
+      </template>
+      <label v-if="!reactor" class="wide">Surefire XML 原件
         <input type="file" multiple required accept=".xml" @change="pick('xmlFiles', $event)" />
       </label>
-      <p class="hint wide">在该模块的 target/surefire-reports 中选取同一次构建的 TEST-*.xml。每批最多 40 份 XML、4000 个测试项，每份最多 2 MiB，合计最多 12 MiB。按模块和执行次数分别导入。</p>
+      <p v-if="!reactor" class="hint wide">在该模块的 target/surefire-reports 中选取同一次构建的 TEST-*.xml。每批最多 40 份 XML、4000 个测试项，每份最多 2 MiB，合计最多 12 MiB。按模块和执行次数分别导入。</p>
       <label class="wide">构建标签或提交号（可选）<input v-model="fields.label" maxlength="180" placeholder="例如 Spring Boot 3.4.2 · 4a021e4c" /></label>
       <label>命令记录（可选 JSON）<input type="file" accept=".json" @change="pick('commandRecord', $event)" /></label>
       <label>Maven 构建日志（可选）<input type="file" accept=".log,.txt" @change="pick('mavenLog', $event)" /></label>
@@ -99,6 +145,8 @@ fieldset, .field-grid { display: grid; grid-template-columns: repeat(auto-fit, m
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0 }
 legend { font-weight: 700; padding: 0; margin-bottom: .75rem }
 label { display: grid; align-content: start; gap: .3rem; min-width: 0 }
+.mode { display: flex; align-items: center; gap: .4rem }
+.module { border: 1px solid var(--line); border-radius: .4rem; padding: .6rem }
 input, textarea { padding: .45rem; width: 100%; min-width: 0 }
 .wide { grid-column: 1 / -1 }
 .hint, .formats p { color: var(--muted); font-size: .9rem; margin: 0 }

@@ -135,6 +135,30 @@ class BuildEvidenceDatabaseGateTest {
         assertThat(service.require(OWNER, report, batchId)).isEqualTo(original);
     }
 
+    @Test void reactorArchivesIdenticalFileNamesUnderDifferentModules() {
+        UUID system = system(OWNER), report = report(OWNER, system);
+        var declaration = """
+                {"requestId":"%s","role":"BASELINE","modules":[
+                  {"path":"alpha","projectName":"alpha","selected":true},
+                  {"path":"beta","projectName":"beta","selected":true}]}
+                """.formatted(UUID.randomUUID());
+        var parts = Map.<String, List<MultipartFile>>of(
+                "moduleXml0", List.of(new MockMultipartFile("moduleXml0", "TEST-example.Orders.xml", "text/xml",
+                        XML.getBytes(StandardCharsets.UTF_8))),
+                "moduleXml1", List.of(new MockMultipartFile("moduleXml1", "TEST-example.Orders.xml", "text/xml",
+                        XML.getBytes(StandardCharsets.UTF_8))));
+        var batch = save(OWNER, report, declaration, parts);
+        assertThat(batch.files()).extracting(file -> file.modulePath()).containsExactly("alpha", "beta");
+        assertThat(batch.modules()).extracting(module -> module.counts()).containsExactly(new Counts(1, 0, 1, 0), new Counts(1, 0, 1, 0));
+        assertThat(service.require(OWNER, report, batch.summary().id())).isEqualTo(batch);
+        assertThat(save(OWNER, report, declaration, parts)).isEqualTo(batch);
+        for (var file : batch.files()) {
+            var download = service.download(OWNER, report, batch.summary().id(), file.id());
+            assertThat(download.file()).isEqualTo(file);
+            assertThat(download.content()).isEqualTo(XML.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
     @Test void realReportOwnershipSystemScopeAndCompositeDatabaseKeyRejectMismatches() {
         UUID system = system(OWNER), report = report(OWNER, system);
         var otherOwner = new ActorContext(UUID.randomUUID(), OWNER.workspaceId());

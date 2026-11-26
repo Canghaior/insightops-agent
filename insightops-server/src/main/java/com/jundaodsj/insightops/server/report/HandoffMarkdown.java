@@ -1,6 +1,7 @@
 package com.jundaodsj.insightops.server.report;
 
 import com.jundaodsj.insightops.report.application.BuildEvidence.*;
+import com.jundaodsj.insightops.report.application.BuildEvidence.Module;
 import com.jundaodsj.insightops.report.application.BuildEvidenceComparison;
 import com.jundaodsj.insightops.report.application.ReportReviewStore.*;
 
@@ -93,6 +94,14 @@ final class HandoffMarkdown {
         block(text, diff.objectiveSummary());
         writeBuild(text, "基线", baseline);
         writeBuild(text, "候选", candidate);
+        if (!diff.modules().isEmpty()) {
+            text.append("## Maven 模块对照\n\n");
+            for (var module : diff.modules()) {
+                field(text, "模块", module.path());
+                field(text, "基线", describeModule(module.baseline()));
+                field(text, "候选", describeModule(module.candidate()));
+            }
+        }
         text.append("## 状态变化、单侧出现、重复身份和原始错误\n\n");
         Map<UUID,String> paths = new HashMap<>();
         for (var batch : List.of(baseline,candidate)) {
@@ -108,7 +117,8 @@ final class HandoffMarkdown {
                 case BASELINE_ONLY -> "仅见于基线"; case CANDIDATE_ONLY -> "仅见于候选";
             };
             text.append("### ").append(listed).append(" · ").append(change).append("\n\n");
-            block(text, group.suite() + "  /  " + group.className() + "#" + group.name());
+            String module = group.modulePath() == null ? "" : group.modulePath() + "  /  ";
+            block(text, module + group.suite() + "  /  " + group.className() + "#" + group.name());
             writeOccurrences(text, "基线", group.baseline(), paths);
             writeOccurrences(text, "候选", group.candidate(), paths);
         }
@@ -116,6 +126,21 @@ final class HandoffMarkdown {
         text.append("完整身份、各侧发生次数及异常类型、消息、堆栈见 [逐项数据](diff.json)。\n\n## 适用范围\n\n");
         for (String limit : diff.limitations()) block(text, limit);
         return text.toString();
+    }
+
+    private static String describeModule(Module module) {
+        if (module == null) return "未提供该模块";
+        String state = switch (module.state()) {
+            case SUCCESS -> "构建成功";
+            case FAILURE -> "构建失败";
+            case SKIPPED -> "构建跳过";
+            case NOT_SELECTED -> "声明未选中";
+            case UNKNOWN -> "状态未知";
+        };
+        var count = module.counts();
+        String xml = count == null ? "未取得模块 XML" : "%d 项，%d 通过、%d 断言失败、%d 执行报错、%d 跳过"
+                .formatted(count.total(), count.passed(), count.failures(), count.errors(), count.skipped());
+        return module.projectName() + " · " + state + " · " + xml;
     }
 
     private static void writeBuild(StringBuilder text, String label, Batch batch) {

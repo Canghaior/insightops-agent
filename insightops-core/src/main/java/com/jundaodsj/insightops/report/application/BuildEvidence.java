@@ -9,9 +9,16 @@ public final class BuildEvidence {
     private BuildEvidence() {}
 
     public enum Role { BASELINE, CANDIDATE }
+    public enum BuildTool { MAVEN, GRADLE }
     public enum ModuleState { SUCCESS, FAILURE, SKIPPED, NOT_SELECTED, UNKNOWN }
     public enum Status { PASSED, FAILURE, ERROR, SKIPPED }
-    public enum FileKind { SUREFIRE_XML, MAVEN_LOG, COMMAND_RECORD, EXCLUSION_MANIFEST }
+    public enum FileKind {
+        SUREFIRE_XML, MAVEN_LOG, COMMAND_RECORD, EXCLUSION_MANIFEST, JUNIT_XML, GRADLE_LOG;
+
+        public boolean isTestXml() {
+            return this == SUREFIRE_XML || this == JUNIT_XML;
+        }
+    }
 
     public record Counts(int passed, int failures, int errors, int skipped) {
         public int total() { return passed + failures + errors + skipped; }
@@ -50,15 +57,22 @@ public final class BuildEvidence {
                           Counts counts) {}
     public record Batch(Summary summary, Metadata metadata, BuildRecord commandRecord, LogFacts log,
                         List<ExcludedMethod> excludedMethods, List<EvidenceFile> files,
-                        List<TestCase> cases, List<String> warnings, List<Module> modules) {
+                        List<TestCase> cases, List<String> warnings, List<Module> modules, BuildTool buildTool) {
         public Batch(Summary summary, Metadata metadata, BuildRecord commandRecord, LogFacts log,
                      List<ExcludedMethod> excludedMethods, List<EvidenceFile> files,
                      List<TestCase> cases, List<String> warnings) {
             this(summary, metadata, commandRecord, log, excludedMethods, files, cases, warnings, List.of());
         }
 
+        public Batch(Summary summary, Metadata metadata, BuildRecord commandRecord, LogFacts log,
+                     List<ExcludedMethod> excludedMethods, List<EvidenceFile> files,
+                     List<TestCase> cases, List<String> warnings, List<Module> modules) {
+            this(summary, metadata, commandRecord, log, excludedMethods, files, cases, warnings, modules, BuildTool.MAVEN);
+        }
+
         public Batch {
             modules = modules == null ? List.of() : List.copyOf(modules);
+            buildTool = buildTool == null ? BuildTool.MAVEN : buildTool;
         }
     }
     public record Original(EvidenceFile file, byte[] content) {}

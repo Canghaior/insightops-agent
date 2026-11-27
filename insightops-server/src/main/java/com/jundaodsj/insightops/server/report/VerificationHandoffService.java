@@ -74,7 +74,8 @@ public class VerificationHandoffService {
                                      List<HandoffArchiveWriter.Entry> entries) { }
     private record ParsedImport(Summary summary, Metadata userDeclarations, BuildRecord commandRecord, LogFacts log,
                                 List<ExcludedMethod> excludedMethodsFromManifest, List<EvidenceFile> files, List<String> warnings,
-                                @JsonInclude(JsonInclude.Include.NON_EMPTY) List<Module> modules) { }
+                                @JsonInclude(JsonInclude.Include.NON_EMPTY) List<Module> modules,
+                                @JsonInclude(JsonInclude.Include.NON_NULL) BuildTool buildTool) { }
 
     private interface OptionalModulePath {
         @JsonInclude(JsonInclude.Include.NON_NULL) String modulePath();
@@ -238,13 +239,18 @@ public class VerificationHandoffService {
         String label = summary.role() == Role.BASELINE ? "基线材料" : "候选材料";
         String reference = summary.id().toString();
         var kinds = batch.files().stream().map(EvidenceFile::kind).toList();
-        if (!kinds.contains(FileKind.MAVEN_LOG)) missing.add(new Missing(label, reference, "未导入 Maven 日志。"));
+        if (batch.buildTool() == BuildTool.GRADLE) {
+            if (!kinds.contains(FileKind.GRADLE_LOG)) missing.add(new Missing(label, reference, "未导入 Gradle 日志。"));
+        } else if (!kinds.contains(FileKind.MAVEN_LOG)) {
+            missing.add(new Missing(label, reference, "未导入 Maven 日志。"));
+        }
         if (!kinds.contains(FileKind.COMMAND_RECORD)) missing.add(new Missing(label, reference, "未导入命令记录。"));
         if (!batch.commandRecord().excludedClasses().isEmpty() && batch.excludedMethods().isEmpty()) {
             missing.add(new Missing(label, reference, "命令有排除类，具体排除方法数量缺少独立依据。"));
         }
         writer.json(prefix + "comparison/" + side + ".json", "PARSED_BUILD", summary.id(), new ParsedImport(summary,batch.metadata(),
-                batch.commandRecord(),batch.log(),batch.excludedMethods(),batch.files(),batch.warnings(),batch.modules()));
+                batch.commandRecord(),batch.log(),batch.excludedMethods(),batch.files(),batch.warnings(),batch.modules(),
+                batch.buildTool() == BuildTool.MAVEN ? null : batch.buildTool()));
         for (var file : batch.files()) {
             var original = builds.download(actor, reportId, summary.id(), file.id());
             if (!file.equals(original.file())) throw new ResponseStatusException(HttpStatus.CONFLICT,

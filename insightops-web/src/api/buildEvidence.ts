@@ -1,8 +1,10 @@
 import { apiClient } from './client'
 
 export type BuildRole = 'BASELINE' | 'CANDIDATE'
+export type BuildTool = 'MAVEN' | 'GRADLE'
 export type CaseStatus = 'PASSED' | 'FAILURE' | 'ERROR' | 'SKIPPED'
 export const buildRoles: Record<BuildRole, string> = { BASELINE: '基线构建', CANDIDATE: '候选构建' }
+export const buildToolNames: Record<BuildTool, string> = { MAVEN: 'Maven', GRADLE: 'Gradle' }
 export const caseStatuses: Record<CaseStatus, string> = {
   PASSED: '通过', FAILURE: '断言失败', ERROR: '执行报错', SKIPPED: '跳过',
 }
@@ -24,9 +26,11 @@ export interface BuildMetadata {
   exitCode: number | null
   sourceNote: string | null
 }
-export type EvidenceFileKind = 'SUREFIRE_XML' | 'MAVEN_LOG' | 'COMMAND_RECORD' | 'EXCLUSION_MANIFEST'
+export type EvidenceFileKind = 'SUREFIRE_XML' | 'MAVEN_LOG' | 'JUNIT_XML' | 'GRADLE_LOG' | 'COMMAND_RECORD' | 'EXCLUSION_MANIFEST'
 export const fileKinds: Record<EvidenceFileKind, string> = {
-  SUREFIRE_XML: 'Surefire 测试结果', MAVEN_LOG: 'Maven 日志', COMMAND_RECORD: '命令记录', EXCLUSION_MANIFEST: '排除方法清单',
+  SUREFIRE_XML: 'Surefire 测试结果', MAVEN_LOG: 'Maven 日志',
+  JUNIT_XML: 'JUnit 测试结果', GRADLE_LOG: 'Gradle 日志',
+  COMMAND_RECORD: '命令记录', EXCLUSION_MANIFEST: '排除方法清单',
 }
 export interface EvidenceFile {
   id: string
@@ -69,6 +73,7 @@ export interface CaseOccurrence {
 }
 export interface BuildBatch {
   summary: BuildSummary
+  buildTool?: BuildTool
   metadata: BuildMetadata
   commandRecord: {
     command: string[]
@@ -90,6 +95,7 @@ export interface ImportFiles {
   xmlFiles: File[]
   modules?: BuildModuleFiles[]
   mavenLog?: File
+  gradleLog?: File
   commandRecord?: File
   exclusionManifest?: File
 }
@@ -102,7 +108,7 @@ export async function listBuilds(reportId: string): Promise<BuildSummary[]> {
 export async function getBuild(reportId: string, batchId: string): Promise<BuildBatch> {
   return (await apiClient.get(`${buildsPath(reportId)}/${encodeURIComponent(batchId)}`)).data.data
 }
-export async function importBuild(reportId: string, metadata: BuildMetadata & { requestId: string; role: BuildRole }, files: ImportFiles): Promise<BuildBatch> {
+export async function importBuild(reportId: string, metadata: BuildMetadata & { requestId: string; role: BuildRole; buildTool?: BuildTool }, files: ImportFiles): Promise<BuildBatch> {
   const data = new FormData()
   const modules = files.modules?.map(({ path, projectName, selected }) => ({ path, projectName, selected }))
   data.append('metadata', JSON.stringify({ ...metadata, modules }))
@@ -110,7 +116,7 @@ export async function importBuild(reportId: string, metadata: BuildMetadata & { 
   files.modules?.forEach((module, index) => {
     for (const file of module.xmlFiles) data.append('moduleXml' + index, file)
   })
-  for (const field of ['mavenLog', 'commandRecord', 'exclusionManifest'] as const) {
+  for (const field of ['mavenLog', 'gradleLog', 'commandRecord', 'exclusionManifest'] as const) {
     const file = files[field]
     if (file) data.append(field, file)
   }

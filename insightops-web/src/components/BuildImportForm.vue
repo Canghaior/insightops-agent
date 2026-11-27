@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { buildRoles, evidenceError, importBuild, type BuildBatch, type BuildModuleFiles, type BuildRole, type ImportFiles } from '@/api/buildEvidence'
+import { buildRoles, buildToolNames, evidenceError, importBuild, type BuildBatch, type BuildModuleFiles, type BuildRole, type BuildTool, type ImportFiles } from '@/api/buildEvidence'
 
 const props = defineProps<{ reportId: string; role: BuildRole }>()
 const emit = defineEmits<{ imported: [batch: BuildBatch]; cancel: []; busy: [value: boolean] }>()
@@ -11,10 +11,14 @@ const error = ref('')
 let submissionId: string | undefined
 let nextModuleKey = 0
 const reactor = ref(false)
+const buildTool = ref<BuildTool>('MAVEN')
+const gradle = computed(() => buildTool.value === 'GRADLE')
+const logField = computed(() => gradle.value ? 'gradleLog' : 'mavenLog')
+const reportDirectory = computed(() => gradle.value ? 'build/test-results/任务名' : 'target/surefire-reports')
 const modules = ref<(BuildModuleFiles & { key: number })[]>([])
 const xmlFiles = computed(() => reactor.value ? modules.value.flatMap(module => module.xmlFiles) : files.value.xmlFiles)
 const selected = computed(() => [
-  ...xmlFiles.value, files.value.mavenLog, files.value.commandRecord, files.value.exclusionManifest,
+  ...xmlFiles.value, files.value[logField.value], files.value.commandRecord, files.value.exclusionManifest,
 ].filter((file): file is globalThis.File => !!file))
 function addModule() {
   dirty()
@@ -29,6 +33,12 @@ function changeMode() {
   files.value.xmlFiles = []
   for (const module of modules.value) module.xmlFiles = []
   if (reactor.value && !modules.value.length) addModule()
+}
+function changeTool() {
+  dirty()
+  reactor.value = false
+  modules.value = []
+  files.value = { xmlFiles: [] }
 }
 function pickModule(index: number, event: globalThis.Event) {
   dirty()
@@ -54,11 +64,11 @@ async function submit() {
     return
   }
   if (!xmlFiles.value.length && (!reactor.value || !files.value.mavenLog)) {
-    error.value = '请选择 XML。缺少 XML 的多模块运行可以上传 Reactor 日志。'
+    error.value = gradle.value ? '请选择同一次 Gradle 测试任务的 JUnit XML。' : '请选择 XML。缺少 XML 的多模块运行可以上传 Reactor 日志。'
     return
   }
   if (xmlFiles.value.some(file => !file.name.startsWith('TEST-') || !file.name.toLowerCase().endsWith('.xml') || file.name.length <= 9)) {
-    error.value = '请选择该模块 target/surefire-reports 下原名为 TEST-*.xml 的测试报告。'; return
+    error.value = '请选择 ' + reportDirectory.value + ' 下原名为 TEST-*.xml 的测试报告。'; return
   }
   if (selected.value.some(file => !file.size || file.size > 2 * 1024 * 1024)
     || selected.value.reduce((sum, file) => sum + file.size, 0) > 12 * 1024 * 1024) {
@@ -75,6 +85,7 @@ async function submit() {
     submissionId ??= globalThis.crypto.randomUUID()
     const result = await importBuild(props.reportId, {
       role: props.role, requestId: submissionId, label: fields.label.trim() || null,
+      buildTool: buildTool.value,
       environment: fields.environment.trim() || null, sourceNote: fields.sourceNote.trim() || null,
       executedBy: fields.executedBy.trim() || null, executedAt: time?.toISOString() ?? null, exitCode,
     }, reactor.value ? { ...files.value, xmlFiles: [], modules: modules.value } : files.value)
@@ -91,7 +102,12 @@ async function submit() {
   <form class="build-import" @input="dirty" @submit.prevent="submit">
     <fieldset :disabled="busy">
       <legend>导入{{ buildRoles[role] }}</legend>
-      <label class="mode wide"><input v-model="reactor" type="checkbox" @change="changeMode" /> Maven 多模块构建</label>
+      <label class="wide">构建工具
+        <select v-model="buildTool" @change="changeTool">
+          <option v-for="(name, key) in buildToolNames" :key="key" :value="key">{{ name }}</option>
+        </select>
+      </label>
+      <label v-if="!gradle" class="mode wide"><input v-model="reactor" type="checkbox" @change="changeMode" /> Maven 多模块构建</label>
       <template v-if="reactor">
         <p class="hint wide">为每个模块填写根目录相对路径和 Reactor 摘要项目名。聚合根使用 .。可登记无测试或未运行的模块。</p>
         <div v-for="(module, index) in modules" :key="module.key" class="field-grid module wide">
@@ -104,20 +120,22 @@ async function submit() {
         <div class="wide"><button type="button" class="text-button" :disabled="modules.length >= 32" @click="addModule">增加模块</button></div>
         <p class="hint wide">每批最多 32 个模块、160 份 XML 和 4000 个测试项。每份原件最多 2 MiB，合计最多 12 MiB。</p>
       </template>
-      <label v-if="!reactor" class="wide">Surefire XML 原件
+      <label v-if="!reactor" :key="buildTool" class="wide">{{ gradle ? 'JUnit XML 原件' : 'Surefire XML 原件' }}
         <input type="file" multiple required accept=".xml" @change="pick('xmlFiles', $event)" />
       </label>
-      <p v-if="!reactor" class="hint wide">在该模块的 target/surefire-reports 中选取同一次构建的 TEST-*.xml。每批最多 40 份 XML、4000 个测试项，每份最多 2 MiB，合计最多 12 MiB。按模块和执行次数分别导入。</p>
+      <p v-if="!reactor" class="hint wide">从 {{ reportDirectory }} 选取 TEST-*.xml。按子项目、测试任务及执行次数分别导入。每批最多 40 份 XML、4000 个测试项，每份最多 2 MiB，合计最多 12 MiB。</p>
       <label class="wide">构建标签或提交号（可选）<input v-model="fields.label" maxlength="180" placeholder="例如 Spring Boot 3.4.2 · 4a021e4c" /></label>
-      <label>命令记录（可选 JSON）<input type="file" accept=".json" @change="pick('commandRecord', $event)" /></label>
-      <label>Maven 构建日志（可选）<input type="file" accept=".log,.txt" @change="pick('mavenLog', $event)" /></label>
-      <label class="wide">排除方法清单（可选 JSON）<input type="file" accept=".json" @change="pick('exclusionManifest', $event)" /></label>
+      <label>命令记录（可选 JSON）<input :key="buildTool" type="file" accept=".json" @change="pick('commandRecord', $event)" /></label>
+      <label>{{ buildToolNames[buildTool] }} 构建日志（可选）<input :key="buildTool" type="file" accept=".log,.txt" @change="pick(logField, $event)" /></label>
+      <label v-if="!gradle" class="wide">排除方法清单（可选 JSON）<input type="file" accept=".json" @change="pick('exclusionManifest', $event)" /></label>
       <details class="wide formats">
         <summary>可选文件格式</summary>
         <p>命令记录支持 command、exit、start、end，也支持 exitCode、startedAt、endedAt。时间需带时区，两种写法同时出现时须一致。</p>
-        <pre>{{ '{ "command": ["mvn", "test"], "exitCode": 0 }' }}</pre>
-        <p>排除方法清单提供独立的源码位置，用于说明命令排除的类里列明了哪些方法。</p>
-        <pre>{{ '{ "excludedMethods": [{ "className": "DatabaseTests", "methodName": "findOwner", "source": "src/test/java/DatabaseTests.java:42" }] }' }}</pre>
+        <pre>{{ gradle ? '{ "command": ["./gradlew", "--console=plain", "test"], "exitCode": 0 }' : '{ "command": ["mvn", "test"], "exitCode": 0 }' }}</pre>
+        <template v-if="!gradle">
+          <p>排除方法清单提供独立的源码位置，用于说明命令排除的类里列明了哪些方法。</p>
+          <pre>{{ '{ "excludedMethods": [{ "className": "DatabaseTests", "methodName": "findOwner", "source": "src/test/java/DatabaseTests.java:42" }] }' }}</pre>
+        </template>
       </details>
       <details class="wide declared">
         <summary>填写执行环境与来源（可选）</summary>

@@ -28,6 +28,8 @@ import java.util.regex.Pattern;
 final class BuildEvidenceDocuments {
     private static final Pattern EXACT_EXCLUDE = Pattern.compile("![A-Za-z_$][\\w$]*");
     private static final Set<String> MAVEN_LAUNCHERS = Set.of("mvn", "mvnw", "mvn.cmd", "mvnw.cmd", "mvn.bat", "mvnw.bat");
+    private static final Set<String> GRADLE_LAUNCHERS = Set.of("gradle", "gradlew", "gradle.bat", "gradlew.bat");
+    private static final Pattern GRADLE_FINISH = Pattern.compile("^BUILD (SUCCESSFUL|FAILED) in \\d+(?:ms|[hms])(?: \\d+(?:ms|[hms]))*$");
     private static final Pattern LOG_COUNTS = Pattern.compile(
             "^\\[(?:INFO|WARN|WARNING|ERROR)]\\s+Tests run:\\s*(\\d{1,8}),\\s*Failures:\\s*(\\d{1,8}),\\s*Errors:\\s*(\\d{1,8}),\\s*Skipped:\\s*(\\d{1,8})(?:,\\s*Flakes:\\s*(\\d{1,8}))?\\s*$");
     private static final Pattern ANSI_COLORS = Pattern.compile("\\x1b\\[[;\\d]*m");
@@ -42,12 +44,15 @@ final class BuildEvidenceDocuments {
 
     BuildEvidenceDocuments(ObjectMapper json) { this.json = json; }
 
-    Batch analyze(Summary header, Metadata metadata, List<Original> originals, List<ModuleDeclaration> declarations) {
+    Batch analyze(Summary header, Metadata metadata, List<Original> originals, List<ModuleDeclaration> declarations,
+                  BuildTool buildTool) {
         List<TestCase> cases = new ArrayList<>();
         Map<String, Set<String>> suitesByModule = new HashMap<>();
         Map<String, Set<String>> directoriesByModule = new HashMap<>();
         Map<String, List<TestCase>> casesByModule = new HashMap<>();
         boolean reactor = !declarations.isEmpty();
+        boolean gradle = buildTool == BuildTool.GRADLE;
+        String toolName = gradle ? "Gradle" : "Maven";
         String logSource = "";
         List<String> warnings = new ArrayList<>();
         BuildRecord command = new BuildRecord(List.of(), null, null, null, null, List.of());
@@ -55,7 +60,7 @@ final class BuildEvidenceDocuments {
         List<ExcludedMethod> methods = List.of();
         for (Original original : originals) {
             EvidenceFile file = original.file();
-            if (file.kind() == FileKind.SUREFIRE_XML) {
+            if (file.kind().isTestXml()) {
                 var suite = xml.parse(file.id(), file.name(), original.content());
                 String module = Objects.toString(file.modulePath(), "");
                 var suites = suitesByModule.computeIfAbsent(module, ignored -> new HashSet<>());
@@ -74,7 +79,8 @@ final class BuildEvidenceDocuments {
                             logSource = logText(original.content(), reactor, warnings);
                             log = log(logSource, warnings, reactor);
                         }
-                        case COMMAND_RECORD -> command = command(object(original.content()), warnings);
+                        case GRADLE_LOG -> log = gradleLog(text(original.content()));
+                        case COMMAND_RECORD -> command = command(object(original.content()), warnings, buildTool);
                         case EXCLUSION_MANIFEST -> methods = manifest(object(original.content()));
                         default -> throw new IllegalStateException("Unsupported evidence kind");
                     }
@@ -101,14 +107,15 @@ final class BuildEvidenceDocuments {
         }
 
         Counts counts = Counts.from(cases);
-        if (command.command().isEmpty()) warnings.add("未取得 Maven 执行命令，测试选择范围未知。");
+        if (command.command().isEmpty()) warnings.add("未取得 " + toolName + " 执行命令，测试选择范围未知。");
         if (command.exitCode() == null && metadata.exitCode() == null) warnings.add("未取得退出码，不能由 XML 推出构建成功。");
-        if (log.outcome() == null) warnings.add("未取得 Maven 最终 BUILD SUCCESS / BUILD FAILURE 标记。");
+        if (log.outcome() == null) warnings.add(gradle ? "未取得 Gradle 最终 BUILD SUCCESSFUL / BUILD FAILED 标记。"
+                : "未取得 Maven 最终 BUILD SUCCESS / BUILD FAILURE 标记。");
         if (command.exitCode() != null && metadata.exitCode() != null && !command.exitCode().equals(metadata.exitCode()))
             warnings.add("命令记录的退出码与用户填写不一致，请核对原件。");
         for (Integer exit : new Integer[]{command.exitCode(), metadata.exitCode()}) {
             if (exit != null && log.outcome() != null && (exit == 0) != log.outcome().equals("SUCCESS")) {
-                warnings.add("退出码与 Maven 日志的最终构建标记不一致，请核对来源。");
+                warnings.add("退出码与 " + toolName + " 日志的最终构建标记不一致，请核对来源。");
                 break;
             }
         }
@@ -120,11 +127,12 @@ final class BuildEvidenceDocuments {
         List<Module> modules = modules(declarations, logSource, casesByModule, warnings);
         warnings.add(reactor
                 ? "统计仅涵盖按模块提交的 XML。模块路径、项目名和选择范围来自提交者。日志状态按唯一的项目名称对应。"
+                : gradle ? "统计仅涵盖已上传的 JUnit XML。请核对它们是否来自同一 Gradle 子项目、同一次测试任务，以及任务是否使用了缓存。"
                 : "统计仅涵盖已上传的 XML。文件哈希可核对字节。原件是否均来自同一模块、同一次构建和所填提交，以及材料是否齐全，尚未核实。");
         var summary = new Summary(header.id(), header.systemId(), header.reportId(), header.role(),
                 header.label(), header.importedAt(), counts);
         return new Batch(summary, metadata, command, log, methods, originals.stream().map(Original::file).toList(),
-                List.copyOf(cases), List.copyOf(warnings), modules);
+                List.copyOf(cases), List.copyOf(warnings), modules, buildTool);
     }
 
     private JsonNode object(byte[] data) {
@@ -280,9 +288,7 @@ final class BuildEvidenceDocuments {
         String outcome = null;
         int totals = 0, finishes = 0;
         for (Iterator<String> it = source.lines().iterator(); it.hasNext();) {
-            String line = it.next();
-            if (line.indexOf('\u001b') >= 0) line = ANSI_COLORS.matcher(line).replaceAll("");
-            line = line.strip();
+            String line = cleanLogLine(it.next());
             if (!line.startsWith("[")) continue;
             if (!reactor && (line.startsWith("[INFO] Reactor Build Order") || line.startsWith("[INFO] Reactor Summary")))
                 throw new IllegalArgumentException("检测到 Maven Reactor 日志，请按模块、按次导入构建材料。");
@@ -307,7 +313,22 @@ final class BuildEvidenceDocuments {
         return new LogFacts(outcome, summary);
     }
 
-    private static BuildRecord command(JsonNode root, List<String> warnings) {
+    private static LogFacts gradleLog(String source) {
+        String outcome = null;
+        for (Iterator<String> it = source.lines().iterator(); it.hasNext();) {
+            var finish = GRADLE_FINISH.matcher(cleanLogLine(it.next()));
+            if (!finish.matches()) continue;
+            if (outcome != null) throw new IllegalArgumentException("日志有多个 Gradle 构建总结，请提供单次构建日志。");
+            outcome = finish.group(1).equals("SUCCESSFUL") ? "SUCCESS" : "FAILURE";
+        }
+        return new LogFacts(outcome, null);
+    }
+
+    private static String cleanLogLine(String line) {
+        return (line.indexOf('\u001b') >= 0 ? ANSI_COLORS.matcher(line).replaceAll("") : line).strip();
+    }
+
+    private static BuildRecord command(JsonNode root, List<String> warnings, BuildTool tool) {
         JsonNode args = root.get("command");
         if (args == null && List.of("exit", "exitCode", "start", "startedAt", "end", "endedAt").stream().noneMatch(root::has))
             throw new IllegalArgumentException("未找到支持的命令字段。可使用 command、exit/exitCode、start/startedAt 或 end/endedAt。");
@@ -323,7 +344,7 @@ final class BuildEvidenceDocuments {
         if (exit == null) exit = exitCode;
         List<String> selectors = new ArrayList<>();
         boolean otherTestProperty = false;
-        for (int i = 0; i < command.size(); i++) {
+        for (int i = 0; tool == BuildTool.MAVEN && i < command.size(); i++) {
             String arg = command.get(i);
             if (arg.startsWith("-Dtest=")) selectors.add(arg.substring(7));
             else if (arg.equals("-Dtest") || arg.equals("--define=test") || arg.startsWith("--define=test=")) {
@@ -340,9 +361,12 @@ final class BuildEvidenceDocuments {
         String selector = selectors.isEmpty() ? null : String.join(" | ", selectors);
         List<String> excluded = List.of();
         List<String> tokens = selectors.size() == 1 ? List.of(selector.split(",", -1)) : List.of();
-        if (!command.isEmpty() && !mavenLauncher(command.getFirst())) {
+        if (!command.isEmpty() && !isLauncher(command.getFirst(), tool == BuildTool.GRADLE ? GRADLE_LAUNCHERS : MAVEN_LAUNCHERS)) {
             selector = null;
-            warnings.add("未识别到直接启动 Maven 的命令。保留原始参数，具体排除范围未知。");
+            warnings.add(tool == BuildTool.GRADLE ? "未识别到直接启动 Gradle 的命令。保留原始参数，测试选择范围未知。"
+                    : "未识别到直接启动 Maven 的命令。保留原始参数，具体排除范围未知。");
+        } else if (tool == BuildTool.GRADLE) {
+            selector = gradleSelector(command);
         } else if (!otherTestProperty && !tokens.isEmpty() && tokens.stream().allMatch(x -> EXACT_EXCLUDE.matcher(x).matches())) {
             excluded = tokens.stream().map(x -> x.substring(1)).distinct().toList();
         } else if (!selectors.isEmpty() || otherTestProperty) {
@@ -354,11 +378,22 @@ final class BuildEvidenceDocuments {
         return new BuildRecord(List.copyOf(command), exit, start, end, selector, excluded);
     }
 
-    private static boolean mavenLauncher(String command) {
+    private static String gradleSelector(List<String> command) {
+        var selectors = new ArrayList<String>();
+        for (int i = 1; i < command.size(); i++) {
+            String arg = command.get(i);
+            if (arg.equals("--tests") && i + 1 < command.size() && !command.get(i + 1).startsWith("-"))
+                selectors.add(command.get(++i));
+            else if (arg.startsWith("--tests=")) selectors.add(arg.substring("--tests=".length()));
+        }
+        return selectors.isEmpty() ? null : String.join(" | ", selectors);
+    }
+
+    private static boolean isLauncher(String command, Set<String> launchers) {
         // Inspect the recorded name only; the path belongs to the external build environment.
         if (command.contains("://")) return false;
         String path = command.replace('\\', '/');
-        return MAVEN_LAUNCHERS.contains(path.substring(path.lastIndexOf('/') + 1).toLowerCase(Locale.ROOT));
+        return launchers.contains(path.substring(path.lastIndexOf('/') + 1).toLowerCase(Locale.ROOT));
     }
 
     private static List<ExcludedMethod> manifest(JsonNode root) {

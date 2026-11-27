@@ -19,7 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 public class JdbcBuildEvidenceStore implements BuildEvidenceStore {
     private record Analysis(BuildRecord commandRecord, LogFacts log, List<ExcludedMethod> excludedMethods,
-                            List<TestCase> cases, List<String> warnings, List<Module> modules) {}
+                            List<TestCase> cases, List<String> warnings, List<Module> modules, BuildTool buildTool) {}
     private record Details(Summary summary, Metadata metadata, Analysis analysis) {}
 
     private static final String SCOPE = " b.workspace_id=:workspace and b.owner_user_id=:owner and b.system_id=:system";
@@ -53,7 +53,7 @@ public class JdbcBuildEvidenceStore implements BuildEvidenceStore {
                     .param("id", batchId).query((rs, n) -> file(rs)).list();
             Analysis a = parts.analysis();
             return new Batch(parts.summary(), parts.metadata(), a.commandRecord(), a.log(), a.excludedMethods(),
-                    files, a.cases(), a.warnings(), a.modules());
+                    files, a.cases(), a.warnings(), a.modules(), a.buildTool());
         });
     }
 
@@ -73,7 +73,8 @@ public class JdbcBuildEvidenceStore implements BuildEvidenceStore {
     @Override @Transactional
     public boolean insert(ActorContext actor, UUID requestId, String fingerprint, Batch batch, List<Original> originals) {
         Summary s = batch.summary();
-        var analysis = new Analysis(batch.commandRecord(), batch.log(), batch.excludedMethods(), batch.cases(), batch.warnings(), batch.modules());
+        var analysis = new Analysis(batch.commandRecord(), batch.log(), batch.excludedMethods(), batch.cases(),
+                batch.warnings(), batch.modules(), batch.buildTool());
         int inserted = jdbc.sql("""
                 insert into build_evidence_batch
                     (id, workspace_id, owner_user_id, system_id, report_id, request_id, request_hash,

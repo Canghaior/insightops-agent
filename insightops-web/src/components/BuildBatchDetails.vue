@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { buildFileUrl, buildRoles, caseStatuses, describeModule, displayTime, evidenceFileName, fileKinds, type BuildBatch, type CaseStatus } from '@/api/buildEvidence'
+import { buildFileUrl, buildRoles, buildToolNames, caseStatuses, describeModule, displayTime, evidenceFileName, fileKinds, type BuildBatch, type CaseStatus } from '@/api/buildEvidence'
 import BuildCaseResult from './BuildCaseResult.vue'
 
 const props = defineProps<{ reportId: string; batch: BuildBatch }>()
@@ -32,6 +32,7 @@ watch([filter, search, () => props.batch.summary.id], () => { page.value = 0 })
       <summary>标签、执行环境与命令范围</summary>
       <strong>用户填写</strong>
       <dl>
+        <dt>构建工具</dt><dd>{{ buildToolNames[batch.buildTool ?? 'MAVEN'] }}</dd>
         <dt>构建标签或提交号</dt><dd>{{ batch.metadata.label || '未知' }}</dd>
         <dt>材料来源</dt><dd>{{ batch.metadata.sourceNote || '未知' }}</dd>
         <dt>执行环境</dt><dd>{{ batch.metadata.environment || '未知' }}</dd>
@@ -44,11 +45,13 @@ watch([filter, search, () => props.batch.summary.id], () => { page.value = 0 })
         <dt>命令及参数</dt><dd><ol v-if="batch.commandRecord.command.length" class="arguments"><li v-for="(arg, ix) in batch.commandRecord.command" :key="ix"><code>{{ arg }}</code></li></ol><span v-else>未知</span></dd>
         <dt>记录起止时间</dt><dd>{{ displayTime(batch.commandRecord.startedAt) }} 至 {{ displayTime(batch.commandRecord.endedAt) }}</dd>
         <dt>记录的退出码</dt><dd>{{ batch.commandRecord.exitCode ?? '未知' }}</dd>
-        <dt>Maven 日志结论</dt><dd>{{ batch.log.outcome === 'SUCCESS' ? '构建成功' : batch.log.outcome === 'FAILURE' ? '构建失败' : '未知' }}</dd>
+        <dt>构建日志结论</dt><dd>{{ batch.log.outcome === 'SUCCESS' ? '构建成功' : batch.log.outcome === 'FAILURE' ? '构建失败' : '未知' }}</dd>
         <template v-if="batch.log.counts"><dt>日志测试总结</dt><dd>通过 {{ batch.log.counts.passed }}，断言失败 {{ batch.log.counts.failures }}，执行报错 {{ batch.log.counts.errors }}，跳过 {{ batch.log.counts.skipped }}</dd></template>
         <dt>测试选择参数</dt><dd>{{ batch.commandRecord.selector || '未知' }}</dd>
-        <dt>命令明确排除的类</dt><dd>{{ batch.commandRecord.excludedClasses.length ? batch.commandRecord.excludedClasses.join('、') : '未从命令确定' }}</dd>
-        <dt>排除的方法</dt><dd v-if="batch.excludedMethods.length">清单列明 {{ batch.excludedMethods.length }} 个方法<ul><li v-for="item in batch.excludedMethods" :key="JSON.stringify(item)">{{ item.className }}.{{ item.methodName }} <small>{{ item.source }}</small></li></ul></dd><dd v-else>具体方法数量未知</dd>
+        <template v-if="batch.buildTool !== 'GRADLE'">
+          <dt>命令明确排除的类</dt><dd>{{ batch.commandRecord.excludedClasses.length ? batch.commandRecord.excludedClasses.join('、') : '未从命令确定' }}</dd>
+          <dt>排除的方法</dt><dd v-if="batch.excludedMethods.length">清单列明 {{ batch.excludedMethods.length }} 个方法<ul><li v-for="item in batch.excludedMethods" :key="JSON.stringify(item)">{{ item.className }}.{{ item.methodName }} <small>{{ item.source }}</small></li></ul></dd><dd v-else>具体方法数量未知</dd>
+        </template>
       </dl>
       <p>本次导入时间为 {{ displayTime(batch.summary.importedAt) }}。测试范围是否完整、原件是否来自所填提交，仍需结合来源核对。</p>
     </details>

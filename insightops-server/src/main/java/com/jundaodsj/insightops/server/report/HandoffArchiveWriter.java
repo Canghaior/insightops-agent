@@ -98,8 +98,9 @@ final class HandoffArchiveWriter {
 
     static String originalPath(Role role, EvidenceFile file) {
         String fallback = switch (file.kind()) {
-            case SUREFIRE_XML -> "original.xml";
+            case SUREFIRE_XML, JUNIT_XML -> "original.xml";
             case MAVEN_LOG -> "maven.log";
+            case GRADLE_LOG -> "gradle.log";
             case COMMAND_RECORD, EXCLUSION_MANIFEST -> "record.json";
         };
         String side = role == Role.BASELINE ? "baseline" : "candidate";

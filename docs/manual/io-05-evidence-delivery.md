@@ -37,6 +37,13 @@ API 沿用报告构建导入接口。`metadata.modules` 按顺序包含 `path`�
 
 最终 Petclinic 环境为 `http://127.0.0.1:20057`。报告 `af22050f-6d5b-4a76-9247-8742947555e6` 的第 3 版验证为 `c4b7ebdf-41d2-4391-8136-417e6331713c`。独立版本升级扩展环境为 `http://127.0.0.1:20067`。两者只监听本机。
 
+## Gradle 测试证据
+
+基线和候选各执行一次测试任务，例如 `./gradlew --no-daemon --console=plain test`。在导入表单选择 Gradle，上传该次执行的 `build/test-results/test/TEST-*.xml`，并可附 UTF-8 控制台日志和命令 JSON。自定义任务使用相应的测试报告目录。每批对应同一子项目、同一次测试任务，沿用单模块的文件和测试数上限。
+
+构建结论从 `BUILD SUCCESSFUL` 或 `BUILD FAILED` 读取。测试数量以提交的 JUnit XML 为依据。核对命令、日志和退出码后，把对照附到验证版本并导出交接包。缓存命中、跨任务合并和重跑需要核对各次原始记录。
+
+通过 API 导入时，声明 `metadata.buildTool` 为 `GRADLE`。XML、日志和命令分别提交到 `xmlFiles`、`gradleLog` 和 `commandRecord`。
 
 ## 采集联合构建及重跑证据
 

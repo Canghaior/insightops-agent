@@ -55,6 +55,31 @@ class BuildEvidenceServiceTest {
         return parts;
     }
 
+    @Test void gradleLogAndCommandAreReadWithoutMavenSelectors() {
+        var originals = sources();
+        originals.put("gradleLog", List.of(data("gradleLog", "gradle.log", "BUILD FAILED in 1m 2s\n")));
+        originals.put("commandRecord", List.of(data("commandRecord", "gradle.json",
+                """
+                {"command":["./gradlew","test","--tests","pkg.A"],"exitCode":1}
+                """)));
+        var batch = service.importBatch(actor, report, declaration(",\"buildTool\":\"GRADLE\""), originals);
+
+        assertThat(batch.buildTool()).isEqualTo(BuildTool.GRADLE);
+        assertThat(batch.files()).extracting(EvidenceFile::kind)
+                .containsExactlyInAnyOrder(FileKind.JUNIT_XML, FileKind.GRADLE_LOG, FileKind.COMMAND_RECORD);
+        assertThat(batch.log()).isEqualTo(new LogFacts("FAILURE", null));
+        assertThat(batch.commandRecord().selector()).isEqualTo("pkg.A");
+        assertThat(batch.commandRecord().excludedClasses()).isEmpty();
+        assertThat(batch.summary().counts().passed()).isEqualTo(1);
+        assertThat(batch.warnings()).noneMatch(warning -> warning.contains("Maven"));
+
+        originals.put("gradleLog", List.of(data("gradleLog", "gradle.log",
+                "BUILD SUCCESSFUL in 3s\nBUILD FAILED in 1m 2s\n")));
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                service.inspectBatch(actor, report, declaration(",\"buildTool\":\"GRADLE\""), originals))
+                .withMessageContaining("多个 Gradle 构建总结");
+    }
+
     @Test void reactorUsesModuleIdentityAndDistinguishesSkippedFromAbsentXml() {
         String modules = """
                 ,"modules":[{"path":".","projectName":"root","selected":true},

@@ -104,6 +104,8 @@ public record BuildEvidenceComparison(UUID baselineId, UUID candidateId, Scope s
         var limits = new LinkedHashSet<String>();
         limits.add("这些数量仅覆盖已导入的 XML。未出现的方法执行情况未知，获知构建是否成功还需核对日志与退出码。");
         if (leftCounts.total() == 0 && rightCounts.total() == 0) limits.add("两份 XML 均未记录 testcase，无法比较业务回归表现。");
+        if (baseline.buildTool() != candidate.buildTool())
+            limits.add("两边使用的构建工具不同。请核对任务、筛选规则与测试名称的对应关系。");
         if (!Objects.equals(baseline.commandRecord().selector(), candidate.commandRecord().selector())) {
             limits.add("两边记录的命令选择器不一致或有一侧缺失。请核对各自执行范围。");
         }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { batchName, describeModule, displayTime, evidenceFileName, type BuildBatch } from '@/api/buildEvidence'
+import { batchName, buildToolNames, describeModule, displayTime, evidenceFileName, type BuildBatch } from '@/api/buildEvidence'
 import { testChanges, type BuildComparison, type ComparisonCounts, type TestChange } from '@/api/buildComparison'
 import BuildCaseResult from './BuildCaseResult.vue'
 
@@ -57,6 +57,7 @@ const fileNames = computed(() => new Map([...props.baseline.files, ...props.cand
       <table aria-label="构建信息和测试数量">
         <thead><tr><th scope="col">对照项</th><th v-for="side in sides" :key="side.key" scope="col">{{ side.title }}构建</th></tr></thead>
         <tbody>
+          <tr><th scope="row">构建工具</th><td v-for="side in sides" :key="side.key">{{ buildToolNames[side.batch.buildTool ?? 'MAVEN'] }}</td></tr>
           <tr><th scope="row">标签（用户填写）</th><td v-for="side in sides" :key="side.key">{{ batchName(side.batch.summary) }}</td></tr>
           <tr><th scope="row">来源（用户填写）</th><td v-for="side in sides" :key="side.key">{{ side.batch.metadata.sourceNote || '未知' }}</td></tr>
           <tr><th scope="row">环境（用户填写）</th><td v-for="side in sides" :key="side.key">{{ side.batch.metadata.environment || '未知' }}</td></tr>
@@ -67,7 +68,7 @@ const fileNames = computed(() => new Map([...props.baseline.files, ...props.cand
           <tr><th scope="row">命令明确排除</th><td v-for="side in sides" :key="side.key">{{ side.batch.commandRecord.excludedClasses.join('、') || '未从命令确定' }}<small>{{ side.batch.excludedMethods.length ? '独立清单列明 ' + side.batch.excludedMethods.length + ' 个方法' : '具体方法数量未知' }}</small></td></tr>
           <tr><th scope="row">退出码（命令记录）</th><td v-for="side in sides" :key="side.key">{{ side.batch.commandRecord.exitCode ?? '未知' }}</td></tr>
           <tr><th scope="row">退出码（用户填写）</th><td v-for="side in sides" :key="side.key">{{ side.batch.metadata.exitCode ?? '未知' }}</td></tr>
-          <tr><th scope="row">Maven 日志结论</th><td v-for="side in sides" :key="side.key">{{ side.batch.log.outcome === 'SUCCESS' ? '构建成功' : side.batch.log.outcome === 'FAILURE' ? '构建失败' : '未知' }}</td></tr>
+          <tr><th scope="row">构建日志结论</th><td v-for="side in sides" :key="side.key">{{ side.batch.log.outcome === 'SUCCESS' ? '构建成功' : side.batch.log.outcome === 'FAILURE' ? '构建失败' : '未知' }}</td></tr>
           <tr><th scope="row">导入时间</th><td v-for="side in sides" :key="side.key">{{ displayTime(side.batch.summary.importedAt) }}</td></tr>
           <tr v-for="row in rows" :key="row.key"><th scope="row">{{ row.title }}</th><td v-for="side in sides" :key="side.key">{{ side.counts[row.key] }}</td></tr>
         </tbody>

@@ -130,7 +130,7 @@ defineExpose({ inspect })
       <h4>构建证据与对照</h4>
       <button type="button" class="text-button" :disabled="loading || saving" @click="refresh">刷新构建批次</button>
     </header>
-    <p class="subtle">导入本系统两次已有的 Maven 构建结果。原件用于验证和交接，独立于研究检索。</p>
+    <p class="subtle">导入本系统已有的 Maven 或 Gradle 构建结果。原件用于验证和交接，独立于研究检索。</p>
     <p v-if="listError" role="alert" class="stream-error">{{ listError }}</p>
     <p v-if="notice" role="status" class="success-notice">{{ notice }}</p>
     <div class="build-sides">

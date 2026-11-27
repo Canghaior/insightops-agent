@@ -44,7 +44,7 @@ class P24AgentWorkflowDatabaseGateTest {
         var result = Flyway.configure().dataSource(dataSource).schemas(SCHEMA)
                 .defaultSchema(SCHEMA).createSchemas(true)
                 .locations("classpath:db/migration").load().migrate();
-        assertThat(result.migrationsExecuted).isEqualTo(54);
+        assertThat(result.migrationsExecuted).isEqualTo(55);
     }
 
     @AfterAll

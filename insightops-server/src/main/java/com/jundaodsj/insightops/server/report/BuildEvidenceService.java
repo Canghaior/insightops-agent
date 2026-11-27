@@ -35,15 +35,22 @@ import static com.jundaodsj.insightops.server.workflow.ResearchProfiles.text;
 public class BuildEvidenceService {
     private static final int MAX_XML = 40, MAX_FILE = 2 * 1024 * 1024, MAX_TOTAL = 12 * 1024 * 1024;
     private static final int MAX_MODULES = 32, MAX_REACTOR_XML = 160;
-    private static final Map<String, FileKind> PARTS = Map.of("xmlFiles", FileKind.SUREFIRE_XML,
+    private static final Map<String, FileKind> MAVEN_PARTS = Map.of("xmlFiles", FileKind.SUREFIRE_XML,
             "mavenLog", FileKind.MAVEN_LOG, "commandRecord", FileKind.COMMAND_RECORD,
             "exclusionManifest", FileKind.EXCLUSION_MANIFEST);
+    private static final Map<String, FileKind> GRADLE_PARTS = Map.of("xmlFiles", FileKind.JUNIT_XML,
+            "gradleLog", FileKind.GRADLE_LOG, "commandRecord", FileKind.COMMAND_RECORD);
 
     public record ImportCommand(UUID requestId, Role role, String label, String environment, String executedAt,
-                                String executedBy, Integer exitCode, String sourceNote, List<ModuleDeclaration> modules) {
+                                String executedBy, Integer exitCode, String sourceNote, List<ModuleDeclaration> modules,
+                                BuildTool buildTool) {
         public ImportCommand(UUID requestId, Role role, String label, String environment, String executedAt,
                              String executedBy, Integer exitCode, String sourceNote) {
-            this(requestId, role, label, environment, executedAt, executedBy, exitCode, sourceNote, null);
+            this(requestId, role, label, environment, executedAt, executedBy, exitCode, sourceNote, null, null);
+        }
+
+        public ImportCommand {
+            buildTool = buildTool == null ? BuildTool.MAVEN : buildTool;
         }
     }
 
@@ -88,7 +95,7 @@ public class BuildEvidenceService {
         ImportCommand command = command(declaration);
         Metadata meta = metadata(command);
         List<ModuleDeclaration> modules = modules(command.modules());
-        List<Original> originals = originals(parts, modules);
+        List<Original> originals = originals(parts, modules, command.buildTool());
         List<List<String>> identities = originals.stream().map(Original::file)
                 .map(f -> f.modulePath() == null ? List.of(f.kind().name(), f.name(), f.sha256())
                         : List.of(f.kind().name(), f.name(), f.sha256(), f.modulePath())).toList();
@@ -96,6 +103,7 @@ public class BuildEvidenceService {
         if (!modules.isEmpty()) {
             signature.add(modules.stream().sorted(Comparator.comparing(ModuleDeclaration::path)).toList());
         }
+        if (command.buildTool() != BuildTool.MAVEN) signature.add(command.buildTool());
         String fingerprint;
         try { fingerprint = sha(json.writeValueAsBytes(signature)); }
         catch (JsonProcessingException ex) { throw new IllegalStateException("无法计算导入标识。", ex); }
@@ -104,7 +112,7 @@ public class BuildEvidenceService {
 
         var header = new Summary(UUID.randomUUID(), system, reportId, command.role(), meta.label(),
                 Instant.now().truncatedTo(ChronoUnit.MICROS), null);
-        Batch batch = documents.analyze(header, meta, originals, modules);
+        Batch batch = documents.analyze(header, meta, originals, modules, command.buildTool());
         if (store.insert(actor, command.requestId(), fingerprint, batch, originals)) return batch;
         // ON CONFLICT waits for the concurrent import transaction. Its receipt and originals are now committed.
         return replay(actor, system, store.request(actor, system, command.requestId()).orElseThrow(), fingerprint);
@@ -118,7 +126,7 @@ public class BuildEvidenceService {
         Metadata meta = metadata(command);
         var header = new Summary(UUID.randomUUID(), system, reportId, command.role(), meta.label(), Instant.now(), null);
         List<ModuleDeclaration> modules = modules(command.modules());
-        return documents.analyze(header, meta, originals(parts, modules), modules);
+        return documents.analyze(header, meta, originals(parts, modules, command.buildTool()), modules, command.buildTool());
     }
 
     private static Metadata metadata(ImportCommand command) {
@@ -146,7 +154,7 @@ public class BuildEvidenceService {
         try {
             var input = json.readTree(source);
             if (input == null || !input.isObject()) throw new IllegalArgumentException("导入声明应为 JSON 对象。");
-            for (String field : List.of("requestId","role","label","environment","executedAt","executedBy","sourceNote")) {
+            for (String field : List.of("requestId","role","label","environment","executedAt","executedBy","sourceNote","buildTool")) {
                 if (input.hasNonNull(field) && !input.get(field).isTextual())
                     throw new IllegalArgumentException(field + " 需要文本值。");
             }
@@ -165,6 +173,8 @@ public class BuildEvidenceService {
             ImportCommand cmd = json.treeToValue(input, ImportCommand.class);
             if (cmd == null || cmd.role() == null || cmd.requestId() == null)
                 throw new IllegalArgumentException("请选择基线或候选构建，并提供提交标识。");
+            if (cmd.buildTool() == BuildTool.GRADLE && cmd.modules() != null && !cmd.modules().isEmpty())
+                throw new IllegalArgumentException("Gradle 每批请提交同一子项目、同一次测试任务的原件。");
             return cmd;
         } catch (JsonProcessingException ex) { throw new IllegalArgumentException("导入字段或数据类型无效。"); }
     }
@@ -191,7 +201,10 @@ public class BuildEvidenceService {
         return List.copyOf(normalized);
     }
 
-    private static List<Original> originals(Map<String, List<MultipartFile>> parts, List<ModuleDeclaration> modules) {
+    private static List<Original> originals(Map<String, List<MultipartFile>> parts, List<ModuleDeclaration> modules,
+                                            BuildTool buildTool) {
+        boolean gradle = buildTool == BuildTool.GRADLE;
+        var supported = gradle ? GRADLE_PARTS : MAVEN_PARTS;
         var moduleParts = new HashMap<String, String>();
         for (int i = 0; i < modules.size(); i++) moduleParts.put("moduleXml" + i, modules.get(i).path());
         if (!modules.isEmpty() && parts.containsKey("xmlFiles"))
@@ -201,17 +214,18 @@ public class BuildEvidenceService {
                 .mapToInt(part -> part.getValue().size()).sum();
         int maxXml = modules.isEmpty() ? MAX_XML : MAX_REACTOR_XML;
         if (xmlCount > maxXml)
-            throw new IllegalArgumentException("每批最多支持 " + maxXml + " 份普通 Surefire TEST-*.xml。");
+            throw new IllegalArgumentException("每批最多支持 " + maxXml + " 份 TEST-*.xml。");
         if (xmlCount == 0 && (modules.isEmpty() || !parts.containsKey("mavenLog")))
-            throw new IllegalArgumentException("请选择 Surefire XML。缺少 XML 的多模块运行可提交 Reactor 日志。");
+            throw new IllegalArgumentException(gradle ? "请选择同一次 Gradle 测试任务的 JUnit XML。"
+                    : "请选择 Surefire XML。缺少 XML 的多模块运行可提交 Reactor 日志。");
         List<Original> items = new ArrayList<>();
         HashSet<String> names = new HashSet<>();
         long total = 0;
         for (var entry : parts.entrySet()) {
             String modulePath = moduleParts.get(entry.getKey());
-            FileKind kind = modulePath == null ? PARTS.get(entry.getKey()) : FileKind.SUREFIRE_XML;
+            FileKind kind = modulePath == null ? supported.get(entry.getKey()) : FileKind.SUREFIRE_XML;
             if (kind == null) throw new IllegalArgumentException("存在不支持的原件字段。");
-            if (kind != FileKind.SUREFIRE_XML && entry.getValue().size() != 1)
+            if (!kind.isTestXml() && entry.getValue().size() != 1)
                 throw new IllegalArgumentException("每批只能选择一份日志、命令记录和排除方法清单。");
             for (MultipartFile upload : entry.getValue()) {
                 String name = fileName(upload.getOriginalFilename(), kind);
@@ -244,8 +258,8 @@ public class BuildEvidenceService {
             throw new IllegalArgumentException("原件需要普通文件名，请直接选择文件，不要提交目录路径。");
         String lower = name.toLowerCase(Locale.ROOT);
         boolean valid = switch (kind) {
-            case SUREFIRE_XML -> name.startsWith("TEST-") && lower.endsWith(".xml") && name.length() > 9;
-            case MAVEN_LOG -> lower.endsWith(".txt") || lower.endsWith(".log");
+            case SUREFIRE_XML, JUNIT_XML -> name.startsWith("TEST-") && lower.endsWith(".xml") && name.length() > 9;
+            case MAVEN_LOG, GRADLE_LOG -> lower.endsWith(".txt") || lower.endsWith(".log");
             case COMMAND_RECORD, EXCLUSION_MANIFEST -> lower.endsWith(".json");
         };
         if (!valid) throw new IllegalArgumentException(name + "：该字段不支持此文件名或格式。");

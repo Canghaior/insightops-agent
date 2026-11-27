@@ -110,7 +110,7 @@ class AgentRunControllerTest {
         private static RunDetail detail() {
             UUID stepId = UUID.fromString("20000000-0000-0000-0000-000000000001");
             return new RunDetail(
-                    RUN_ID, UUID.randomUUID(), "trace-runs", "SUCCEEDED", "question", "answer",
+                    RUN_ID, UUID.randomUUID(), "trace-runs", "SUCCEEDED", "question", "answer", null,
                     "deepseek", "deepseek-v4-flash", 1, 100, 20, null,
                     null, null, null, 800L, Instant.parse("2026-08-16T00:00:00Z"),
                     Instant.parse("2026-08-16T00:00:00.800Z"),

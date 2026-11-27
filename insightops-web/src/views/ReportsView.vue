@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import MarkdownContent from '@/components/MarkdownContent.vue'
+import ClaimReviewPanel from '@/components/ClaimReviewPanel.vue'
 import EvidenceQualityPanel from '@/components/EvidenceQualityPanel.vue'
+import ReportReviewPanel from '@/components/ReportReviewPanel.vue'
+import { frozenBaseline } from '@/api/engineeringBaselines'
+import { isReviewEligible, type Verification } from '@/api/reportReview'
 import { listProjects, type ProjectWatch } from '@/api/projects'
 import {
   createDeliveryChannel, createReport, deleteDeliveryChannel, downloadReport,
-  enqueueReportDelivery, listDeliveryChannels, listReportDeliveries, listReports,
+  enqueueReportDelivery, getReport, listDeliveryChannels, listReportDeliveries, listReports,
   retryReportDelivery, updateDeliveryChannel, isPublicHttpsWebhookUrl,
   type DeliveryChannel, type DeliveryRecord,
   type ReportEventType, type ResearchReport,
@@ -17,6 +22,55 @@ const channels = ref<DeliveryChannel[]>([])
 const deliveries = ref<DeliveryRecord[]>([])
 const projects = ref<ProjectWatch[]>([])
 const selectedReport = ref<ResearchReport | null>(null)
+const route = useRoute(), router = useRouter()
+const reviewCandidateId = computed(() => {
+  const report = selectedReport.value
+  return report?.reportType === 'RESEARCH' && report.research?.runId && report.research.inputs?.systemSnapshot?.id
+    ? report.id : null
+})
+const reviewAccess = ref<'closed' | 'checking' | 'open' | 'error'>('closed')
+const verificationSummary = ref('')
+const reviewVersions = ref<Verification[]>([])
+let reviewRequest = 0
+async function checkReviewAccess() {
+  const id = reviewCandidateId.value
+  const request = ++reviewRequest
+  verificationSummary.value = ''
+  reviewVersions.value = []
+  reviewAccess.value = id ? 'checking' : 'closed'
+  if (!id) return
+  try {
+    const allowed = await isReviewEligible(id)
+    if (request === reviewRequest) reviewAccess.value = allowed ? 'open' : 'closed'
+  } catch { if (request === reviewRequest) reviewAccess.value = 'error' }
+}
+watch(reviewCandidateId, checkReviewAccess, { flush: 'sync' })
+function updateVerificationSummary(reportId: string, versions: Verification[]) {
+  if (reportId !== reviewCandidateId.value) return
+  reviewVersions.value = versions
+  const superseded = new Set(versions.map(version => version.previousVersionId))
+  const latest = versions.filter(version => !superseded.has(version.id))
+  const executed = latest.filter(version => version.fields.status === 'EXECUTED').length
+  verificationSummary.value = latest.length
+    ? `后续关联 ${latest.length} 条验证记录，其中 ${executed} 条记录为已执行。`
+    : '当前尚无后续验证记录。'
+}
+function selectReport(report: ResearchReport) {
+  selectedReport.value = report
+  void router.replace({ query: { ...route.query, reportId: report.id } })
+}
+async function restoreSelection() {
+  const id = route.query.reportId
+  if (typeof id !== 'string' || !id) { selectedReport.value = null; return }
+  const listed = reports.value.find(r => r.id === id)
+  if (listed) { selectedReport.value = listed; return }
+  selectedReport.value = null
+  try {
+    const item = await getReport(id)
+    if (route.query.reportId === id) selectedReport.value = item
+  } catch (e) { if (route.query.reportId === id) error.value = message(e) }
+}
+watch(() => route.query.reportId, restoreSelection)
 const selectedChannelId = ref('')
 const loading = ref(false)
 const saving = ref(false)
@@ -55,7 +109,7 @@ async function load() {
     reports.value = reportPage.items; channels.value = channelItems
     deliveries.value = deliveryPage.items; projects.value = projectItems
     if (!form.projectIds.length) form.projectIds = projectItems.filter(item => item.enabled).map(item => item.id)
-    if (selectedReport.value) selectedReport.value = reports.value.find(item => item.id === selectedReport.value?.id) || null
+    await restoreSelection()
     if (!enabledChannels.value.some(item => item.id === selectedChannelId.value)) {
       selectedChannelId.value = enabledChannels.value[0]?.id || ''
     }
@@ -76,7 +130,7 @@ async function generate() {
       projectIds: form.projectIds, eventTypes: form.eventTypes, maxItems: form.maxItems,
     })
     notice.value = `报告已生成，共 ${report.itemCount} 条情报。`
-    await load(); selectedReport.value = reports.value.find(item => item.id === report.id) || report
+    await load(); selectReport(report)
   }
   catch (caught) { error.value = message(caught) }
   finally { saving.value = false }
@@ -147,13 +201,42 @@ onMounted(load)
 
 <template>
   <section class="reports-page">
-    <div class="section-heading"><div><span class="eyebrow">P1.8 · 结果交付</span><h2>研究报告</h2><p>在研究结果页保存结论与引用，或按周期汇总情报；随时下载 Markdown / PDF。</p></div><button class="secondary-button" :disabled="loading" @click="load">刷新</button></div>
+    <div class="section-heading"><div><h2>报告与验证</h2><p>打开已关联业务系统的评估报告，可将一项建议交给执行者，导入构建证据，并交接实际结果。</p></div><button class="secondary-button" :disabled="loading" @click="load">刷新</button></div>
     <p v-if="error" class="stream-error">{{ error }}</p><p v-if="notice" class="success-notice">{{ notice }}</p>
-    <div class="report-create-grid">
-      <form class="panel report-builder" @submit.prevent="generate"><div><span class="eyebrow">生成专题报告</span><h3>选择周期和情报范围</h3></div><label>报告标题<input v-model="form.title" maxlength="200" /></label><div class="quality-form-grid"><label>开始日期<input v-model="form.periodStart" type="date" /></label><label>结束日期<input v-model="form.periodEnd" type="date" /></label><label>最多条目<input v-model.number="form.maxItems" type="number" min="1" max="100" /></label></div><fieldset><legend>项目</legend><label v-for="project in activeProjects" :key="project.id" class="check-label"><input v-model="form.projectIds" type="checkbox" :value="project.id" /> {{ project.name }}</label></fieldset><fieldset><legend>事件类型</legend><label class="check-label"><input v-model="form.eventTypes" type="checkbox" value="GITHUB_RELEASE" /> Release</label><label class="check-label"><input v-model="form.eventTypes" type="checkbox" value="GITHUB_ISSUE" /> Issue</label><label class="check-label"><input v-model="form.eventTypes" type="checkbox" value="GITHUB_PULL_REQUEST" /> Pull Request</label><label class="check-label"><input v-model="form.eventTypes" type="checkbox" value="GITHUB_SECURITY_ADVISORY" /> Security Advisory</label></fieldset><button class="send-button" :disabled="saving">生成不可变报告快照</button></form>
-      <form class="panel report-builder" @submit.prevent="addChannel"><div><span class="eyebrow">站外交付</span><h3>Webhook 渠道</h3><p>仅接受公网 HTTPS 地址；完整地址使用 AES-GCM 加密，页面只显示掩码。</p></div><label>渠道名称<input v-model="channelName" maxlength="100" placeholder="例如：架构组机器人" /></label><label>Webhook 地址<input v-model="endpointUrl" type="url" maxlength="2048" placeholder="https://hooks.example.com/..." /></label><button class="send-button" :disabled="saving">添加渠道</button><div class="delivery-channels"><article v-for="channel in channels" :key="channel.id"><div><strong>{{ channel.name }}</strong><small>{{ channel.endpointMasked }}</small></div><i :class="channel.enabled ? 'status-succeeded' : ''">{{ channel.enabled ? '已启用' : '已停用' }}</i><button type="button" class="text-button" @click="toggleChannel(channel)">{{ channel.enabled ? '停用' : '启用' }}</button><button type="button" class="danger-link" @click="removeChannel(channel)">删除</button></article><p v-if="!channels.length" class="subtle">尚未配置站外渠道。</p></div></form>
+    <details class="report-tools">
+      <summary>新建周期报告或管理 Webhook 渠道</summary>
+      <div class="report-create-grid">
+        <form class="panel report-builder" @submit.prevent="generate"><div><span class="eyebrow">生成专题报告</span><h3>选择周期和情报范围</h3></div><label>报告标题<input v-model="form.title" maxlength="200" /></label><div class="quality-form-grid"><label>开始日期<input v-model="form.periodStart" type="date" /></label><label>结束日期<input v-model="form.periodEnd" type="date" /></label><label>最多条目<input v-model.number="form.maxItems" type="number" min="1" max="100" /></label></div><fieldset><legend>项目</legend><label v-for="project in activeProjects" :key="project.id" class="check-label"><input v-model="form.projectIds" type="checkbox" :value="project.id" /> {{ project.name }}</label></fieldset><fieldset><legend>事件类型</legend><label class="check-label"><input v-model="form.eventTypes" type="checkbox" value="GITHUB_RELEASE" /> Release</label><label class="check-label"><input v-model="form.eventTypes" type="checkbox" value="GITHUB_ISSUE" /> Issue</label><label class="check-label"><input v-model="form.eventTypes" type="checkbox" value="GITHUB_PULL_REQUEST" /> Pull Request</label><label class="check-label"><input v-model="form.eventTypes" type="checkbox" value="GITHUB_SECURITY_ADVISORY" /> Security Advisory</label></fieldset><button class="send-button" :disabled="saving">生成不可变报告快照</button></form>
+        <form class="panel report-builder" @submit.prevent="addChannel"><div><span class="eyebrow">站外交付</span><h3>Webhook 渠道</h3><p>仅接受公网 HTTPS 地址；完整地址使用 AES-GCM 加密，页面只显示掩码。</p></div><label>渠道名称<input v-model="channelName" maxlength="100" placeholder="例如：架构组机器人" /></label><label>Webhook 地址<input v-model="endpointUrl" type="url" maxlength="2048" placeholder="https://hooks.example.com/..." /></label><button class="send-button" :disabled="saving">添加渠道</button><div class="delivery-channels"><article v-for="channel in channels" :key="channel.id"><div><strong>{{ channel.name }}</strong><small>{{ channel.endpointMasked }}</small></div><i :class="channel.enabled ? 'status-succeeded' : ''">{{ channel.enabled ? '已启用' : '已停用' }}</i><button type="button" class="text-button" @click="toggleChannel(channel)">{{ channel.enabled ? '停用' : '启用' }}</button><button type="button" class="danger-link" @click="removeChannel(channel)">删除</button></article><p v-if="!channels.length" class="subtle">尚未配置站外渠道。</p></div></form>
+      </div>
+    </details>
+    <div class="report-workspace">
+      <div class="report-list"><h3 class="subsection-title">历史报告</h3><button v-for="report in reports" :key="report.id" :class="{active:selectedReport?.id===report.id}" @click="selectReport(report)"><span><b>{{ report.title }}</b><i>{{ report.reportType === 'RESEARCH' ? '研究快照' : `${report.highRiskCount} 高风险` }}</i></span><small><template v-if="report.research?.inputs?.systemSnapshot?.revision">档案修订 {{ report.research.inputs.systemSnapshot.revision }} · </template>{{ report.itemCount }} 条 · {{ time(report.createdAt) }}</small><EvidenceQualityPanel v-if="report.research?.evidenceQuality" :quality="report.research.evidenceQuality" compact /><small v-else-if="report.reportType === 'RESEARCH'">历史快照未记录资料完整性检查</small></button><div v-if="!reports.length" class="conversation-empty"><strong>尚无已保存报告</strong><p>在已完成的系统评估中点「保存为研究报告」，即可在此重新打开。</p></div></div><article v-if="selectedReport" class="panel report-detail">
+        <header><div><span class="eyebrow">{{ selectedReport.reportType === 'RESEARCH' ? '研究快照' : '情报汇总' }}</span><h3>{{ selectedReport.title }}</h3><p>{{ time(selectedReport.periodStart) }} — {{ time(selectedReport.periodEnd) }}</p></div><i class="status-pill">{{ selectedReport.itemCount }} 条</i></header><div class="quality-actions"><button class="secondary-button" :disabled="saving" @click="download(selectedReport,'md')">下载 Markdown</button><button class="secondary-button" :disabled="saving" @click="download(selectedReport,'pdf')">下载 PDF</button><select v-model="selectedChannelId"><option value="">选择 Webhook</option><option v-for="channel in enabledChannels" :key="channel.id" :value="channel.id">{{ channel.name }}</option></select><button class="send-button" :disabled="saving || !selectedChannelId" @click="deliver(selectedReport)">加入投递队列</button></div>
+        <EvidenceQualityPanel v-if="selectedReport.research?.evidenceQuality" :quality="selectedReport.research.evidenceQuality">
+          <template #validation v-if="reviewAccess === 'open'">
+            <p v-if="verificationSummary">{{ verificationSummary }}</p>
+            <a href="#report-verification-records">查看验证记录与原件</a>
+          </template>
+        </EvidenceQualityPanel>
+        <p v-else-if="selectedReport.reportType === 'RESEARCH'" class="subtle" role="status">这份历史报告没有保存资料完整性检查结果，不能据此认定结论已核验。原快照保持不变，可发起新的研究。</p>
+        <ClaimReviewPanel v-if="selectedReport.research?.evidence?.some(item => item.claimReviewVersion === 1)" :key="selectedReport.id" :report="selectedReport" :verifications="reviewVersions" />
+        <p v-if="reviewAccess === 'checking'" class="subtle" role="status">正在核对本报告的工程验证入口…</p>
+        <p v-else-if="reviewAccess === 'error'" class="stream-error" role="alert">暂时无法核对本报告的验证入口。<button type="button" class="text-button" @click="checkReviewAccess">重试加载验证入口</button></p>
+        <ReportReviewPanel
+          v-else-if="reviewAccess === 'open'" :key="selectedReport.id" :report-id="selectedReport.id" :original-answer="selectedReport.research?.answer"
+          id="report-verification-records" @loaded="updateVerificationSummary"
+          :report-title="selectedReport.title" :markdown="selectedReport.markdown" :baseline="frozenBaseline(selectedReport.research?.inputs)" :sources="reportSources"
+        />
+        <p v-if="selectedReport.reportType === 'RESEARCH' && !selectedReport.research?.inputs?.engineeringBaseline">本次评估未关联工程基线。</p>
+        <details open><summary>报告预览</summary><MarkdownContent :content="selectedReport.markdown" :sources="reportSources" /></details>
+      </article><div v-else class="conversation-empty"><strong>从历史报告中选择一份报告</strong></div>
     </div>
-    <div class="report-workspace"><div class="report-list"><h3 class="subsection-title">历史报告</h3><button v-for="report in reports" :key="report.id" :class="{active:selectedReport?.id===report.id}" @click="selectedReport=report"><span><b>{{ report.title }}</b><i>{{ report.reportType === 'RESEARCH' ? '研究快照' : `${report.highRiskCount} 高风险` }}</i></span><small>{{ report.itemCount }} 条 · {{ time(report.createdAt) }}</small><EvidenceQualityPanel v-if="report.research?.evidenceQuality" :quality="report.research.evidenceQuality" compact /><small v-else-if="report.reportType === 'RESEARCH'">历史快照未记录资料完整性检查</small></button><div v-if="!reports.length" class="conversation-empty"><strong>尚未生成报告</strong></div></div><article v-if="selectedReport" class="panel report-detail"><header><div><span class="eyebrow">{{ selectedReport.reportType }}</span><h3>{{ selectedReport.title }}</h3><p>{{ time(selectedReport.periodStart) }} — {{ time(selectedReport.periodEnd) }}</p></div><i class="status-pill">{{ selectedReport.itemCount }} 条</i></header><div class="quality-actions"><button class="secondary-button" :disabled="saving" @click="download(selectedReport,'md')">下载 Markdown</button><button class="secondary-button" :disabled="saving" @click="download(selectedReport,'pdf')">下载 PDF</button><select v-model="selectedChannelId"><option value="">选择 Webhook</option><option v-for="channel in enabledChannels" :key="channel.id" :value="channel.id">{{ channel.name }}</option></select><button class="send-button" :disabled="saving || !selectedChannelId" @click="deliver(selectedReport)">加入投递队列</button></div><EvidenceQualityPanel v-if="selectedReport.research?.evidenceQuality" :quality="selectedReport.research.evidenceQuality" /><p v-else-if="selectedReport.reportType === 'RESEARCH'" class="subtle" role="status">这份历史报告没有保存资料完整性检查结果，不能据此认定结论已核验。原快照保持不变，可发起新的研究。</p><details open><summary>报告预览</summary><MarkdownContent :content="selectedReport.markdown" :sources="reportSources" /></details></article><div v-else class="conversation-empty"><strong>选择一份报告查看与交付</strong></div></div>
     <section class="delivery-audit"><h3 class="subsection-title">投递审计</h3><div class="panel delivery-table"><article v-for="item in deliveries" :key="item.id"><div><strong>{{ item.reportTitle }}</strong><small>{{ item.channelName }} · {{ item.endpointMasked }}</small></div><i class="status-pill" :class="item.status==='SUCCEEDED'?'status-succeeded':''">{{ item.status }}</i><span>尝试 {{ item.attempts }}/{{ item.maxAttempts }}</span><span>HTTP {{ item.responseCode || '—' }} · {{ item.durationMs ?? '—' }} ms</span><p v-if="item.lastError">{{ item.lastError }}</p><button v-if="item.status==='FAILED'" class="secondary-button" :disabled="saving" @click="retry(item)">重试</button></article><p v-if="!deliveries.length" class="subtle">暂无投递记录。</p></div></section>
   </section>
 </template>
+
+<style scoped>
+.report-tools { margin-bottom: 1rem }
+.report-tools > summary { cursor: pointer; color: var(--accent); padding: .5rem 0 }
+</style>

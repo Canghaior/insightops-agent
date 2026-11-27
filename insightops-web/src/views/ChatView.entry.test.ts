@@ -39,6 +39,7 @@ const modules: Record<string, unknown> = {
   '@/api/upgradeAssessments': researchApi, '@/api/feedback': feedbackApi, '@/utils/sourceClassification': sourceApi,
   '@/components/MarkdownContent.vue': { default: stub }, '@/components/ResearchResultActions.vue': { default: stub },
   '@/components/RunEvidenceQuality.vue': { default: stub },
+  '@/components/ResearchModelPicker.vue': { default: { props: ['modelValue', 'disabled'], render: () => null } },
 }
 const componentExports: { default?: vueRuntime.Component } = {}
 new Function('require', 'exports', compiled.outputText)((name: string) => {

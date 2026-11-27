@@ -1,10 +1,12 @@
 package com.jundaodsj.insightops.server.chat;
 
+import com.jundaodsj.insightops.businesssystem.application.AssessmentType;
 import com.jundaodsj.insightops.conversation.application.ChatRunStore;
 import com.jundaodsj.insightops.conversation.application.ChatCitation;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -49,6 +51,18 @@ class P0ChatGuardrailTest {
                 .startsWith("你是 InsightOps Agent")
                 .contains("只能基于该证据回答可验证事实", "不得声称查询了系统证据中没有出现的来源")
                 .endsWith(guardrail.systemPolicy());
+    }
+
+    @Test
+    void baselineAssessmentsUseFrozenProjectEvidenceAndLeaveGeneralAccountMemoryOut() {
+        for (AssessmentType assessment : AssessmentType.values()) {
+            var prompt = guardrail.researchSystemPrompt(Map.of("assessmentType", assessment.name(), "engineeringBaseline", Map.of("version", 1)),
+                    () -> { throw new AssertionError("Unselected account memory was read"); }, "选中的工具证据");
+            assertThat(prompt).contains("冻结工程基线", "原件路径和行号", "外部技术事实须来自本次工具证据", guardrail.systemPolicy())
+                    .endsWith("选中的工具证据");
+        }
+        assertThat(guardrail.researchSystemPrompt(Map.of(), () -> "旧入口的记忆", "工具"))
+                .isEqualTo(guardrail.researchSystemPrompt() + "旧入口的记忆工具");
     }
 
     private static ChatCitation citation(String type, String url) {

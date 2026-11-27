@@ -19,7 +19,9 @@ import com.jundaodsj.insightops.model.application.StreamingChatModelGateway;
 import com.jundaodsj.insightops.server.api.ChatStreamController.ChatSseEvent;
 import com.jundaodsj.insightops.server.api.ChatStreamController.OrchestrationSsePayload;
 import com.jundaodsj.insightops.tool.application.registry.AgentToolDefinition;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import com.jundaodsj.insightops.model.application.ResearchModel;
+import com.jundaodsj.insightops.infrastructure.config.ResearchModelsEnabled;
+import org.springframework.context.annotation.Conditional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -28,6 +30,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -40,7 +43,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
-@ConditionalOnProperty(prefix = "insightops.model.deepseek", name = "enabled", havingValue = "true")
+@Conditional(ResearchModelsEnabled.class)
 public class DurableChatRunExecutionService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DurableChatRunExecutionService.class);
@@ -159,8 +162,9 @@ public class DurableChatRunExecutionService {
             AgentToolDefinition.AccessLevel accessLevel =
                     AgentToolDefinition.AccessLevel.valueOf(lease.accessLevel());
             AgentLoopService.LoopResult loopResult;
-            if (workflowGraphs != null && workflowGraphs.isWorkflow(lease.runId())) {
-                loopResult = workflowGraphs.execute(
+            var workflow = workflowGraphs == null ? null : workflowGraphs.findWorkflow(lease.runId()).orElse(null);
+            if (workflow != null) {
+                loopResult = workflowGraphs.execute(workflow,
                         new com.jundaodsj.insightops.server.workflow.AgentWorkflowFixedGraphService.Request(
                                 lease.runId(), lease.workspaceId(), lease.ownerUserId(),
                                 lease.systemAdmin(), accessLevel, lease.leaseToken(),
@@ -171,18 +175,19 @@ public class DurableChatRunExecutionService {
                 loopResult = agentLoop.run(new AgentLoopService.LoopRequest(
                                 lease.runId(), lease.workspaceId(), lease.ownerUserId(),
                                 lease.systemAdmin(), accessLevel, lease.contextualPrompt(),
-                                lease.resumeCheckpointId(), null, false, recoveryCheckpointId),
+                                lease.resumeCheckpointId(), null, false, recoveryCheckpointId, preparation.researchModel()),
                         progress(lease), guard::isActive);
             }
             guard.renewNow();
             guardrail.verifyCitationSources(loopResult.citations());
 
             ActorContext actor = new ActorContext(lease.ownerUserId(), lease.workspaceId());
-            String systemPrompt = guardrail.researchSystemPrompt()
-                    + userMemoryStore.prompt(actor, 20) + loopResult.systemPromptAppendix();
+            var linkedInputs = workflow == null ? Map.<String, Object>of() : workflowGraphs.linkedSystemInputs(workflow);
+            String systemPrompt = guardrail.researchSystemPrompt(linkedInputs,
+                    () -> userMemoryStore.prompt(actor, 20), loopResult.systemPromptAppendix());
             Completion completion = streamAnswer(
                     lease, guard, answer, systemPrompt, lease.contextualPrompt(),
-                    loopResult.planningUsage());
+                    loopResult.planningUsage(), preparation.researchModel());
             ChatSseEvent completed = completed(lease, completion.event(),
                     loopResult.sourceUrls(), loopResult.citations());
             if (!terminalService.succeed(
@@ -191,7 +196,7 @@ public class DurableChatRunExecutionService {
                     loopResult.citations(), json(completed), Instant.now())) {
                 throw new AgentRunLeaseLostException();
             }
-            settleCostSafely(lease.runId(), completion.event().usage());
+            settleCostSafely(lease.runId(), completion.event());
     }
 
     void timeout(DurableChatRunStore.WorkLease lease) {
@@ -212,11 +217,11 @@ public class DurableChatRunExecutionService {
             StringBuffer answer,
             String systemPrompt,
             String userPrompt,
-            ModelUsage planningUsage) {
+            ModelUsage planningUsage, ResearchModel model) {
         CompletableFuture<ChatStreamEvent> terminal = new CompletableFuture<>();
         ChatStreamSession session = streamingGateway.stream(
                 new ChatModelRequest(systemPrompt, userPrompt,
-                        modelProperties.temperature(), modelProperties.maxOutputTokens()),
+                        modelProperties.temperature(), modelProperties.maxOutputTokens(), model),
                 new ChatStreamListener() {
                     @Override
                     public void onEvent(ChatStreamEvent event) {
@@ -389,8 +394,8 @@ public class DurableChatRunExecutionService {
         }
     }
 
-    private void settleCostSafely(UUID runId, ModelUsage usage) {
-        try { agentLoop.settleCost(runId, usage); }
+    private void settleCostSafely(UUID runId, ChatStreamEvent event) {
+        try { agentLoop.settleCost(runId, event.usage(), event.provider(), event.model()); }
         catch (RuntimeException exception) {
             LOGGER.error("Failed to settle durable Agent cost for run {}", runId, exception);
         }

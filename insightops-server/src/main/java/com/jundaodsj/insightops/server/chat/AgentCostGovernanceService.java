@@ -64,9 +64,13 @@ public class AgentCostGovernanceService {
     }
 
     public void settle(UUID runId, ModelUsage usage) {
+        settle(runId, usage, null, null);
+    }
+
+    public void settle(UUID runId, ModelUsage usage, String provider, String model) {
         if (runId == null || store.findByRun(runId).isEmpty()) return;
         long tokens = totalTokens(usage);
-        BigDecimal cost = costEstimator.estimate(usage)
+        BigDecimal cost = costEstimator.estimate(provider, model, usage)
                 .map(DeepSeekCostEstimator.CostEstimate::cny).orElse(BigDecimal.ZERO);
         store.settle(runId, tokens, cost, clock.instant());
         metrics.settlement("settled");

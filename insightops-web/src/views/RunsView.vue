@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { modelChoiceLabel } from '@/api/researchModels'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -13,6 +14,11 @@ import {
   type RunSummary,
   type RunToolCall,
 } from '@/api/runs'
+import { frozenBaseline } from '@/api/engineeringBaselines'
+import EngineeringBaselineFacts from '@/components/EngineeringBaselineFacts.vue'
+import SystemBackgroundPanel from '@/components/SystemBackground.vue'
+import { assessmentTypeOf, decisionFormOf } from '@/utils/assessmentTypes'
+import { selectedMaterialNames, systemSnapshotOf } from '@/utils/upgradeProfiles'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import ResearchResultActions from '@/components/ResearchResultActions.vue'
 import RunEvidenceQuality from '@/components/RunEvidenceQuality.vue'
@@ -43,8 +49,29 @@ const totalPages = ref(0)
 const status = ref<RunStatus | ''>('')
 const checkpoint = ref<AgentCheckpoint | null>(null)
 const workflowRun = ref<WorkflowRunDetail | null>(null)
+const engineering = computed(() => frozenBaseline(workflowRun.value?.inputs))
+const linkedSystem = computed(() => systemSnapshotOf(workflowRun.value))
+const assessmentType = computed(() => assessmentTypeOf(workflowRun.value))
+const decision = computed(() => workflowRun.value && assessmentType.value === 'SYSTEM_DECISION' ? decisionFormOf(workflowRun.value) : null)
+const decisionFiles = computed(() => [...selectedMaterialNames((workflowRun.value?.inputs as Record<string, unknown>)?.selectedMaterials).values()])
+const warnings = computed(() => researchWarnings(selectedRun.value?.toolCalls ?? [], workflowRun.value?.nodes, assessmentType.value === 'SYSTEM_DECISION'))
+const repeatUrl = computed(() => {
+  const run = selectedRun.value
+  if (!run) return
+  if (assessmentType.value === 'SYSTEM_DECISION') return `/business-systems/${workflowRun.value!.businessSystemId}/decision-assessment?runId=${run.id}`
+  if (assessmentType.value === 'UPGRADE_ASSESSMENT') return `/upgrade-assessment?runId=${run.id}`
+  return workflowRun.value ? `/agent-workflows?runId=${run.id}` : `/chat?question=${encodeURIComponent(run.question)}`
+})
+const assessmentRange = computed(() => {
+  const inputs = workflowRun.value?.inputs
+  if (!linkedSystem.value || !inputs || typeof inputs !== 'object') return ''
+  const values = inputs as Record<string, unknown>
+  return values.currentVersion && values.targetVersion ? `${values.projectName} · ${values.currentVersion} → ${values.targetVersion}` : ''
+})
 const runActionLoading = ref(false)
 const runActionError = ref('')
+let detailSequence = 0
+let pendingDetail: string | null = null
 let detailPoll: ReturnType<typeof globalThis.setInterval> | undefined
 
 const rangeLabel = computed(() => {
@@ -84,6 +111,9 @@ function startDetailPolling(runId: string) {
 }
 
 async function loadDetail(runId: string, quiet = false) {
+  if (quiet && pendingDetail === runId) return
+  const sequence = ++detailSequence
+  pendingDetail = runId
   if (!quiet) {
     detailLoading.value = true
     detailError.value = null
@@ -93,27 +123,21 @@ async function loadDetail(runId: string, quiet = false) {
     runActionError.value = ''
   }
   try {
-    selectedRun.value = await getRun(runId)
-    try {
-      workflowRun.value = await getWorkflowRun(runId)
-    } catch {
-      workflowRun.value = null
-    }
-    if (selectedRun.value.status === 'PAUSED' || workflowRun.value) {
-      try {
-        checkpoint.value = await getLatestAgentCheckpoint(runId)
-      } catch {
-        checkpoint.value = null
-      }
-    }
+    const run = await getRun(runId)
+    const workflow = await getWorkflowRun(runId).catch(() => null)
+    const latest = run.status === 'PAUSED' || workflow ? await getLatestAgentCheckpoint(runId).catch(() => null) : null
+    if (sequence !== detailSequence) return
+    selectedRun.value = run
+    workflowRun.value = workflow
+    checkpoint.value = latest
   } catch {
-    if (!quiet) detailError.value = '该执行记录不存在或暂时无法读取。'
+    if (sequence === detailSequence && !quiet) detailError.value = '该执行记录不存在或暂时无法读取。'
   } finally {
-    if (!quiet) detailLoading.value = false
-    if (selectedRun.value?.id === runId && selectedRun.value.status === 'RUNNING') {
-      startDetailPolling(runId)
-    } else {
-      stopDetailPolling()
+    if (sequence === detailSequence) {
+      pendingDetail = null
+      detailLoading.value = false
+      if (selectedRun.value?.status === 'RUNNING') startDetailPolling(runId)
+      else stopDetailPolling()
     }
   }
 }
@@ -239,13 +263,20 @@ watch(
     stopDetailPolling()
     const runId = Array.isArray(value) ? value[0] : value
     if (runId) void loadDetail(runId)
-    else selectedRun.value = null
+    else {
+      ++detailSequence
+      pendingDetail = null
+      selectedRun.value = null
+    }
   },
   { immediate: true },
 )
 
 onMounted(loadRuns)
-onUnmounted(stopDetailPolling)
+onUnmounted(() => {
+  ++detailSequence
+  stopDetailPolling()
+})
 </script>
 
 <template>
@@ -330,13 +361,27 @@ onUnmounted(stopDetailPolling)
             检查点 #{{ checkpoint.sequence }} · {{ checkpoint.reason }} · {{ formatDate(checkpoint.createdAt) }}
           </p>
 
+          <div v-if="linkedSystem && workflowRun?.runId === selectedRun.id" class="detail-block">
+            <template v-if="decision">
+              <h3>系统决策评估</h3><p>{{ decision.question }}</p>
+              <p v-if="decision.observations">观察到的现象（用户自述） · {{ decision.observations }}</p>
+              <p v-if="decision.environment">补充环境（用户自述） · {{ decision.environment }}</p>
+              <p>相关框架 · {{ (workflowRun?.inputs as Record<string, unknown>)?.projectName || '未选择' }}</p>
+              <p>本次选用资料 · {{ decisionFiles.join('、') || '未选择' }}</p>
+            </template>
+            <p v-else class="assessment-range">版本升级评估 · {{ assessmentRange }}</p>
+            <SystemBackgroundPanel :system="linkedSystem" />
+            <details v-if="engineering"><summary>本次工程基线 v{{ engineering.baseline.version }} · {{ engineering.baseline.label }}</summary><EngineeringBaselineFacts :content="engineering.content" :saved="engineering.baseline" /></details>
+            <p v-else>本次评估未关联工程基线。</p>
+          </div>
+          <p v-else-if="assessmentType && workflowRun?.runId === selectedRun.id">本次评估未关联工程基线。</p>
           <ResearchResultActions
             :run-id="selectedRun.id" :can-save="selectedRun.status === 'SUCCEEDED' && !!selectedRun.answer"
-            :repeat-url="workflowRun?.templateName === '升级评估（版本范围）' ? `/upgrade-assessment?runId=${selectedRun.id}` : workflowRun ? `/agent-workflows?runId=${selectedRun.id}` : `/chat?question=${encodeURIComponent(selectedRun.question)}`"
+            :repeat-url="repeatUrl"
           />
           <RunEvidenceQuality :key="`${selectedRun.id}:${selectedRun.status}`" :run-id="selectedRun.id" />
-          <div v-if="researchWarnings(selectedRun.toolCalls, workflowRun?.nodes).length" class="detail-block detail-failure" role="status">
-            <h3>资料缺口与待核实事项</h3><ul><li v-for="warning in researchWarnings(selectedRun.toolCalls, workflowRun?.nodes)" :key="warning">{{ warning }}</li></ul>
+          <div v-if="warnings.length" class="detail-block detail-failure" role="status">
+            <h3>资料缺口与待核实事项</h3><ul><li v-for="warning in warnings" :key="warning">{{ warning }}</li></ul>
           </div>
           <section v-if="selectedRun.answer" class="detail-block">
             <span class="eyebrow">研究结论</span>
@@ -363,7 +408,8 @@ onUnmounted(stopDetailPolling)
           <details class="detail-block">
             <summary>查看研究参数、任务图与工具过程</summary>
             <dl class="detail-metrics">
-              <div><dt>模型</dt><dd>{{ selectedRun.modelName ?? '—' }}</dd></div>
+              <div v-if="selectedRun.requestedModel"><dt>选择的模型</dt><dd>{{ modelChoiceLabel(selectedRun.requestedModel) }}</dd></div>
+              <div><dt>响应模型</dt><dd>{{ selectedRun.modelName ?? '—' }}</dd></div>
               <div><dt>Token</dt><dd>{{ totalTokens(selectedRun) }}</dd></div>
               <div><dt>工具轮次</dt><dd>{{ selectedRun.toolRounds }}</dd></div>
               <div><dt>估算费用</dt><dd>{{ formatCost(selectedRun.estimatedCostCny) }}</dd></div>
@@ -381,7 +427,7 @@ onUnmounted(stopDetailPolling)
                 <RouterLink :to="`/runs/${workflowRun.sourceRunId}`">{{ shortId(workflowRun.sourceRunId) }}</RouterLink>
                 的失败节点 {{ workflowRun.retryFromNodeId }} 重试；成功节点直接复用。
               </p>
-              <details><summary>固化入口参数</summary><pre>{{ pretty(workflowRun.inputs) }}</pre></details>
+              <details v-if="!linkedSystem"><summary>固化入口参数</summary><pre>{{ pretty(workflowRun.inputs) }}</pre></details>
               <div class="workflow-node-list">
                 <article
                   v-for="node in workflowRun.nodes"
@@ -447,7 +493,7 @@ onUnmounted(stopDetailPolling)
 
             <section class="detail-block">
               <span class="eyebrow">Question</span>
-              <p>{{ selectedRun.question }}</p>
+              <p>{{ linkedSystem ? selectedRun.question.split('\n')[0] : selectedRun.question }}</p>
             </section>
 
 
@@ -488,3 +534,7 @@ onUnmounted(stopDetailPolling)
     </div>
   </section>
 </template>
+
+<style scoped>
+.assessment-range { margin: 0 0 14px; color: var(--muted); }
+</style>

@@ -53,6 +53,10 @@ public class ReportService {
         return pdf.render(store.findReport(actor, reportId).orElseThrow(ReportNotFoundException::new));
     }
 
+    public ReportDeliveryStore.ReportRecord find(ActorContext actor, UUID reportId) {
+        return store.findReport(actor, reportId).orElseThrow(ReportNotFoundException::new);
+    }
+
     public String markdown(ActorContext actor, UUID reportId) {
         return store.findReport(actor, reportId).orElseThrow(ReportNotFoundException::new).markdown();
     }

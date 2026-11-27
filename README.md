@@ -1,4 +1,10 @@
-# InsightOps Agent
+# InsightOps
+
+**面向已有业务系统的升级与改造工作台。** 第一阶段聚焦维护 Java / Spring 系统的工程师、技术负责人和软件维护团队。现有版本可以建立系统档案、发起评估、查看报告采用的资料和仍缺的证据，并在系统决策报告下记录实际验证与人工决定。
+
+首次使用可从工作台选择内部工程问题或框架升级。在系统档案中选择本机模块并预览工程包。新报告支持逐条核对建议与冻结依据。本机执行支持单模块 Maven、多个授权文件和新增回归用例的前后对照。
+
+下一步用一项真实升级核对影响清单、试改或关键验证、实际结果及交接成本。产品范围、尚待验证的市场假设和新功能准入统一见[现行产品定位与范围](docs/product/current-product-scope.md)。各项交付与验收状态见[项目进度](AGENT项目与进度.md)。
 
 2026-11-09 产品优化：事件可直接进入升级评估，研究执行状态与资料完整性分开；聊天可直接保存/下载报告，刷新后保留准确运行关联。常用导航收敛，新增 `/getting-started` 使用指南与自愿试用记录。实现范围、迁移及真实用户验证安排见 [本轮优化与验收](docs/manual/product-optimization-2026-11-09.md)。以下章节保留各阶段实现背景，实际部署能力以当前配置与验证结果为准。
 
@@ -8,9 +14,7 @@
 
 封闭 Alpha 采用单台 4 核 16 GB Linux 云服务器部署。生产编排、Caddy 自动 HTTPS、内网隔离、Prometheus/Grafana、数据库备份恢复、镜像 CI 和健康失败回滚已经配置；服务器购买、域名 DNS 和首次上线步骤见 [云服务器与 HTTPS 操作指南](docs/operations/cloud-server-and-https.md)，日常处理见 [生产运维手册](docs/operations/production-runbook.md)。真实密钥只写入服务器未提交的 `.env.prod`。
 
-面向需要持续跟踪 AI 开源项目的 Java 开发者、架构师和技术负责人的开源情报 Agent。
-
-当前处于 Alpha/P1：已具备登录和 Workspace 隔离、会话/长期记忆、可配置项目与官方知识源、Release/Issue/PR/Security/RSS/Roadmap 持续采集、用户资料上传、情报分析、报告交付，以及基于可信证据的本地混合检索 RAG 问答。
+Alpha/P1 阶段面向持续跟踪 AI 开源项目的技术团队，已实现登录和 Workspace 隔离、会话与长期记忆、更新采集、资料上传、情报分析、报告和本地混合检索。现有知识库、采集与研究能力可为业务系统评估提供资料。
 
 ## 工程结构
 
@@ -97,6 +101,8 @@ docs                       产品、架构、评测与测试文档
 访问 `http://127.0.0.1:15173` 并使用 `.env` 中的本地账号登录。Server 和 Worker 健康检查分别为 `http://127.0.0.1:18080/actuator/health`、`http://127.0.0.1:18081/actuator/health`。前端、两个 Java 进程和 PostgreSQL 默认只绑定 `127.0.0.1`。启动脚本会同时运行 Worker；它首次启动后立即采集已关注项目，之后默认每 6 小时增量同步 GitHub Releases，失败时按原因退避重试。
 
 系统采用封闭邀请制，不提供公开注册接口。`SYSTEM_ADMIN` 可在“用户管理”中创建系统管理员、Owner 或 Member；工作区 `OWNER` 只能创建和管理普通 Member；`MEMBER` 只能使用业务功能。管理员创建用户时设置临时密码，新用户首次登录只能进入“账号设置”修改密码，完成后旧会话立即失效。普通用户和管理员使用同一套工作台，管理菜单按权限显示，不维护两套重复前端。
+
+本机可为已登记的单模块 Maven 仓库开启工程试改。启用条件与任务入口见[本地工程执行](docs/manual/io-11-local-engineering-execution.md)。
 
 研究问答页面已接通 DeepSeek SSE：回答会增量显示，用户可以停止生成，完成后显示模型、Token、首 Token 时间、总耗时、RunId 和 TraceId。同一浏览器会话会复用最近 12 条用户/助手消息，支持“这个版本”等指代型追问；页面按时间连续展示问答，刷新后从 PostgreSQL 恢复最近 100 条消息。会话、用户消息、成功的 AI 消息以及成功/取消/失败 Run 会保存到 PostgreSQL。`/runs` 页面支持分页和状态筛选，Run 详情展示 Step、Tool Call、请求/结果 JSON、来源、失败原因和最终回答。
 
@@ -200,6 +206,14 @@ GET  /api/v1/knowledge/uploads/{uploadId}/content
 
 系统预置 10 个真实项目，并通过统一租约管线持续采集 Spring 官方博客 RSS 和 Spring AI GitHub Milestone。用户可在“我的资料”上传 Markdown、文本或 PDF，选择项目以及私有/Workspace 可见性；文件完成解析和 Embedding 后可直接进入 RAG，引用通过登录接口下载并保留 PDF 页码。上传卷和数据库采用一致备份，Prometheus 规则覆盖服务不可用、采集租约、Embedding 积压、上传失败和 5xx。设计边界见 [P1.9 多来源、用户资料与生产稳定性](docs/architecture/p1-9-sources-uploads-stability.md)。
 
+## 交互研究使用的模型
+
+研究对话、版本升级评估、系统决策评估和工作流启动表单都提供模型选择。运行详情显示选择的模型和服务商实际返回的型号，失败节点重试继续使用原选择。服务端从本地忽略提交的 `.env` 读取密钥，网页只接收模型名称。
+
+配置 `OPENAI_API_KEY` 即可启用 OpenAI 研究模型。可选的 `OPENAI_RESEARCH_MODELS` 是逗号分隔的模型 ID，例如 `gpt-6.2-sol,gpt-6.1-terra`。留空会列出应用支持的六个 GPT 型号，实际访问取决于 OpenAI 项目权限。仅使用 OpenAI 时保留 `SPRING_AI_MODEL_CHAT=none`。同时配置 DeepSeek 时，原有默认研究入口继续使用 DeepSeek。
+
+使用受限的 OpenAI 项目密钥时，请为 Responses 和 Chat Completions 两个接口开启请求权限。研究对话通过 Responses 规划工具调用，通过 Chat Completions 流式生成最终回答。
+
 ## DeepSeek API Key
 
 只在未提交的根目录 `.env` 中填写：
@@ -210,7 +224,7 @@ DEEPSEEK_ENABLED=true
 SPRING_AI_MODEL_CHAT=openai
 ```
 
-这里的 `openai` 表示使用 Spring AI 的 OpenAI-compatible 协议适配器，实际 Provider 和模型仍然是 DeepSeek 官方 API 与 `deepseek-v4-flash`。这样才能向 DeepSeek V4 发送 `thinking.type=disabled`。
+这里的 `SPRING_AI_MODEL_CHAT=openai` 为原有 DeepSeek 服务启用 Spring AI 协议适配器。交互研究可选 DeepSeek Flash、Pro 以及各自的思考模式。OpenAI 的请求使用独立的客户端和项目密钥。
 
 不要把真实 Key 写进 `.env.example`、YAML、Java 源码、提交记录或聊天消息。在线 Smoke 入口默认关闭，只在显式设置 `DEEPSEEK_SMOKE_TEST_ENABLED=true` 的本地进程中出现。
 
@@ -235,4 +249,4 @@ $env:INSIGHTOPS_CHAIN_GATE='true'
 
 GitHub Actions 的 backend job 已自动启动 PostgreSQL 并执行该门禁；模型和 GitHub 均使用固定假数据，不消耗在线额度。
 
-产品范围见 `docs/product/target-user.md`；官方来源登记见 `docs/product/tracked-projects.yaml` 和 `docs/product/official-sources.md`；架构决策见 `docs/architecture/`。
+现行产品范围见[定位与范围说明](docs/product/current-product-scope.md)。可另查[官方来源登记](docs/product/official-sources.md)、[跟踪项目清单](docs/product/tracked-projects.yaml)和[架构决策](docs/architecture/)。

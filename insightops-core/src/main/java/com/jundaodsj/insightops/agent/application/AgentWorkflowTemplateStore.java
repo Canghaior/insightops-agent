@@ -8,6 +8,8 @@ import java.util.UUID;
 /** Workspace-owned, immutable-version workflow templates for governed Agent plans. */
 public interface AgentWorkflowTemplateStore {
 
+    void lockName(UUID workspaceId, String name);
+
     List<WorkflowTemplate> overview(UUID workspaceId);
 
     Optional<WorkflowTemplate> find(UUID workspaceId, UUID templateId);

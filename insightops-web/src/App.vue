@@ -18,14 +18,15 @@ const navigation = [
   { path: '/', label: '工作台', icon: DataAnalysis, routes: ['/'] },
   { path: '/projects', label: '我的项目', icon: FolderOpened, routes: ['/projects', '/knowledge-files'] },
   { path: '/updates', label: '更新与提醒', icon: Bell, routes: ['/updates', '/watch-rules', '/intelligence', '/digests'] },
-  { path: '/upgrade-assessment', label: '研究', icon: ChatDotRound, routes: ['/upgrade-assessment', '/chat', '/runs', '/agent-workflows'] },
-  { path: '/reports', label: '报告', icon: Document, routes: ['/reports'] },
+  { path: '/upgrade-assessment', label: '研究', icon: ChatDotRound, routes: ['/upgrade-assessment', '/business-systems', '/chat', '/runs', '/agent-workflows'] },
+  { path: '/reports', label: '报告与验证', icon: Document, routes: ['/reports'] },
 ]
 const secondaryNavigation = [
   { path: '/knowledge-files', label: '项目资料', group: '/projects' },
   { path: '/intelligence', label: '影响分析', group: '/updates' },
   { path: '/digests', label: '摘要与通知', group: '/updates' },
   { path: '/watch-rules', label: '提醒规则', group: '/updates' },
+  { path: '/business-systems', label: '业务系统', group: '/upgrade-assessment' },
   { path: '/upgrade-assessment', label: '升级评估', group: '/upgrade-assessment' },
   { path: '/chat', label: '研究问答', group: '/upgrade-assessment' },
   { path: '/runs', label: '研究记录', group: '/upgrade-assessment' },
@@ -75,7 +76,7 @@ async function changeWorkspace(event: { target: unknown }) {
   <RouterView v-if="route.meta.public" />
   <div v-else class="app-shell">
     <aside class="sidebar">
-      <div class="brand"><span class="brand-mark">IO</span><div><strong>InsightOps</strong><small>技术研究工作台</small></div></div>
+      <div class="brand"><span class="brand-mark">IO</span><div><strong>InsightOps</strong><small>Java / Spring</small></div></div>
       <nav class="navigation" aria-label="主导航">
         <RouterLink v-for="item in navigation" :key="item.path" :to="item.path" :title="item.label" :aria-label="item.label" :class="{ 'section-active': activeGroup?.path === item.path }">
           <el-icon><component :is="item.icon" /></el-icon><span>{{ item.label }}</span><b v-if="item.path === '/updates' && unreadUpdates + unreadNotifications" class="nav-badge" aria-label="有未读更新或通知">●</b>
@@ -120,13 +121,13 @@ async function changeWorkspace(event: { target: unknown }) {
     </aside>
     <main class="content">
       <header class="topbar">
-        <div><span class="eyebrow">AI 开源情报工作台</span><h1>让技术选型有证据、可追溯</h1></div>
+        <h1>业务系统升级与改造工作台</h1>
         <RouterLink class="alpha-chip" to="/getting-started">使用指南与试用反馈</RouterLink>
       </header>
       <nav v-if="secondaryItems.length" class="section-navigation" :aria-label="`${activeGroup?.label}相关功能`">
         <RouterLink v-for="item in secondaryItems" :key="item.path" :to="item.path">{{ item.label }}<b v-if="item.path === '/digests' && unreadNotifications"> {{ unreadNotifications > 99 ? '99+' : unreadNotifications }}</b></RouterLink>
       </nav>
-      <RouterView />
+      <RouterView :key="route.name === 'upgrade-assessment' ? JSON.stringify([route.query.systemId, route.query.runId]) : route.name === 'system-decision' ? JSON.stringify([route.params.id, route.query.runId]) : undefined" />
     </main>
   </div>
 </template>

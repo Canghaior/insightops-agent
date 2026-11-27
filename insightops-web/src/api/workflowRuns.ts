@@ -69,7 +69,9 @@ export interface WorkflowRunNode {
 }
 
 export interface WorkflowRunDetail {
+  requestedModel?: string | null
   runId: string
+  businessSystemId?: string | null
   templateId: string | null
   templateVersionId: string | null
   templateName: string
@@ -96,10 +98,11 @@ export async function launchWorkflow(
   templateId: string,
   expectedVersionId: string,
   inputs: Record<string, unknown>,
+  modelChoice?: string,
 ): Promise<{ runId: string; sessionId: string | null; duplicate: boolean }> {
   const response = await apiClient.post<ApiResponse<{ runId: string; sessionId: string | null; duplicate: boolean }>>(
     `/agent-workflows/${encodeURIComponent(templateId)}/runs`,
-    { expectedVersionId, requestId: crypto.randomUUID(), inputs },
+    { expectedVersionId, requestId: crypto.randomUUID(), inputs, ...(modelChoice && { modelChoice }) },
   )
   return response.data.data
 }

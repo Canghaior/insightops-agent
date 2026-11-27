@@ -2,13 +2,18 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.prod}"
-COMPOSE_FILE="$ROOT_DIR/infra/compose.prod.yml"
-BACKUP_DIR="$ROOT_DIR/backups"
+case "${1:-}" in
+  "") profile=prod ;;
+  --tiny) profile=tiny ;;
+  *) echo "Usage: $0 [--tiny]" >&2; exit 2 ;;
+esac
+ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.$profile}"
+COMPOSE_FILE="$ROOT_DIR/infra/compose.$profile.yml"
+BACKUP_DIR="${BACKUP_DIR:-$ROOT_DIR/backups}"
 # shellcheck source=prod-env.sh
 source "$ROOT_DIR/scripts/prod-env.sh"
 
-bash "$ROOT_DIR/scripts/preflight-prod.sh" "$ENV_FILE" >/dev/null
+bash "$ROOT_DIR/scripts/preflight-$profile.sh" "$ENV_FILE" >/dev/null
 POSTGRES_USER="$(prod_env_get POSTGRES_USER "$ENV_FILE")"
 POSTGRES_DB="$(prod_env_get POSTGRES_DB "$ENV_FILE")"
 BACKUP_RETENTION_DAYS="$(prod_env_get BACKUP_RETENTION_DAYS "$ENV_FILE")"
@@ -17,12 +22,19 @@ POSTGRES_DB="${POSTGRES_DB:-insightops}"
 
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
+umask 077
+BACKUP_DIR="$(realpath "$BACKUP_DIR")"
+exec 9>"$BACKUP_DIR/.snapshot.lock"
+flock -n 9 || { echo "Another snapshot is in progress" >&2; exit 1; }
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 target="$BACKUP_DIR/insightops-$timestamp.dump"
 temporary="$target.partial"
 uploads_target="$BACKUP_DIR/insightops-$timestamp.uploads.tar.gz"
 uploads_temporary="$uploads_target.partial"
 checksum_target="$BACKUP_DIR/insightops-$timestamp.sha256"
+[[ ! -e "$target" && ! -e "$uploads_target" && ! -e "$checksum_target" ]] || {
+  echo "A snapshot already exists at this timestamp" >&2; exit 1;
+}
 running_app_container_ids=()
 
 cleanup() {
@@ -55,7 +67,7 @@ test -s "$temporary"
 test -s "$uploads_temporary"
 mv -- "$temporary" "$target"
 mv -- "$uploads_temporary" "$uploads_target"
-sha256sum "$target" "$uploads_target" > "$checksum_target"
+(cd "$BACKUP_DIR" && sha256sum "$(basename "$target")" "$(basename "$uploads_target")") > "$checksum_target"
 chmod 600 "$target" "$uploads_target" "$checksum_target"
 if (( ${#running_app_container_ids[@]} > 0 )); then
   docker start "${running_app_container_ids[@]}"

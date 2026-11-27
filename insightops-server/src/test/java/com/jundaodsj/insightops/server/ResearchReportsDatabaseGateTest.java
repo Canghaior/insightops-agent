@@ -61,29 +61,59 @@ class ResearchReportsDatabaseGateTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
     @Test void scopedSearchFiltersBeforeRankingAndStillChecksPrivateFileOwner() {
+        UUID file = UUID.randomUUID();
+        UUID chunk = insertSearchableUpload(file);
+        UUID otherChunk = insertSearchableUpload(UUID.randomUUID());
+        UUID springSource = UUID.fromString("00000000-0000-0000-0000-000000000401");
+        UUID otherProjectSource = UUID.fromString("00000000-0000-0000-0000-000000000402");
+        UUID springDoc = insertSearchableDocument(springSource, "https://docs.spring.io/spring-ai/reference/scope-fixture");
+        UUID otherProjectDoc = insertSearchableDocument(otherProjectSource, "https://docs.langchain4j.dev/scope-fixture");
+        var frameworkOnly = new KnowledgeEmbeddingStore.SearchScope(PROJECT, List.of());
+        var embeddings = new JdbcKnowledgeEmbeddingStore(jdbc, JSON);
+        var selected = new KnowledgeEmbeddingStore.SearchScope(PROJECT, List.of(file));
+        var filesOnly = new KnowledgeEmbeddingStore.SearchScope(null, List.of(file));
+        assertThat(embeddings.searchKeywordVisible(WORKSPACE, USER, false, "compatibility", 10))
+                .extracting(KnowledgeEmbeddingStore.SearchResult::chunkId).contains(chunk, otherChunk, springDoc, otherProjectDoc);
+        for (var scope : List.of(selected, filesOnly)) {
+            assertThat(embeddings.searchKeywordScoped(WORKSPACE, USER, "compatibility", 10, scope))
+                    .extracting(KnowledgeEmbeddingStore.SearchResult::chunkId).containsExactly(chunk);
+            assertThat(embeddings.searchKeywordScoped(WORKSPACE, UUID.randomUUID(), "compatibility", 10, scope)).isEmpty();
+            assertThat(embeddings.searchKeywordScoped(UUID.randomUUID(), USER, "compatibility", 10, scope)).isEmpty();
+        }
+        assertThat(embeddings.searchKeywordScoped(WORKSPACE, USER, "compatibility", 10, frameworkOnly))
+                .extracting(KnowledgeEmbeddingStore.SearchResult::chunkId).containsExactly(springDoc);
+        float[] vector = new float[1024]; vector[0] = 1;
+        embeddings.prepareCurrentChunks("test", "scope-test", 1024, Instant.now());
+        embeddings.claimPending("scope-test", Instant.now(), java.time.Duration.ofMinutes(1), 10);
+        for (UUID id : List.of(chunk, otherChunk, springDoc, otherProjectDoc))
+            embeddings.complete(id, "scope-test", vector, Instant.now());
+        assertThat(embeddings.searchScoped(WORKSPACE, USER, "scope-test", vector, 10, 0.1, frameworkOnly))
+                .extracting(KnowledgeEmbeddingStore.SearchResult::chunkId).containsExactly(springDoc);
+        for (var scope : List.of(selected, filesOnly)) {
+            assertThat(embeddings.searchScoped(WORKSPACE, USER, "scope-test", vector, 10, 0.1, scope))
+                    .extracting(KnowledgeEmbeddingStore.SearchResult::chunkId).containsExactly(chunk);
+            assertThat(embeddings.searchScoped(WORKSPACE, UUID.randomUUID(), "scope-test", vector, 10, 0.1, scope)).isEmpty();
+        }
+    }
+
+    private static UUID insertSearchableUpload(UUID file) {
         var uploads = new JdbcKnowledgeUploadStore(jdbc);
-        UUID file = UUID.randomUUID(), source = UUID.randomUUID(), document = UUID.randomUUID(), revision = UUID.randomUUID(), chunk = UUID.randomUUID();
-        uploads.create(new KnowledgeUploadStore.CreateUpload(file, source, WORKSPACE, PROJECT, USER, "selected.txt", file + ".txt",
+        UUID source = UUID.randomUUID();
+        uploads.create(new KnowledgeUploadStore.CreateUpload(file, source, WORKSPACE, PROJECT, USER, file + ".txt", file + ".txt",
                 "text/plain", 100, "a".repeat(64), "PRIVATE", 1_000_000), Instant.now());
-        jdbc.sql("insert into knowledge_document(id,source_id,canonical_url,title) values(:id,:source,:url,'team compatibility')")
-                .param("id", document).param("source", source).param("url", "upload://" + file + "/content").update();
+        return insertSearchableDocument(source, "upload://" + file + "/content");
+    }
+
+    private static UUID insertSearchableDocument(UUID source, String url) {
+        UUID document = UUID.randomUUID(), revision = UUID.randomUUID(), chunk = UUID.randomUUID();
+        jdbc.sql("insert into knowledge_document(id,source_id,canonical_url,title) values(:id,:source,:url,'compatibility fixture')")
+                .param("id", document).param("source", source).param("url", url).update();
         jdbc.sql("insert into knowledge_revision(id,document_id,content_sha256,content_text,character_count) values(:id,:doc,:hash,'compatibility selected',22)")
                 .param("id", revision).param("doc", document).param("hash", "b".repeat(64)).update();
         jdbc.sql("update knowledge_document set current_revision_id=:revision where id=:id").param("revision", revision).param("id", document).update();
         jdbc.sql("insert into knowledge_chunk(id,revision_id,chunk_index,content,content_sha256,character_count,estimated_tokens) values(:id,:revision,0,'compatibility selected',:hash,22,6)")
                 .param("id", chunk).param("revision", revision).param("hash", "c".repeat(64)).update();
-        var embeddings = new JdbcKnowledgeEmbeddingStore(jdbc, JSON);
-        var selected = new KnowledgeEmbeddingStore.SearchScope(PROJECT, List.of(file));
-        assertThat(embeddings.searchKeywordScoped(WORKSPACE, USER, "compatibility", 10, selected)).extracting(KnowledgeEmbeddingStore.SearchResult::chunkId).containsExactly(chunk);
-        assertThat(embeddings.searchKeywordScoped(WORKSPACE, UUID.randomUUID(), "compatibility", 10, selected)).isEmpty();
-        assertThat(embeddings.searchKeywordScoped(WORKSPACE, USER, "compatibility", 10, new KnowledgeEmbeddingStore.SearchScope(PROJECT, List.of()))).isEmpty();
-        assertThat(embeddings.searchKeywordScoped(UUID.randomUUID(), USER, "compatibility", 10, selected)).isEmpty();
-        float[] vector = new float[1024]; vector[0] = 1;
-        embeddings.prepareCurrentChunks("test", "scope-test", 1024, Instant.now());
-        embeddings.claimPending("scope-test", Instant.now(), java.time.Duration.ofMinutes(1), 10);
-        embeddings.complete(chunk, "scope-test", vector, Instant.now());
-        assertThat(embeddings.searchScoped(WORKSPACE, USER, "scope-test", vector, 10, 0.1, selected)).extracting(KnowledgeEmbeddingStore.SearchResult::chunkId).containsExactly(chunk);
-        assertThat(embeddings.searchScoped(WORKSPACE, UUID.randomUUID(), "scope-test", vector, 10, 0.1, selected)).isEmpty();
+        return chunk;
     }
 
     @Test void finalAnswerContractsRoundTripWhileHistoricalUnassessedCasesRemainNull() {

@@ -69,7 +69,7 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
     @Override
     public Optional<RunDetail> findRun(ActorContext actor, UUID runId) {
         Optional<RunRow> row = jdbcClient.sql("""
-                        select id, session_id, trace_id, status, question, answer,
+                        select id, session_id, trace_id, status, question, answer, requested_model,
                                model_provider, model_name, tool_rounds, prompt_tokens,
                                completion_tokens, estimated_cost_cny, failure_code,
                                failure_message, pricing_effective_date, citations::text as citations,
@@ -206,7 +206,7 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
         RunRow value = row.orElseThrow();
         return Optional.of(new RunDetail(
                 value.id(), value.sessionId(), value.traceId(), value.status(), value.question(),
-                value.answer(), value.modelProvider(), value.modelName(), value.toolRounds(),
+                value.answer(), value.requestedModel(), value.modelProvider(), value.modelName(), value.toolRounds(),
                 value.promptTokens(), value.completionTokens(), value.estimatedCostCny(),
                 value.pricingEffectiveDate(), value.failureCode(), value.failureMessage(),
                 value.durationMs(), value.startedAt(),
@@ -277,6 +277,7 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
                 resultSet.getString("status"),
                 resultSet.getString("question"),
                 resultSet.getString("answer"),
+                resultSet.getString("requested_model"),
                 resultSet.getString("model_provider"),
                 resultSet.getString("model_name"),
                 resultSet.getInt("tool_rounds"),
@@ -410,6 +411,7 @@ public class JdbcAgentRunQuery implements AgentRunQuery {
             String status,
             String question,
             String answer,
+            String requestedModel,
             String modelProvider,
             String modelName,
             int toolRounds,

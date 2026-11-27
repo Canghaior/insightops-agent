@@ -31,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -84,15 +85,23 @@ public class AgentWorkflowFixedGraphService {
         this.json = json;
     }
 
-    public boolean isWorkflow(UUID runId) {
-        return workflowRuns.find(runId).isPresent();
+    public Optional<AgentWorkflowRunStore.WorkflowRun> findWorkflow(UUID runId) {
+        return workflowRuns.find(runId);
+    }
+
+    public Map<String, Object> linkedSystemInputs(AgentWorkflowRunStore.WorkflowRun workflow) {
+        return workflow.businessSystemId() == null ? Map.of() : readMap(workflow.inputJson());
     }
 
     public AgentLoopService.LoopResult execute(
             Request request, AgentToolDispatcher.ProgressListener listener,
             BooleanSupplier active) {
-        AgentWorkflowRunStore.WorkflowRun workflow = workflowRuns.find(request.runId())
-                .orElseThrow(() -> new WorkflowExecutionException("WORKFLOW_RUN_NOT_FOUND"));
+        return execute(findWorkflow(request.runId()).orElseThrow(() -> new WorkflowExecutionException("WORKFLOW_RUN_NOT_FOUND")),
+                request, listener, active);
+    }
+
+    public AgentLoopService.LoopResult execute(AgentWorkflowRunStore.WorkflowRun workflow, Request request,
+                                               AgentToolDispatcher.ProgressListener listener, BooleanSupplier active) {
         AgentWorkflowExpressionService.Graph graph = expressions.validateGraph(workflow.graphSpecJson());
         if (!workflow.toolContractFingerprint().equals(expressions.contractFingerprint(graph))) {
             throw new WorkflowExecutionException("WORKFLOW_TOOL_CONTRACT_CHANGED");

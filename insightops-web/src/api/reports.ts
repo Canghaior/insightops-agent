@@ -16,7 +16,7 @@ export interface ResearchReport {
   id: string; title: string; reportType: string; periodStart: string; periodEnd: string
   projectIds: string[]; eventTypes: ReportEventType[]; itemCount: number; highRiskCount: number
   items: ReportItem[]; markdown: string; createdAt: string
-  research?: { sources: string[]; evidenceQuality?: EvidenceQuality | null; inputs?: { sourceEvent?: { sourceUrl?: string } } } | null
+  research?: { runId?: string; answer?: string; sources: string[]; evidenceQuality?: EvidenceQuality | null; citations?: import('./claimReviews').ClaimSource[]; evidence?: { claimReviewVersion?: number; passages?: import('./claimReviews').SourcePassage[] }[]; inputs?: { engineeringBaseline?: import('./engineeringBaselines').EngineeringBaseline; assessmentType?: string; sourceEvent?: { sourceUrl?: string }; systemSnapshot?: { id?: string; revision: number } } } | null
 }
 export interface ReportPage { items: ResearchReport[]; page: number; size: number; total: number }
 export interface CreateReportCommand {
@@ -58,6 +58,9 @@ export function isPublicHttpsWebhookUrl(raw: string): boolean {
 export async function listReports(): Promise<ReportPage> {
   const response = await apiClient.get<{ data: ReportPage }>('/reports', { params: { page: 0, size: 50 } })
   return response.data.data
+}
+export async function getReport(id: string): Promise<ResearchReport> {
+  return (await apiClient.get(`/reports/${encodeURIComponent(id)}`)).data.data
 }
 export async function createReport(command: CreateReportCommand): Promise<ResearchReport> {
   const response = await apiClient.post<{ data: ResearchReport }>('/reports', command)

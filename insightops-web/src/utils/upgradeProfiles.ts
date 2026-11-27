@@ -1,3 +1,5 @@
+import type { BusinessSystem } from '@/api/businessSystems'
+import type { WorkflowRunDetail } from '@/api/workflowRuns'
 import type { ResearchEventContext, UpgradeInput } from '@/api/upgradeAssessments'
 
 export function suggestResearchProfile(owner: string, name: string): string {
@@ -21,6 +23,33 @@ export function restoreUpgradeInput(raw: Record<string, unknown>): UpgradeInput 
     springBootVersion: profileId === 'java_backend' ? context.springBootVersion ?? '' : '',
     profileId, context, concerns: strings('concerns'), uploadIds: strings('uploadIds'), issueUrls: strings('issueUrls'),
     ...(text('eventId') ? { eventId: text('eventId') } : {}) }
+}
+
+/** Use the explicit server association, including when restoring an assessment from its run. */
+export function systemSnapshotOf(run: WorkflowRunDetail | null): BusinessSystem | null {
+  if (!run?.businessSystemId || !run.inputs || typeof run.inputs !== 'object' || !('systemSnapshot' in run.inputs)) return null
+  const system = run.inputs.systemSnapshot as BusinessSystem | null
+  return system?.id === run.businessSystemId && system.background && Array.isArray(system.attachments) ? system : null
+}
+
+/** When starting a new assessment, its current dossier supplies the linked files again. */
+export function previousAssessmentInput(run: WorkflowRunDetail): Record<string, unknown> {
+  const inputs = (run.inputs && typeof run.inputs === 'object' ? run.inputs : {}) as Record<string, unknown>
+  const files = new Set(systemSnapshotOf(run)?.attachments.map(file => file.uploadId))
+  return { ...inputs, uploadIds: Array.isArray(inputs.uploadIds) ? inputs.uploadIds.filter(id => !files.has(id)) : [] }
+}
+
+/** Use only the names recorded with this assessment, even if a file is no longer visible. */
+export function selectedMaterialNames(materials: unknown): Map<string, string> {
+  const names = new Map<string, string>()
+  if (Array.isArray(materials)) {
+    for (const item of materials) {
+      if (typeof item?.uploadId === 'string' && typeof item.name === 'string' && item.name.trim()) {
+        names.set(item.uploadId, item.name)
+      }
+    }
+  }
+  return names
 }
 
 /** Only apply an event resolved by the authenticated server, never raw URL query metadata. */

@@ -27,6 +27,13 @@ public final class ResearchProfiles {
                     field("deployment", "运行与部署平台", "填写操作系统、架构和部署方式")),
                     List.of("API 与配置变更", "依赖与兼容性", "弃用与移除", "安全风险", "性能与稳定性", "测试与回滚")));
 
+    public static String text(String value, int max, boolean required) {
+        String text = value == null ? "" : value.strip();
+        if ((required && text.isBlank()) || text.length() > max || text.indexOf('\0') >= 0)
+            throw new IllegalArgumentException("请检查必填信息和文本长度。");
+        return text;
+    }
+
     public static List<Profile> all() { return PROFILES; }
     public static Profile require(String id) {
         return PROFILES.stream().filter(item -> item.id().equals(id)).findFirst()

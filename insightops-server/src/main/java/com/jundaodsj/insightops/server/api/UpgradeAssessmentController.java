@@ -10,15 +10,15 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/v1/upgrade-assessments")
+@RequestMapping("/api/v1")
 public class UpgradeAssessmentController {
     private final UpgradeAssessmentService service;
     public UpgradeAssessmentController(UpgradeAssessmentService service) { this.service = service; }
-    @PostMapping("/setup")
+    @PostMapping("/upgrade-assessments/setup")
     public ApiResponse<?> setup(HttpServletRequest request) {
         return response(request, service.setup(CurrentAccount.actor(request)));
     }
-    @GetMapping("/versions")
+    @GetMapping("/upgrade-assessments/versions")
     public ApiResponse<?> versions(@RequestParam UUID projectId, HttpServletRequest request) {
         try { return response(request, service.versions(CurrentAccount.actor(request), projectId)); }
         catch (IllegalArgumentException exception) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage()); }
@@ -26,29 +26,31 @@ public class UpgradeAssessmentController {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Release 列表暂时无法读取，可以手动填写目标版本。");
         }
     }
-    @GetMapping("/presets")
+    @GetMapping("/upgrade-assessments/presets")
     public ApiResponse<?> presets(HttpServletRequest request) {
         return response(request, service.presets(CurrentAccount.actor(request)));
     }
-    @GetMapping("/events/{eventId}")
+    @GetMapping("/upgrade-assessments/events/{eventId}")
     public ApiResponse<?> researchEvent(@PathVariable UUID eventId, HttpServletRequest request) {
         try { return response(request, service.researchEvent(CurrentAccount.actor(request), eventId)); }
         catch (IllegalArgumentException exception) { throw new ResponseStatusException(HttpStatus.NOT_FOUND, exception.getMessage()); }
     }
-    @PostMapping("/presets")
+    @PostMapping("/upgrade-assessments/presets")
     public ApiResponse<?> savePreset(@RequestBody SavePreset input, HttpServletRequest request) {
         try { return response(request, service.savePreset(CurrentAccount.actor(request), input.name(), input.input())); }
         catch (IllegalArgumentException exception) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage()); }
     }
     public record SavePreset(String name, UpgradeAssessmentService.Command input) { }
-    @PostMapping("/runs")
-    public ApiResponse<?> launch(@RequestBody UpgradeAssessmentService.Command command, HttpServletRequest request) {
+    @PostMapping({"/upgrade-assessments/runs", "/business-systems/{systemId}/upgrade-runs"})
+    public ApiResponse<?> launch(@PathVariable(required = false) UUID systemId,
+            @RequestParam(required = false) Integer expectedRevision,
+            @RequestBody UpgradeAssessmentService.Command command, HttpServletRequest request) {
         var account = CurrentAccount.account(request);
         var access = "SYSTEM_ADMIN".equals(account.systemRole()) ? AgentToolDefinition.AccessLevel.SYSTEM_ADMIN
                 : "OWNER".equals(account.role()) ? AgentToolDefinition.AccessLevel.WORKSPACE_OWNER : AgentToolDefinition.AccessLevel.WORKSPACE_MEMBER;
         if (command.requestId() == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少请求标识，请刷新页面重试。");
         try { return response(request, service.launch(account.actor(), "SYSTEM_ADMIN".equals(account.systemRole()), access,
-                command, (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE))); }
+                command, systemId, expectedRevision, (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE))); }
         catch (IllegalArgumentException exception) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage()); }
     }
     private ApiResponse<?> response(HttpServletRequest request, Object value) {

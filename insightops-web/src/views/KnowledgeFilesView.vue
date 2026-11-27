@@ -27,6 +27,7 @@ const visibility = ref<UploadVisibility>('PRIVATE')
 const selectedFile = ref<InstanceType<typeof globalThis.File> | null>(null)
 const input = ref<InstanceType<typeof globalThis.HTMLInputElement> | null>(null)
 const loading = ref(false)
+const statusAvailable = ref(false)
 const submitting = ref(false)
 const error = ref('')
 const refreshError = ref('')
@@ -42,9 +43,11 @@ async function load(silent = false) {
     const [projectData, uploadData] = await Promise.all([listProjects(), listKnowledgeUploads()])
     projects.value = projectData
     uploads.value = uploadData
+    statusAvailable.value = true
     if (!projectId.value && projectData.length) projectId.value = projectData[0].id
     completeKnowledgeStatusLoad(refreshError)
   } catch (caught: unknown) {
+    statusAvailable.value = false
     failKnowledgeStatusLoad(error, refreshError, silent, message(caught))
   } finally { if (!silent) loading.value = false }
 }
@@ -60,7 +63,7 @@ async function submit() {
   notice.value = ''
   try {
     const created = await uploadKnowledgeFile(projectId.value, visibility.value, selectedFile.value)
-    notice.value = `${created.originalName} 已安全保存，Worker 将开始解析和向量化。`
+    notice.value = `${created.originalName} 已保存。可在下方查看处理状态。`
     selectedFile.value = null
     if (input.value) input.value.value = ''
     await load(true)
@@ -82,7 +85,7 @@ async function remove(upload: KnowledgeUpload) {
 }
 
 function status(upload: KnowledgeUpload): string {
-  return ({ PENDING: '等待处理', PROCESSING: '解析中', SUCCEEDED: '可检索', FAILED: '处理失败', DELETING: '删除中' } as Record<string, string>)[upload.status] ?? upload.status
+  return ({ PENDING: '已保存，等待处理', PROCESSING: '处理中', SUCCEEDED: '已处理', FAILED: '处理失败', DELETING: '删除中' } as Record<string, string>)[upload.status] ?? upload.status
 }
 
 function statusClass(upload: KnowledgeUpload): string {
@@ -119,20 +122,20 @@ onBeforeUnmount(() => { if (timer) globalThis.clearInterval(timer) })
 <template>
   <section>
     <div class="section-heading">
-      <div><span class="eyebrow">P1.9-B · Workspace RAG</span><h2>上传知识文件</h2></div>
+      <div><h2>项目知识资料</h2><p>评估可以选用已处理的资料。每次研究实际引用了哪些文件，可在运行或报告中查看。</p></div>
       <button class="secondary-button" :disabled="loading" @click="load()">刷新状态</button>
     </div>
 
     <div class="upload-summary">
-      <article class="panel"><span>可见文件</span><strong>{{ uploads.length }}</strong></article>
-      <article class="panel"><span>已使用容量</span><strong>{{ size(usedBytes) }}</strong></article>
-      <article class="panel"><span>可检索</span><strong>{{ uploads.filter(item => item.status === 'SUCCEEDED').length }}</strong></article>
+      <article class="panel"><span>可见文件</span><strong>{{ statusAvailable ? uploads.length : '—' }}</strong></article>
+      <article class="panel"><span>已使用容量</span><strong>{{ statusAvailable ? size(usedBytes) : '—' }}</strong></article>
+      <article class="panel"><span>已处理</span><strong>{{ statusAvailable ? uploads.filter(item => item.status === 'SUCCEEDED').length : '—' }}</strong></article>
     </div>
 
     <form class="panel upload-form" @submit.prevent="submit">
       <div class="admin-form-heading">
         <strong>添加 PDF、Markdown 或 TXT</strong>
-        <span>单文件最大 20 MB；PDF 最大 500 页。文件通过异步解析、切片和向量化后进入研究问答。</span>
+        <span>单文件最大 20 MB，PDF 最多 500 页。Maven 测试 XML 和构建日志请到<RouterLink to="/reports">已保存的系统评估报告</RouterLink>中导入。</span>
       </div>
       <label>所属项目
         <select v-model="projectId" required>
@@ -151,7 +154,9 @@ onBeforeUnmount(() => { if (timer) globalThis.clearInterval(timer) })
       <button class="send-button" :disabled="submitting || !selectedFile || !projectId">{{ submitting ? '上传中…' : '上传并处理' }}</button>
     </form>
 
-    <p v-if="error || refreshError" class="stream-error">{{ error || refreshError }}</p>
+    <p v-if="error" class="stream-error" role="alert">{{ error }}</p>
+    <p v-if="refreshError" class="stream-error" role="alert">{{ refreshError }}</p>
+    <p v-if="!statusAvailable && uploads.length" class="subtle">以下文件显示上次读取的状态。可点「刷新状态」重新核对。</p>
     <p v-if="notice" class="success-notice">{{ notice }}</p>
     <p v-if="loading" class="run-loading">正在读取上传文件…</p>
 
@@ -178,7 +183,7 @@ onBeforeUnmount(() => { if (timer) globalThis.clearInterval(timer) })
           </div>
         </footer>
       </article>
-      <article v-if="!uploads.length" class="empty-state"><div><h3>还没有知识文件</h3><p>上传团队方案、评估报告或官方 PDF，处理完成后即可在研究问答中检索并按页引用。</p></div></article>
+      <article v-if="statusAvailable && !uploads.length" class="empty-state"><div><h3>暂无可见的知识资料</h3><p>选择所属项目后，可上传团队说明、评估报告或官方文档。</p></div></article>
     </div>
   </section>
 </template>

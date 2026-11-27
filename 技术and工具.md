@@ -1,5 +1,7 @@
 # AI / 开源软件行业情报 Agent：技术与工具
 
+> 本清单归档了 2026-07 技术情报阶段的选型和环境准备。原有技术记录可供查考。现阶段的产品与功能取舍统一见[现行产品定位与范围](docs/product/current-product-scope.md)。
+
 > 文档类型：技术基线与环境准备清单（Living Document）
 > 适用项目：InsightOps Agent（暂定名）
 > 对应规划：[AGENT项目与进度.md](./AGENT项目与进度.md)

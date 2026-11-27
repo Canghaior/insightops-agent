@@ -39,14 +39,14 @@ function downloadTrial() {
 
 <template>
   <section class="guide">
-    <div class="section-heading"><span class="eyebrow">开始使用</span><h2>完成第一份有依据的升级评估</h2><p>准备一个真实业务项目、正在使用的框架版本，以及想升级到的版本。</p></div>
+    <div class="section-heading"><span class="eyebrow">开始使用</span><h2>从工程问题到验证交接</h2><p>准备一项具体的改造任务，以及能说明当前实现的材料。</p></div>
     <ol class="guide-steps">
-      <li class="panel"><h3>1. 选择关注的框架</h3><p>在“我的项目”关注框架。准备项目的运行环境和关键依赖；已有内部说明可以上传为项目资料。</p><RouterLink to="/projects">选择项目 →</RouterLink> <RouterLink to="/knowledge-files">管理项目资料 →</RouterLink></li>
-      <li class="panel"><h3>2. 填写版本与业务背景</h3><p>填写当前版本、目标版本和关注项。查看来源采集情况，并保存配置供下次复用。版本覆盖不足时，结果会需要进一步核实。</p><RouterLink to="/upgrade-assessment">开始升级评估 →</RouterLink></li>
-      <li class="panel"><h3>3. 核对证据与待验证事项</h3><p>先看证据检查和资料缺口，再阅读结论。打开至少两条关键引用，检查项目、版本与原文是否支持结论。自动检查无法代替业务构建与测试。</p><RouterLink to="/runs">查看研究记录 →</RouterLink></li>
-      <li class="panel"><h3>4. 保存报告，安排下一步验证</h3><p>从结果直接下载 Markdown 或 PDF，保留引用与项目背景。下次从研究详情复用参数。对不准确的答案或引用，可在研究问答中提交反馈。</p><RouterLink to="/reports">查看已保存报告 →</RouterLink></li>
+      <li class="panel"><h3>准备业务系统和基线</h3><p>选择或新建系统档案。在「工程基线」导入 POM、规范 ZIP，或选择本机模块及相关文件，核对预览后保存。</p><RouterLink to="/business-systems">打开业务系统 →</RouterLink></li>
+      <li class="panel"><h3>选择评估问题</h3><p>金额、权限等内部规则可以使用系统决策评估。框架升级需要选择关注的框架、当前版本和目标版本。</p><RouterLink :to="{ path: '/business-systems', query: { intent: 'decision' } }">解决项目中的问题 →</RouterLink> <RouterLink to="/upgrade-assessment">评估框架升级 →</RouterLink></li>
+      <li class="panel"><h3>核对依据并准备任务</h3><p>从运行记录保存报告，核对工程依据、外部资料与实际验证。选取一条建议，填写可改范围和验收条件，保存任务版本。</p><RouterLink to="/runs">查看研究记录 →</RouterLink></li>
+      <li class="panel"><h3>执行并交接</h3><p>就绪任务可导出执行包。在已配置本地执行的环境，还能选择登记仓库试改。回看测试、补丁与限制，然后下载结果交接包。</p><RouterLink to="/reports">打开报告与验证 →</RouterLink></li>
     </ol>
-    <div class="panel help-panel"><h3>遇到问题时</h3><p>没有资料：检查是否关注项目以及来源采集状态。研究未完成：打开研究详情查看原因与可用的恢复操作。报告下载失败：可重新下载，已保存的报告会保留。</p><p>“执行完成”表示任务结束；是否能够用于决策，还需要结合证据检查和实际项目验证。</p></div>
+    <div class="panel help-panel"><h3>遇到问题时</h3><p>内部问题缺工程依据时，检查本次选择的基线。升级缺目标版本资料时，核对该版本的 Release 或迁移指南。研究中断可在详情查看原因与恢复操作。</p></div>
     <details class="panel trial-panel">
       <summary>参与一次产品试用（选填）</summary>
       <p>用同一个真实问题，对照你平时阅读官方资料或使用其他助手的方式。记录能否独立完成、需要补充什么、报告是否有用。记录只保留在本页，刷新会清空；点击下载后可自行保存，不会自动发送。</p>

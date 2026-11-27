@@ -101,6 +101,7 @@ export interface RunBudget {
 }
 
 export interface RunDetail extends RunSummary {
+  requestedModel?: string | null
   answer: string | null
   estimatedCostCny: number | null
   pricingEffectiveDate: string | null
@@ -140,6 +141,13 @@ export async function getRun(runId: string): Promise<RunDetail> {
   return response.data.data
 }
 
+interface EvidenceSection {
+  label: string
+  summary: string
+  reasons: Array<{ code: string; message: string }>
+  missing: boolean
+}
+
 export interface EvidenceQuality {
   status: 'INSUFFICIENT_EVIDENCE' | 'REQUIRES_VALIDATION' | 'REVIEW_READY' | 'NOT_ASSESSED'
   label: string
@@ -147,6 +155,7 @@ export interface EvidenceQuality {
   reasons: Array<{ code: string; message: string }>
   compatibilityVerified: boolean
   assessmentVersion: string
+  coverage?: { engineering: EvidenceSection; external: EvidenceSection; validation: EvidenceSection } | null
 }
 
 // Deduplicate only concurrent requests; later checks always fetch a fresh assessment.

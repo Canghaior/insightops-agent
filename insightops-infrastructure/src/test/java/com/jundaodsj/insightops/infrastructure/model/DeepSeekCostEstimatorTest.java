@@ -29,6 +29,16 @@ class DeepSeekCostEstimatorTest {
     }
 
     @Test
+    void researchModelsUseTheirOwnRatesIncludingDatedOpenAiResponses() {
+        var usage = new ModelUsage(1_000_000, 0, 1_000_000, 0L, 0L);
+        assertThat(estimator.estimate("openai", "gpt-6.2-astra-2026-11-01", usage).orElseThrow().cny())
+                .isEqualByComparingTo("57.60");
+        assertThat(estimator.estimate("deepseek", "deepseek-v4-pro", usage).orElseThrow().cny())
+                .isEqualByComparingTo("9.504");
+        assertThat(estimator.estimate("openai", "unrecognized", usage)).isEmpty();
+    }
+
+    @Test
     void shouldUseConservativeCacheMissPriceWhenCacheUsageIsUnknown() {
         var estimate = estimator.estimate(new ModelUsage(1_000, 100, 1_100, null, null))
                 .orElseThrow();

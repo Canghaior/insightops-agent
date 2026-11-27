@@ -2,6 +2,7 @@ package com.jundaodsj.insightops.conversation.application;
 
 import com.jundaodsj.insightops.identity.application.ActorContext;
 
+import com.jundaodsj.insightops.model.application.ResearchModel;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -78,7 +79,8 @@ public interface DurableChatRunStore {
             Instant leaseExpiresAt) {
     }
 
-    record AttemptPreparation(UUID recoveryCheckpointId, boolean recovered) {
+    record AttemptPreparation(UUID recoveryCheckpointId, boolean recovered, ResearchModel researchModel) {
+        public AttemptPreparation(UUID recoveryCheckpointId, boolean recovered) { this(recoveryCheckpointId, recovered, null); }
     }
 
     enum LeaseControl {

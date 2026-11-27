@@ -80,4 +80,10 @@ sudo bash scripts/enable-tiny-demo.sh
 
 ## 日常维护
 
-使用 `sudo docker stats --no-stream`、`free -h`、`df -h /` 观察资源。备份 PostgreSQL、上传文件和恢复所需密钥，并把副本保存到 VPS 之外。原 `deploy-prod.sh`、`backup-prod.sh`、`restore-prod.sh` 只适用于完整生产编排，不能直接用于此轻量版。
+使用 `sudo docker stats --no-stream`、`free -h`、`df -h /` 观察资源。轻量站点使用以下发布和恢复步骤，GitHub 的完整生产部署工作流仍用于 `compose.prod.yml`。
+
+1. 记录当前 Git 提交、实际容器镜像 ID、卷名、Flyway 起点与配置密钥所在位置。以同一候选提交构建 Server、Worker、Web 并保留镜像与 SHA-256。将脚本和编排切换到该提交，在目标主机载入三个候选镜像。
+2. 用 `python3 scripts/tiny-release-images.py <完整提交> .tiny-release.json --server <镜像> --worker <镜像> --web <镜像>` 生成覆盖文件。工具核对本机检出和三份镜像的提交标签，使用本机不可变镜像 ID，统一 uploads-init 与 Server。每台主机分别生成，发布后保存文件供核对。
+3. `sudo bash scripts/backup-prod.sh --tiny` 短暂停止已运行的 Server 和 Worker，成对备份数据库和上传卷、生成哈希清单，然后恢复原运行状态。妥善保管原有身份和投递加密密钥。已配置异机备份密钥时，可运行 `sudo bash scripts/create-offsite-backup.sh <标记> --tiny`，将加密包带到隔离主机，沿用 `scripts/restore-offsite-drill.sh` 验证数据库与上传件哈希。启用本机工程执行的主机另须成对保留其运行数据目录及已登记源码提交，轻量 Web 部署默认关闭执行器。
+4. 先在隔离恢复副本演练候选迁移、登录和历史交接下载。通过后，使用 `docker compose --env-file .env.tiny -f infra/compose.tiny.yml -f .tiny-release.json up -d --pull never uploads-init server web` 切换应用。现场已经启用 Worker 时将 `worker` 加入同一命令。逐个对照运行容器的 `.Image` 与覆盖文件，检查 Flyway、登录后的完整产品流程和历史原件。
+5. 保留此前运行的应用镜像、编排与成对备份。仅在旧应用兼容数据库时直接切回原图像；如需恢复数据库，应先停写并保存切换后的新写入和诊断记录，在独立数据库及文件卷恢复与旧版本配对的备份、核对原件，再切换连接到已恢复的卷。首次恢复演练始终使用隔离副本。

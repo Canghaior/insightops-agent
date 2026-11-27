@@ -79,6 +79,9 @@ class ResearchReportServiceTest {
         assertThat(snapshot.getValue().question()).isEqualTo(run.question());
         assertThat(markdown.getValue()).contains("Node.js 版本: 22", "渲染与部署方式: SPA", "尚缺插件兼容性资料", "3.4.38", "3.5.0")
                 .contains("## 触发事件", "更新标题：Vue 3.5 发布", "事件版本：v3.5.0", "https://github.com/vuejs/core/releases/tag/v3.5.0")
+                .contains("### 工程依据", "### 外部资料", "### 实际验证", "评估时未执行",
+                        "缺少 Vue 目标版本 3.5.0 的可核对来源", "补充该版本的官方 Release")
                 .doesNotContain("internal instructions", "Java 版本:", "sourceEvent:", "eventId:", "event-internal-id");
+        assertThat(snapshot.getValue().evidenceQuality().coverage().external().missing()).isTrue();
     }
 }
